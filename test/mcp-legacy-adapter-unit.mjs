@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const transportSource = fs.readFileSync(new URL('../src/http/mcpTransport.js', import.meta.url), 'utf8');
+const transportSource = fs.readFileSync(new URL('../src/http/mcpTransport.ts', import.meta.url), 'utf8');
+const coreSource = fs.readFileSync(new URL('../src/core/mcp-runtime.ts', import.meta.url), 'utf8');
 const policy = fs.readFileSync(new URL('../docs/MCP_PROTOCOL_POLICY.md', import.meta.url), 'utf8');
 
 assert.match(transportSource, /async function handleLegacyMcpRequest\s*\(/, 'legacy HTTP compatibility must have one named adapter');
@@ -10,8 +11,9 @@ assert.match(
   /if \(legacy\) \{\s*await handleLegacyMcpRequest\([\s\S]*?\);\s*return;\s*\}/,
   'the main HTTP dispatcher must delegate the legacy branch directly'
 );
-assert.match(transportSource, /async function observeRequestManifest\s*\(/, 'manifest observation must remain shared');
-assert.match(transportSource, /function runMcpRequestSpan\s*\(/, 'request telemetry must remain shared');
+assert.match(transportSource, /observeMcpRequestManifest/, 'HTTP must delegate manifest observation to Core');
+assert.match(coreSource, /function observeMcpRequestManifest\s*\(/, 'manifest observation must remain shared in Core');
+assert.match(coreSource, /function runMcpRequestSpan(?:<[^>]+>)?\s*\(/, 'request telemetry must remain shared in Core');
 assert.equal((transportSource.match(/getCoreNodeHandler\(\)\(ctx\.req, ctx\.res, message\)/g) || []).length, 2, 'modern and legacy SDK dispatch must each remain explicit');
 
 assert.match(policy, /Modern MCP protocol:\s*`2026-07-28`/);

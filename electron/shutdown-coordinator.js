@@ -35,8 +35,8 @@ function createShutdownCoordinator(options = {}) {
       await runStepAsync(removeRuntimeMarker, 'runtime marker', errors);
 
       const serviceClean = serviceResult?.cleanup?.clean !== false;
+      if (errors.length === 0 && serviceClean) await runStepAsync(markCleanShutdown, 'lifecycle marker', errors);
       const clean = errors.length === 0 && serviceClean;
-      if (clean) await runStepAsync(markCleanShutdown, 'lifecycle marker', errors);
       prepared = true;
 
       for (const item of errors) {

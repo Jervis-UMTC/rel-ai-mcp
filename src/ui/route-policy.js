@@ -10,7 +10,6 @@ const CANONICAL_PATHS = new Set([
   'usage',
   'settings',
   'settings/connection',
-  'settings/learning',
   'settings/application',
   'settings/about'
 ]);
@@ -18,7 +17,7 @@ const CANONICAL_PATHS = new Set([
 const ALLOWED_PARAMS = {
   home: new Set(['workspace']),
   tasks: new Set(['workspace', 'task']),
-  code: new Set(['task']),
+  code: new Set(['task', 'file']),
   workspaces: new Set(['workspace', 'focus']),
   processes: new Set(['workspace']),
   activity: new Set(['workspace', 'search', 'time', 'tool', 'status', 'task', 'event']),

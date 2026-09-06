@@ -1,5 +1,16 @@
 
 
+const TASK_RUNTIME_EVENT_PHASES = Object.freeze([
+  'started',
+  'progress',
+  'completion_requested',
+  'finished',
+  'cancelled',
+  'inactive',
+  'completed'
+]);
+const TASK_RUNTIME_TERMINAL_PHASES = Object.freeze(['completed', 'cancelled', 'inactive']);
+
 function cleanTaskId(value) {
   return String(value || '').trim();
 }
@@ -99,6 +110,8 @@ function eventTime(value) {
 }
 
 export {
+  TASK_RUNTIME_EVENT_PHASES,
+  TASK_RUNTIME_TERMINAL_PHASES,
   clamp,
   cleanTaskId,
   eventIdentityFields,

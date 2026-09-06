@@ -6,13 +6,11 @@ import { projectServiceActivityEvent, projectServiceActivitySnapshot } from './s
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error('Rel.AI service process requires an Electron utility-process parent port.');
 
-const [httpModule, toolActivity, dashboardSessions, processManager, configModule, codeIntelligenceModule] = await Promise.all([
-  importResourceModule('src/httpServer.js'),
+const [httpModule, toolActivity, dashboardSessions, coreDesktopOperations] = await Promise.all([
+  importResourceModule('src/httpServer.ts'),
   importResourceModule('src/toolActivity.js'),
-  importResourceModule('src/http/dashboardSessions.js'),
-  importResourceModule('src/processManager.js'),
-  importResourceModule('src/config.js'),
-  importResourceModule('src/codeIntelligence/service.js')
+  importResourceModule('src/http/dashboardSessions.ts'),
+  importResourceModule('src/core/desktop-operations.ts')
 ]);
 
 let httpServer = null;
@@ -71,6 +69,11 @@ async function dispatchRequest(method, payload) {
   if (method === 'stop') return runLifecycle(stopService);
   if (method === 'dashboard-bootstrap') return createDashboardBootstrap();
   if (method === 'activity-snapshot') return projectServiceActivitySnapshot(toolActivity.getToolActivity());
+  if (method === 'desktop-local-usage') return coreDesktopOperations.getDesktopLocalUsage(payload.month);
+  if (method === 'desktop-onboarding-handoff') return coreDesktopOperations.markDesktopOnboardingHandoff();
+  if (method === 'desktop-task-code-workspace') return coreDesktopOperations.getDesktopTaskCodeWorkspace(payload);
+  if (method === 'desktop-task-code-diff') return coreDesktopOperations.readDesktopTaskCodeDiff(payload);
+  if (method === 'desktop-task-code-workspace-path') return coreDesktopOperations.getDesktopTaskCodeWorkspacePath(payload);
   throw new Error(`Unknown service-process request: ${method}`);
 }
 
@@ -97,7 +100,6 @@ async function startService(payload = {}) {
       publicUrl: '',
       exitOnError: false,
       writeProfile: false,
-      stopManagedProcessesOnClose: false,
       pickFolder: () => callNative('pickFolder'),
       openFolder: folderPath => callNative('openFolder', { path: folderPath }),
       getTaskActivity: () => toolActivity.getToolActivity(),
@@ -141,34 +143,44 @@ async function stopService() {
   httpServer = null;
   activeToken = '';
   activePort = 0;
-  let runtimeConfig = null;
-  let configError = null;
-  try {
-    runtimeConfig = configModule.readConfig();
-  } catch (error) {
-    configError = error;
-  }
-  const managedProcessStop = runtimeConfig
-    ? processManager.stopAllManagedProcesses(runtimeConfig)
-      .catch(error => ({ attempted: 0, stopped: 0, orphaned: 1, error: errorMessage(error) }))
-    : Promise.resolve({ attempted: 0, stopped: 0, orphaned: 1, error: errorMessage(configError) });
-  const [managedProcesses, localService, codeIntelligence] = await Promise.all([
-    managedProcessStop,
-    closeHttpServer(ownedServer),
-    codeIntelligenceModule.codeIntelligence.shutdown()
-      .then(() => ({ closed: true }))
-      .catch(error => ({ closed: false, error: errorMessage(error) }))
-  ]);
+  const localService = await closeHttpServer(ownedServer);
+  const shutdownResult = ownedServer?.waitForShutdown
+    ? await ownedServer.waitForShutdown()
+    : null;
+  const runtimeCleanup = normalizeRuntimeCleanup(shutdownResult);
   dashboardSessions.clearDashboardSessions();
   publishActivitySnapshot();
+  const clean = localService.closed !== false && runtimeCleanup.clean !== false;
   return {
-    ok: managedProcesses.orphaned === 0 && localService.closed !== false && codeIntelligence.closed !== false,
+    ok: clean,
     cleanup: {
-      clean: managedProcesses.orphaned === 0 && localService.closed !== false && codeIntelligence.closed !== false,
-      managedProcesses,
+      clean,
+      managedProcesses: runtimeCleanup.managedProcesses,
       localService,
-      codeIntelligence
+      repositoryIntelligence: runtimeCleanup.repositoryIntelligence,
+      ...(runtimeCleanup.errors.length ? { errors: runtimeCleanup.errors } : {}),
+      ...(runtimeCleanup.reported ? {} : { runtimeCleanupReported: false })
     }
+  };
+}
+
+function normalizeRuntimeCleanup(value) {
+  const reported = Boolean(value && typeof value === 'object');
+  const cleanup = reported ? value : {};
+  return {
+    reported,
+    clean: cleanup.clean !== false,
+    managedProcesses: cleanup.managedProcesses || {
+      attempted: 0,
+      stopped: 0,
+      orphaned: 0,
+      delegated: true
+    },
+    repositoryIntelligence: cleanup.repositoryIntelligence || {
+      closed: true,
+      delegated: true
+    },
+    errors: Array.isArray(cleanup.errors) ? cleanup.errors : []
   };
 }
 

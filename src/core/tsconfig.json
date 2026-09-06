@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "rootDir": "..",
+    "tsBuildInfoFile": "../../node_modules/.cache/rel-ai-ts/core.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../contracts" }
+  ],
+  "include": ["../**/*.ts"],
+  "exclude": [
+    "../contracts/**/*.ts",
+    "../http/**/*.ts",
+    "../httpServer.ts",
+    "../repository/intelligence/**/*.ts",
+    "../ui/**/*.ts",
+    "../ui/**/*.tsx"
+  ]
+}

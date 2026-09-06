@@ -1,6 +1,8 @@
-import { closeModal, openModal } from './components/modal.js';
+import React from 'react';
+import { closeModal, openModal, updateModal } from './components/modal.js';
 import { toast } from './components/toast.js';
 
+const h = React.createElement;
 const RELEASES_URL = 'https://github.com/Kyne0328/rel-ai-chatgpt-web-harness/releases';
 
 function supportPolicyModalView(policy) {
@@ -84,7 +86,6 @@ function initUpdateAvailableModal(options = {}) {
   let latestStatus = null;
   let removeUpdateListener = null;
   let activeModalKey = '';
-  let modalContent = null;
 
   function consider(status) {
     latestStatus = status || latestStatus;
@@ -120,75 +121,34 @@ function initUpdateAvailableModal(options = {}) {
   }).catch(() => {});
 
   function showOrUpdateModal(view, status) {
-    if (activeModalKey !== view.key || !modalContent?.isConnected) {
+    const content = h(UpdateNoticeContent, {
+      view,
+      status,
+      onLater: closeModal,
+      onAction: method => void runSupportUpdateAction(method)
+    });
+    if (activeModalKey !== view.key) {
       activeModalKey = view.key;
-      modalContent = document.createElement('div');
-      renderModalContent(modalContent, view, status);
       openModal({
         title: view.title,
-        content: modalContent,
+        content,
         size: 'compact',
         escDisabled: view.blocking,
-        onClose: () => {
-          activeModalKey = '';
-          modalContent = null;
-        }
+        onClose: () => { activeModalKey = ''; }
       });
       return;
     }
-    const title = document.getElementById('__relai-modal-title');
-    if (title) title.textContent = view.title;
-    renderModalContent(modalContent, view, status);
+    updateModal({ title: view.title, content, escDisabled: view.blocking });
   }
 
   function closeActiveModal() {
     if (!activeModalKey) return;
     activeModalKey = '';
-    modalContent = null;
     closeModal();
   }
 
-  function renderModalContent(content, view, status) {
-    content.replaceChildren();
-    const description = document.createElement('p');
-    description.textContent = view.description;
-    const detail = document.createElement('p');
-    detail.className = 'muted';
-    detail.textContent = view.detail || (view.blocking
-      ? 'You can still use the dashboard and update controls, but Rel.AI cannot work with ChatGPT until a supported version is installed.'
-      : 'You can update now or continue. Rel.AI will show this notice again on a later launch until you update.');
-    const actions = document.createElement('div');
-    actions.className = 'modal-actions';
-    const action = supportUpdateAction(status);
-    let primaryAction;
-    if (action.kind === 'link') {
-      const link = document.createElement('a');
-      link.className = 'buttonlike primary';
-      link.href = RELEASES_URL;
-      link.target = '_blank';
-      link.rel = 'noreferrer';
-      link.textContent = action.label;
-      primaryAction = link;
-    } else {
-      const primary = actionButton(action.label, 'primary');
-      primary.disabled = action.disabled;
-      if (action.busy) primary.setAttribute('aria-busy', 'true');
-      primary.addEventListener('click', () => runSupportUpdateAction(primary, action.method));
-      primaryAction = primary;
-    }
-    if (view.allowLater) {
-      const later = actionButton('Later', 'secondary');
-      later.addEventListener('click', closeModal);
-      actions.appendChild(later);
-    }
-    actions.appendChild(primaryAction);
-    content.append(description, detail, actions);
-  }
-
-  async function runSupportUpdateAction(button, method) {
+  async function runSupportUpdateAction(method) {
     if (!method || typeof bridge?.[method] !== 'function') return;
-    button.disabled = true;
-    button.setAttribute('aria-busy', 'true');
     closeModal();
     try {
       const result = await bridge[method]();
@@ -222,12 +182,28 @@ function supportUpdateAction(status = {}) {
   return { kind: 'button', method: 'checkForUpdates', label: state === 'error' ? 'Try update check again' : 'Check for update', disabled: false, busy: false };
 }
 
-function actionButton(label, className) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = className;
-  button.textContent = label;
-  return button;
+function UpdateNoticeContent({ view, status, onLater, onAction }) {
+  const action = supportUpdateAction(status);
+  const detail = view.detail || (view.blocking
+    ? 'You can still use the dashboard and update controls, but Rel.AI cannot work with ChatGPT until a supported version is installed.'
+    : 'You can update now or continue. Rel.AI will show this notice again on a later launch until you update.');
+  const primary = action.kind === 'link'
+    ? h('a', { className: 'buttonlike primary', href: RELEASES_URL, target: '_blank', rel: 'noreferrer' }, action.label)
+    : h('button', {
+        type: 'button',
+        className: 'primary',
+        disabled: action.disabled,
+        'aria-busy': action.busy ? 'true' : undefined,
+        onClick: () => onAction(action.method)
+      }, action.label);
+  return h(React.Fragment, null,
+    h('p', null, view.description),
+    h('p', { className: 'muted' }, detail),
+    h('div', { className: 'modal-actions' },
+      view.allowLater ? h('button', { type: 'button', className: 'secondary', onClick: onLater }, 'Later') : null,
+      primary
+    )
+  );
 }
 
 function cleanVersion(value) {

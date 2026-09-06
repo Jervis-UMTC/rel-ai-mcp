@@ -11,16 +11,16 @@
         "src/process.js!",
         "src/localAnalytics.js!",
         "src/telemetry.js!",
-        "src/httpServer.js!",
+        "src/httpServer.ts!",
         "src/toolActivity.js!",
-        "src/http/dashboardSessions.js!",
+        "src/http/dashboardSessions.ts!",
         "src/processManager.js!",
         "public/dashboard.js!"
       ],
       "project": [
         "scripts/knip-production-runtime.mjs!",
         "bin/**/*.js!",
-        "src/**/*.js!",
+        "src/**/*.{js,ts,tsx,css}!",
         "public/**/*.js!"
       ],
       "paths": {
@@ -47,9 +47,8 @@
         "scripts/verify-fuses.js!"
       ],
       "project": [
-        "*.js!",
-        "*.cjs!",
-        "renderer/**/*.js!",
+        "*.{js,cjs,ts,tsx}!",
+        "renderer/**/*.{js,ts,tsx}!",
         "build/**/*.js!"
       ],
       "ignoreDependencies": [

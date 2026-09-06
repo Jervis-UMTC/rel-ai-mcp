@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { listSessions, readSession, resetTaskHistoryCaches, writeSession } from '../src/taskHistoryStorage.js';
-import { stateDatabasePath, withStateDatabase } from '../src/stateDatabase.js';
+import { listSessions, readSession, resetTaskHistoryCaches, writeSession } from '../src/taskHistoryStorage.ts';
+import { stateDatabasePath, withStateDatabase } from '../src/stateDatabase.ts';
 
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-history-storage-'));
 const directory = path.join(stateDir, 'sessions');

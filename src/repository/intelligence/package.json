@@ -1,0 +1,9 @@
+{
+  "name": "@rel-ai/repository-intelligence",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./service.js",
+    "./languages": "./languages.js"
+  }
+}

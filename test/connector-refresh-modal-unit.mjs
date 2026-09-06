@@ -38,6 +38,7 @@ const updateNotice = prepareConnectorRefreshNotice({
 assert.ok(updateNotice, '0.27.4 must require a connector refresh when its connector revision changed');
 assert.deepEqual(updateNotice.steps, CHATGPT_REFRESH_STEPS);
 assert.equal(updateNotice.businessNote, CHATGPT_REFRESH_BUSINESS_NOTE);
+assert.match(updateNotice.steps.join(' '), /Go\/Plus\/Pro.*Settings.*Plugins.*Rel\.AI MCP.*Information.*Refresh/i);
 assert.match(updateNotice.steps.join(' '), /Enterprise\/Edu.*Workspace settings.*Apps.*Action control.*Refresh/i);
 assert.match(updateNotice.businessNote, /Business.*recreate and republish/i);
 assert.equal('dismissDelayMs' in updateNotice, false, 'connector refresh notices must never impose a timed dismissal lockout');

@@ -11,23 +11,27 @@ for (const item of [...SYSTEM_NAV_ITEMS, ...SETTINGS_NAV_ITEMS]) {
   assert.ok(item.icon, `${item.label} must keep an icon for the collapsed sidebar`);
 }
 
-const shell = read('src/http/dashboard.js');
-const bootstrap = read('src/http/dashboardShellChrome.js');
-const sidebar = read('src/ui/sidebar.js');
+const shell = read('src/http/dashboard.ts');
+const bootstrap = read('src/http/dashboardShellChrome.ts');
+const reactShell = read('src/ui/react/main.js');
 const router = read('src/ui/router.js');
 const appCss = read('src/ui/styles/app.css');
 const settingsCss = read('src/ui/features/settings/styles.css');
 
-assert.match(shell, /renderDashboardAccordion\(APPLICATION_NAV_ITEMS\[0\], SYSTEM_NAV_ITEMS\)/);
-assert.match(shell, /renderDashboardAccordion\(APPLICATION_NAV_ITEMS\[1\], SETTINGS_NAV_ITEMS\)/);
-assert.match(shell, /id="sidebarToggle"[\s\S]*aria-controls="desktopSidebar"/);
+assert.match(shell, /id="dashboardRoot"/);
+assert.doesNotMatch(shell, /id="sidebarToggle"/, 'server shell must not duplicate the React sidebar');
 assert.match(bootstrap, /relai_sidebar_collapsed/);
-assert.match(sidebar, /localStorage\.setItem\(SIDEBAR_STORAGE_KEY/);
-assert.match(sidebar, /aria-expanded/);
-assert.match(sidebar, /other\.open = false/);
-assert.match(router, /anchor\.closest\('\.sidebar-subnav'\)/);
-assert.match(router, /details\.dataset\.navAccordion === owner/);
-assert.match(router, /if \(active\) details\.open = true/);
+assert.match(reactShell, /APPLICATION_NAV_ITEMS\[0\]/);
+assert.match(reactShell, /APPLICATION_NAV_ITEMS\[1\]/);
+assert.match(reactShell, /SYSTEM_NAV_ITEMS/);
+assert.match(reactShell, /SETTINGS_NAV_ITEMS/);
+assert.match(reactShell, /id: 'sidebarToggle'/);
+assert.match(reactShell, /'aria-controls': 'desktopSidebar'/);
+assert.match(reactShell, /localStorage\.setItem\('relai_sidebar_collapsed'/);
+assert.match(reactShell, /'aria-expanded': collapsed \? 'false' : 'true'/);
+assert.match(reactShell, /setOpenAccordion/);
+assert.doesNotMatch(router, /document\.getElementById\('pageTitle'\)|createRoot|innerHTML/, 'router must not mutate React-owned navigation chrome');
+assert.match(reactShell, /document\.getElementById\('pageTitle'\)\?\.focus/, 'React shell must focus the route heading after navigation');
 assert.match(appCss, /:root\[data-sidebar="collapsed"\]\s*\{[^}]*--sidebar-width:\s*[^;]+;/s, 'collapsed sidebar must define its own width without freezing one pixel value');
 assert.match(appCss, /:root\[data-sidebar="collapsed"\][\s\S]*\.nav-icon\s*\{[^}]*size-5/s);
 assert.match(appCss, /\.sidebar-accordion > summary/);

@@ -10,8 +10,8 @@ function git(args, options = {}) {
 }
 
 import { writeSessionPolicy, resolvePolicy, captureBaselineDirty, readSessionPolicy } from "../src/policyResolver.js";
-import { withStateDatabase } from '../src/stateDatabase.js';
-import { recordTaskIntegrityEvent } from "../src/taskIntegrity.js";
+import { withStateDatabase } from '../src/stateDatabase.ts';
+import { recordTaskIntegrityEvent } from "../src/taskIntegrity.ts";
 import { buildWorkspaceStates } from "../src/workspaceState.js";
 
 const policyResolverSource = fs.readFileSync(new URL('../src/policyResolver.js', import.meta.url), 'utf8');

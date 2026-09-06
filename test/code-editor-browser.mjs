@@ -56,6 +56,13 @@ try {
   assert.equal(result.readOnly, true, 'the rendered task diff must be read-only');
   assert.equal(result.saveButtonPresent, false, 'the Changes surface must not expose a Save control');
   assert.deepEqual(result.changedFileRows, ['src/example.js', 'src/new.js'], 'the file explorer must show only changed files and hide untouched files');
+  assert.deepEqual(result.taskOptions, ['probe-task'], 'Changes must exclude tasks with no project-file changes and support-only artifacts');
+  assert.equal(result.taskReturnHref, '#tasks?workspace=app&task=probe-task', 'Changes must provide a contextual link back to the selected task');
+  assert.equal(result.selectedFileHeading, 'src/new.js', 'task file links must be able to deep-link to the exact changed file');
+  assert.deepEqual(result.taskFileHrefs, [
+    '#code?task=probe-task&file=src%2Fexample.js',
+    '#code?task=probe-task&file=src%2Fnew.js'
+  ], 'task project-file items must link to their exact file in Changes');
   assert.deepEqual(result.statusBadges.map(item => item.code), ['M', 'U'], 'changed-file markers must expose real Git states instead of hardcoding M');
   assert.match(result.statusBadges[0]?.title || '', /^Modified:/);
   assert.match(result.statusBadges[1]?.title || '', /^Untracked:/);
@@ -64,6 +71,8 @@ try {
   }
   assert.equal(result.sameEditorAfterLiveUpdate, true, 'live task updates must not recreate the active editor');
   assert.deepEqual(result.positionAfterLiveUpdate, result.positionBeforeLiveUpdate, 'live task updates must not move the active cursor');
+  assert.equal(result.editorCountAfterUnmount, 0, 'leaving the React Changes route must dispose Monaco editors');
+  assert.equal(result.modelCountAfterUnmount, 0, 'leaving the React Changes route must dispose Monaco models');
   assert.equal(result.modelLanguage, 'javascript', `JavaScript files must use the JavaScript Monaco language: ${JSON.stringify(result)}`);
   assert.ok(result.tokenTypes.length >= 3, `JavaScript syntax tokenization must be active: ${JSON.stringify(result)}`);
   assert.ok(result.tokenColors.length >= 3, `Monaco syntax colors must be applied by the active theme: ${JSON.stringify(result)}`);

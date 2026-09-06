@@ -1,15 +1,20 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { readJsonFile, writeJsonAtomic } from '../durableState.js';
+import { readJsonFile, writeJsonAtomic } from '../durableState.ts';
 import { getStateDir } from '../statePaths.js';
-import { readTaskBackgroundOperation, recordTaskBackgroundOperation } from '../taskHistoryStore.js';
+import { readTaskBackgroundOperation, recordTaskBackgroundOperation } from '../taskHistoryStore.ts';
 import { sanitizeTaskRecord } from '../taskObservability.js';
+import { FALLBACK_EXECUTION_STATUS } from './contracts.ts';
 
 const DEFAULT_FALLBACK_GRACE_MS = 1_000;
 const FALLBACK_RECORD_TTL_MS = 15 * 60_000;
 const MAX_FALLBACK_RECORDS = 128;
-const REPLAYABLE_FALLBACK_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+const REPLAYABLE_FALLBACK_STATUSES = new Set([
+  FALLBACK_EXECUTION_STATUS.COMPLETED,
+  FALLBACK_EXECUTION_STATUS.FAILED,
+  FALLBACK_EXECUTION_STATUS.CANCELLED
+]);
 const executionsByWorkId = new Map();
 const executionsByOperationId = new Map();
 
@@ -25,7 +30,7 @@ function startFallbackExecution({ config = null, workId = '', scopeId = '', tool
     const persisted = recoverPersistedFallback(config, id, now);
     if (persisted && REPLAYABLE_FALLBACK_STATUSES.has(persisted.status)) existing = hydratePersistedRecord(persisted);
   }
-  if (existing?.status === 'running') {
+  if (existing?.status === FALLBACK_EXECUTION_STATUS.RUNNING) {
     if (existing.signature === signature) return { record: existing, reused: true };
     const error = new Error('Another long-running operation is already active for this work session. Check relai_work status before starting another operation.');
     error.code = 'TASK_OPERATION_IN_PROGRESS';
@@ -46,7 +51,7 @@ function startFallbackExecution({ config = null, workId = '', scopeId = '', tool
     tool: String(tool || ''),
     workspace: String(workspace || ''),
     signature,
-    status: 'running',
+    status: FALLBACK_EXECUTION_STATUS.RUNNING,
     startedAt,
     startedAtMs,
     updatedAt: startedAt,
@@ -69,7 +74,7 @@ function startFallbackExecution({ config = null, workId = '', scopeId = '', tool
         persistFallbackRecord(config, record);
         return { ok: false, cancelled: true, error: controller.signal.reason };
       }
-      settleRecord(record, result?.isError === true ? 'failed' : 'completed', now);
+      settleRecord(record, result?.isError === true ? FALLBACK_EXECUTION_STATUS.FAILED : FALLBACK_EXECUTION_STATUS.COMPLETED, now);
       record.result = result || null;
       record.isError = result?.isError === true;
       persistFallbackRecord(config, record);
@@ -80,7 +85,7 @@ function startFallbackExecution({ config = null, workId = '', scopeId = '', tool
         persistFallbackRecord(config, record);
         return { ok: false, cancelled: true, error: controller.signal.reason || error };
       }
-      settleRecord(record, 'failed', now);
+      settleRecord(record, FALLBACK_EXECUTION_STATUS.FAILED, now);
       record.error = error instanceof Error ? error.message : String(error);
       persistFallbackRecord(config, record);
       return { ok: false, error };
@@ -104,10 +109,10 @@ function cancelFallbackExecution(workId, options = {}) {
   if (!record && options.config) {
     const persisted = readPersistedFallback(options.config, id);
     if (!persisted) return { cancelled: false, duplicate: false, record: null };
-    if (persisted.status !== 'running') return { cancelled: false, duplicate: true, record: persisted };
+    if (persisted.status !== FALLBACK_EXECUTION_STATUS.RUNNING) return { cancelled: false, duplicate: true, record: persisted };
     const cancelled = {
       ...persisted,
-      status: 'cancelled',
+      status: FALLBACK_EXECUTION_STATUS.CANCELLED,
       updatedAt: new Date(timeValue(now)).toISOString(),
       completedAt: new Date(timeValue(now)).toISOString(),
       revision: Math.max(1, Number(persisted.revision || 1)) + 1,
@@ -116,7 +121,7 @@ function cancelFallbackExecution(workId, options = {}) {
     persistFallbackSnapshot(options.config, { ...cancelled, workId: String(cancelled.workId || id) });
     return { cancelled: true, duplicate: false, record: cancelled };
   }
-  if (record.status !== 'running') return { cancelled: false, duplicate: true, record: publicFallbackRecord(record, now) };
+  if (record.status !== FALLBACK_EXECUTION_STATUS.RUNNING) return { cancelled: false, duplicate: true, record: publicFallbackRecord(record, now) };
   if (!record.controller.signal.aborted) record.controller.abort(reason);
   settleCancelledRecord(record, now, reason);
   persistFallbackRecord(options.config, record);
@@ -141,7 +146,7 @@ function fallbackExecutionStatus(reference, options = {}) {
 function publicFallbackRecord(record, now = Date.now) {
   if (!record) return null;
   const structured = record.result?.structuredContent || record.persistedResult || record.result?.result || null;
-  const running = record.status === 'running';
+  const running = record.status === FALLBACK_EXECUTION_STATUS.RUNNING;
   return {
     operationId: record.operationId,
     tool: record.tool,
@@ -170,11 +175,11 @@ function fallbackPollAfterMs(record, now = Date.now) {
 function recoverPersistedFallback(config, reference, now = Date.now) {
   const persisted = readPersistedFallback(config, reference);
   if (!persisted) return null;
-  if (persisted.status !== 'running') return persisted;
+  if (persisted.status !== FALLBACK_EXECUTION_STATUS.RUNNING) return persisted;
   const timestamp = timeValue(now);
   const interrupted = {
     ...persisted,
-    status: 'interrupted',
+    status: FALLBACK_EXECUTION_STATUS.INTERRUPTED,
     updatedAt: new Date(timestamp).toISOString(),
     completedAt: new Date(timestamp).toISOString(),
     revision: Math.max(1, Number(persisted.revision || 1)) + 1,
@@ -295,14 +300,14 @@ function settleRecord(record, status, now = Date.now) {
 }
 
 function settleCancelledRecord(record, now = Date.now, reason = null) {
-  if (record.status !== 'cancelled') settleRecord(record, 'cancelled', now);
+  if (record.status !== FALLBACK_EXECUTION_STATUS.CANCELLED) settleRecord(record, FALLBACK_EXECUTION_STATUS.CANCELLED, now);
   record.error = reason instanceof Error ? reason.message : String(reason || record.error || 'Work session cancelled by request.');
 }
 
 function pruneFallbackExecutions(now = Date.now) {
   const current = timeValue(now);
   for (const [workId, record] of executionsByWorkId) {
-    if (record.status === 'running') continue;
+    if (record.status === FALLBACK_EXECUTION_STATUS.RUNNING) continue;
     const completed = Number(record.completedAtMs || record.startedAtMs || current);
     if (current - completed > FALLBACK_RECORD_TTL_MS) {
       executionsByWorkId.delete(workId);
@@ -311,7 +316,7 @@ function pruneFallbackExecutions(now = Date.now) {
   }
   if (executionsByWorkId.size <= MAX_FALLBACK_RECORDS) return;
   const removable = [...executionsByWorkId.entries()]
-    .filter(([, record]) => record.status !== 'running')
+    .filter(([, record]) => record.status !== FALLBACK_EXECUTION_STATUS.RUNNING)
     .sort((left, right) => Number(left[1].completedAtMs || left[1].startedAtMs) - Number(right[1].completedAtMs || right[1].startedAtMs));
   while (executionsByWorkId.size > MAX_FALLBACK_RECORDS && removable.length) {
     executionsByWorkId.delete(removable.shift()[0]);

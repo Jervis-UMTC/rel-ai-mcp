@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
-import { isDashboardAuthorized } from '../src/http/auth.js';
-import { clearDashboardSessions, createDashboardBootstrap } from '../src/http/dashboardSessions.js';
+import { isDashboardAuthorized } from '../src/http/auth.ts';
+import { clearDashboardSessions, createDashboardBootstrap } from '../src/http/dashboardSessions.ts';
 
 const token = 'dashboard-session-test-token';
 

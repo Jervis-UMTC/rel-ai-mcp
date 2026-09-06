@@ -13,7 +13,10 @@
 @import "../features/processes/styles.css";
 @import "../features/usage/styles.css";
 @source "../**/*.js";
-@source "../../http/dashboard.js";
+@source "../**/*.jsx";
+@source "../**/*.ts";
+@source "../**/*.tsx";
+@source "../../http/dashboard.ts";
 @source "../../../public/dashboard.js";
 
 :root {

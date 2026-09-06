@@ -4,9 +4,11 @@ import { readConfig } from "../src/config.js";
 import { flushAuditWrites, getAuditPath, readAudit } from "../src/audit.js";
 import { flushLocalAnalytics } from "../src/localAnalytics.js";
 import { repositoryIntelligence } from "../src/repository/intelligence/service.js";
-import { resetTaskHistoryCaches } from "../src/taskHistoryStorage.js";
-import { flushTaskHistoryPersistence } from "../src/taskHistoryStore.js";
+import { resetTaskHistoryCaches } from "../src/taskHistoryStorage.ts";
+import { flushTaskHistoryPersistence } from "../src/taskHistoryStore.ts";
 import { resolvePolicy } from "../src/policyResolver.js";
+import { readTaskIntegrity } from '../src/taskIntegrity.ts';
+import { withStateDatabase } from '../src/stateDatabase.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -127,12 +129,13 @@ try {
   );
 
   resetToolActivity();
-  const integrityTasksDir = path.join(stateDir, 'task-integrity', 'tasks');
-  const authorityBefore = new Set(fs.existsSync(integrityTasksDir) ? fs.readdirSync(integrityTasksDir) : []);
   const missingAuthorityTask = await startTask('missing-authority-fail-closed');
-  const createdAuthorityFiles = fs.readdirSync(integrityTasksDir).filter(name => !authorityBefore.has(name));
-  assert.equal(createdAuthorityFiles.length, 1);
-  fs.rmSync(path.join(integrityTasksDir, createdAuthorityFiles[0]), { force: true });
+  const runtimeConfig = readConfig();
+  assert.ok(readTaskIntegrity(runtimeConfig, missingAuthorityTask, 'app'), 'task start must create authoritative integrity state');
+  withStateDatabase(runtimeConfig, db => {
+    db.prepare('DELETE FROM task_integrity_tasks WHERE task_id=?').run(missingAuthorityTask);
+  }, { transaction: true });
+  assert.equal(readTaskIntegrity(runtimeConfig, missingAuthorityTask, 'app'), null, 'test sabotage must remove authoritative integrity state');
   const blockedMutationPath = path.join(workspace, 'src', 'missing-authority-mutation.js');
   await assert.rejects(
     () => callTool('relai_edit', {

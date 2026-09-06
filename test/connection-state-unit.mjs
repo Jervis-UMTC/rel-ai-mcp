@@ -45,7 +45,8 @@ const failed = connectionStateFor({
 assert.equal(connectionSummary(failed).label, 'Last request failed');
 assert.equal(connectionSummary(failed).title, 'The last ChatGPT request failed');
 assert.doesNotMatch(connectionSummary(failed).message, /tools\//i);
-assert.match(connectionSummary(failed).message, /local MCP service and Secure MCP Tunnel remain ready for another request/i);
+assert.match(connectionSummary(failed).message, /local Rel\.AI service and Secure MCP Tunnel are ready for another request/i);
+assert.match(connectionSummary(failed).message, /Restart Rel\.AI only if a connection layer has a problem/i);
 
 const legacyClientState = connectionStateFor({
   ...base,
@@ -69,10 +70,10 @@ assert.equal(connectionSummary(unavailable).title, 'ChatGPT connection unavailab
 assert.doesNotMatch(connectionSummary(unavailable).message, /Tunnel ID|API key|MCP/i);
 
 assert.deepEqual(connectionLayerViews(recent).map(layer => layer.title), [
-  'Local MCP service',
+  'Local Rel.AI service',
   'OpenAI Secure MCP Tunnel',
   'Ready for ChatGPT',
-  'MCP activity',
+  'ChatGPT requests',
   'Dashboard updates'
 ]);
 assert.equal(connectionLayerViews(recent).find(layer => layer.key === 'publicEndpoint')?.label, 'Connected');

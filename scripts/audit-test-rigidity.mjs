@@ -42,11 +42,12 @@ function auditPackageJson(packageJson) {
   const violations = [];
   const scripts = packageJson?.scripts || {};
   const testAll = String(scripts['test:all'] || '');
+  const check = String(scripts.check || '');
   if (/release-check\.mjs|release:check/.test(testAll)) {
     violations.push({ relativePath: 'package.json', lineNumber: 1, kind: 'release-leak', message: 'Normal development tests must not require finalized release metadata.' });
   }
-  if (!/audit:test-rigidity/.test(testAll)) {
-    violations.push({ relativePath: 'package.json', lineNumber: 1, kind: 'missing-rigidity-audit', message: 'test:all must run audit:test-rigidity so brittle gates cannot silently return.' });
+  if (!/audit:test-rigidity/.test(check)) {
+    violations.push({ relativePath: 'package.json', lineNumber: 1, kind: 'missing-rigidity-audit', message: 'check must run audit:test-rigidity so brittle gates cannot silently return.' });
   }
   if (scripts['test:tool-budgets']) {
     violations.push({ relativePath: 'package.json', lineNumber: 1, kind: 'misleading-budget-alias', message: 'Tool-surface measurement must not be named like a blocking test budget.' });

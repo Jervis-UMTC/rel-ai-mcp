@@ -254,6 +254,8 @@ try {
   assert.equal(timedOut.executed, true);
   assert.equal(timedOut.commandSucceeded, false);
   assert.equal(timedOut.timedOut, true);
+  assert.equal(timedOut.terminationConfirmed, true);
+  assert.equal(typeof timedOut.forcedTermination, 'boolean');
   assert.match(timedOut.error, /Timed out after 1000ms/);
 
   const preDirtyMutation = await execCall({

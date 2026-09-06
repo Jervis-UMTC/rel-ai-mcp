@@ -37,7 +37,7 @@ try {
   const { callTool: rawCallTool } = await import('../src/tools.js');
   const callTool = (name, args, context = {}) => rawCallTool(name, args, { principal: 'local:trusted', ...context });
   const { getToolActivity, onToolActivity, resetToolActivity } = await import('../src/toolActivity.js');
-  const { readTaskHistorySession } = await import('../src/taskHistoryStore.js');
+  const { readTaskHistorySession } = await import('../src/taskHistoryStore.ts');
   const config = { stateDir, auditLogPath: path.join(stateDir, 'audit.jsonl') };
   const events = [];
   const stopListening = onToolActivity(event => events.push(event));

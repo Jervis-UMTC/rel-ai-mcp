@@ -1,4 +1,5 @@
 import { OPERATION_IDS as OP } from './operationIds.js';
+import { FAILURE_OPERATION } from './contracts.ts';
 
 function enhanceToolError(toolName, error) {
   const raw = error instanceof Error ? error.message : String(error);
@@ -44,11 +45,11 @@ function patchErrorHint(toolName, raw, append, error) {
 }
 
 function operationForTool(toolName) {
-  if ([OP.READ, OP.SEARCH_TEXT, OP.SEARCH_SEMANTIC, OP.SNAPSHOT, OP.INSPECT, 'relai_read', 'relai_search', 'relai_snapshot', 'relai_inspect'].includes(toolName)) return 'read';
-  if ([OP.CHANGES_RESTORE, OP.CHANGES_RESET, 'relai_changes'].includes(toolName)) return 'restore';
-  if ([OP.PUBLISH_COMMIT, 'relai_publish'].includes(toolName)) return 'commit';
-  if ([OP.CHANGES_DIFF, OP.PUBLISH_DRAFT_PR].includes(toolName)) return 'review';
-  return 'write';
+  if ([OP.READ, OP.SEARCH_TEXT, OP.SEARCH_SEMANTIC, OP.SNAPSHOT, OP.INSPECT, 'relai_read', 'relai_search', 'relai_snapshot', 'relai_inspect'].includes(toolName)) return FAILURE_OPERATION.READ;
+  if ([OP.CHANGES_RESTORE, OP.CHANGES_RESET, 'relai_changes'].includes(toolName)) return FAILURE_OPERATION.RESTORE;
+  if ([OP.PUBLISH_COMMIT, 'relai_publish'].includes(toolName)) return FAILURE_OPERATION.COMMIT;
+  if ([OP.CHANGES_DIFF, OP.PUBLISH_DRAFT_PR].includes(toolName)) return FAILURE_OPERATION.REVIEW;
+  return FAILURE_OPERATION.WRITE;
 }
 
 function serializeToolError(toolName, error) {

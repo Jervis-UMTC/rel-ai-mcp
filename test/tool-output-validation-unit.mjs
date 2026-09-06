@@ -219,10 +219,6 @@ function requiredArgs(entry) {
     case 'relai_inspect:trace': return { symbol: 'target' };
     case 'relai_inspect:related': return { query: 'target' };
     case 'relai_inspect:impact': return { paths: ['src/index.js'] };
-    case 'relai_skill:create':
-    case 'relai_skill:edit': return { name: 'output-skill', content: 'skill content' };
-    case 'relai_skill:patch': return { name: 'output-skill', oldText: 'old', newText: 'new' };
-    case 'relai_skill:delete': return { name: 'output-skill' };
     case 'relai_exec:default': return { command: 'npm test' };
     case 'relai_process:start': return { command: 'npm run dev', kind: 'service', purpose: 'Validate.' };
     case 'relai_ui:start': return { port: 3000 };

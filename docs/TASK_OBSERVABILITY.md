@@ -16,8 +16,8 @@ MCP tools/call
 → process, repository, validation, Git, or approval layer executes
 → src/taskObservability.js derives a sanitized structured outcome
 → the lifecycle event is updated by stable operation/event ID
-→ src/taskHistoryStore.js normalizes and upserts the canonical task snapshot
-→ src/taskHistoryStorage.js sanitizes before disk write and after disk read
+→ src/taskHistoryStore.ts normalizes and upserts the canonical task snapshot
+→ src/taskHistoryStorage.ts sanitizes before disk write and after disk read
 → src/http/dashboardData.js builds the canonical dashboard projection
 → src/http/dashboard.js publishes an ordered snapshot over the existing SSE stream
 → src/ui/snapshot-order.js rejects duplicate or stale snapshots
@@ -36,7 +36,7 @@ MCP tools/call
 | Validation and diagnostic work-unit progress | `src/bridge/validation.js` and `src/bridge/diagnosticsRunner.js` |
 | Cooperative process cancellation | `src/abortSignals.js`, `src/process.js`, and process-backed bridges |
 | Queue-wait activity | `src/tools/execution.js` through the current activity context |
-| Persistence and historical read normalization | `src/taskHistoryStore.js` and `src/taskHistoryStorage.js` |
+| Persistence and historical read normalization | `src/taskHistoryStore.ts` and `src/taskHistoryStorage.ts` |
 | Dashboard projection and copy-safe activity | `src/http/dashboardData.js` |
 | Snapshot stream ID and sequence | `src/http/dashboard.js` |
 | Duplicate/stale snapshot rejection | `src/ui/snapshot-order.js` |

@@ -2,16 +2,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const css = fs.readFileSync('src/ui/features/activity/styles.css', 'utf8');
-const columns = ['time', 'tool', 'task', 'status', 'message', 'action'];
+const react = fs.readFileSync('src/ui/features/activity/react.js', 'utf8');
 
-assert.doesNotMatch(css, /\.activity-col-message\s*\{[^}]*width:\s*calc\(/s, 'Message width must not depend on brittle calc chains');
-for (const column of columns) {
-  assert.match(css, new RegExp(`\\.activity-col-${column}\\s*\\{[^}]*width:\\s*\\d+(?:\\.\\d+)?%`, 's'), `${column} must participate in the shared percentage column model`);
-}
-assert.match(css, /@media\s*\(max-width:[^)]+\)[\s\S]*\.activity-task-column[\s\S]*display:\s*none/s, 'narrow layouts may fold the task column into the message cell');
-assert.match(css, /\.activity-message-mobile-task\s*\{[^}]*display:\s*none/s, 'desktop rows must not duplicate the task label');
-assert.match(css, /@media\s*\(max-width:[^)]+\)[\s\S]*\.activity-message-mobile-task[\s\S]*block/s, 'narrow layouts must keep task attribution visible in the message cell');
-assert.match(css, /@media\s*\(max-width:[^)]+\)[\s\S]*\.activity-time-column[\s\S]*display:\s*none/s, 'the narrowest responsive layout must yield lower-priority columns before squeezing message content');
+assert.match(react, /h\('colgroup',[\s\S]{0,260}activity-col-time[\s\S]{0,180}activity-col-message/, 'React activity table must keep the canonical time + activity columns');
+assert.doesNotMatch(react, /activity-col-(?:tool|task|status|action)/, 'tool, task, status, and action belong in Activity metadata instead of duplicate table columns');
+assert.match(react, /activity-row-meta[\s\S]{0,500}StatusPill[\s\S]{0,300}activity-row-action[\s\S]{0,300}activity-row-task[\s\S]{0,300}activity-row-project/, 'Activity metadata must retain status, action, task, and project context');
+assert.match(css, /\.activity-table\s*\{[^}]*table-layout:\s*fixed/s, 'Activity table must use a stable fixed layout');
+assert.match(css, /\.activity-col-time\s*\{[^}]*width:\s*\d+px/s, 'Time must keep a bounded fixed-width column');
+assert.match(css, /\.activity-col-message\s*\{[^}]*width:\s*auto/s, 'Activity content must consume the remaining width');
+assert.doesNotMatch(css, /\.activity-col-message\s*\{[^}]*width:\s*calc\(/s, 'Activity width must not depend on brittle calc chains');
 assert.match(css, /\.activity-message-copy\s*\{[^}]*min-width:/s, 'message text must retain an explicit readable minimum width');
+assert.match(css, /@media\s*\(max-width:[^)]+\)[\s\S]*\.activity-time-column[\s\S]*display:\s*none/s, 'the narrowest responsive layout must yield the lower-priority time column');
+assert.match(css, /@media\s*\(max-width:[^)]+\)[\s\S]*\.activity-col-message\s*\{[^}]*width:\s*100%/s, 'the Activity column must expand to full width when time is hidden'); // rigidity-ok: full width is the responsive contract after the time column is hidden.
 
 console.log('Activity message layout invariants passed.');

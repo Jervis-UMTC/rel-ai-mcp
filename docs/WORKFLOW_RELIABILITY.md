@@ -11,7 +11,7 @@ Authorization, workspace containment, sensitive-file policy, stale-write checks,
 | Concern | Authority |
 | --- | --- |
 | Authorization, principal identity, workspace containment, sensitive-file policy | Existing runtime safety/authorization modules |
-| Workspace/task mutations, mutation generations, validation freshness, and workspace conflicts | `src/taskIntegrity.js` |
+| Workspace/task mutations, mutation generations, validation freshness, and workspace conflicts | `src/taskIntegrity.ts` |
 | Repository topology, package boundaries, check catalog | `src/workflow/topology.js` and `src/workflow/checkCatalog.js` |
 | Safe evidence receipts | Existing durable task history |
 | Process ownership and lifecycle | Existing managed-process runtime |
@@ -120,7 +120,7 @@ Historical records that used `inactivity_window` as cancellation/failure are nor
 
 ## Completion and validation evidence
 
-Validation evidence does not decide whether the agent may consider its objective complete. `src/taskIntegrity.js` remains the factual authority for task/workspace mutations, ownership/conflicts, and whether recorded validation is current for the repository state.
+Validation evidence does not decide whether the agent may consider its objective complete. `src/taskIntegrity.ts` remains the factual authority for task/workspace mutations, ownership/conflicts, and whether recorded validation is current for the repository state.
 
 Use current structured validation when it helps prove the objective. Do not rerun an unchanged exact check merely to create ceremonial "final" verification. If a durable work session exists, `relai_validate` with `complete:true` remains an optional convenience to validate and close that exact session atomically; `relai_work` with `action:"finish"` may also close it while truthfully reporting validation as passed, failed, stale, not run, or not required.
 

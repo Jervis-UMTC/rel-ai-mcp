@@ -42,15 +42,15 @@ function read(rel) {
 
 // Shared ChatGPT guidance owns create and reconnect instructions.
 {
-  const connector = read('src/ui/features/settings/connector.js');
+  const settingsReact = read('src/ui/features/settings/react.js');
   const guidance = read('src/ui/features/settings/connection-guidance.js');
-  assert.match(connector, /createChatGptSetupGuide/);
-  assert.match(connector, /connectionGuideMode/);
-  assert.match(guidance, /Connection set to Tunnel/i);
+  assert.match(settingsReact, /chatGptGuideSteps/);
+  assert.match(settingsReact, /connectionGuideMode/);
+  assert.match(guidance, /Set Connection to Tunnel/i);
   assert.match(guidance, /No authentication/i);
   assert.match(guidance, /chatgpt\.com\/plugins#settings\/Connectors\?create-connector=true/i);
   assert.match(guidance, /Scan Tools/i);
-  assert.match(guidance, /existing Rel\.AI MCP connector instead of creating a duplicate/i);
+  assert.match(guidance, /already exists in that workspace, open it instead of creating a duplicate/i);
 }
 
 // Dashboard tool metadata stays internally consistent; workspace cards do not
@@ -93,7 +93,7 @@ function read(rel) {
 // page-owned Tailwind listboxes instead of native topbar controls.
 {
   const dashboard = read('public/dashboard.js');
-  const dashboardHtml = read('src/http/dashboard.js');
+  const dashboardHtml = read('src/http/dashboard.ts');
   const dashboardCss = read('public/dashboard.css');
   const workspaceMenu = read('src/ui/components/workspace-menu.js');
   assert.match(dashboard, /invalidateCache\(DASHBOARD_DATA_URL\)/);

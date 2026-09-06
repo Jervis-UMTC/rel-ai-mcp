@@ -9,8 +9,9 @@ import { safeReadJson, realRootOf, clearRealRootCache } from './safety.js';
 import { discoverCommands } from './commandDiscovery.js';
 import { readProjectInstructions, summarizeProjectInstructions } from './projectInstructions.js';
 import { normalizeAllowedKeys } from './processEnvironment.js';
-import { writeJsonAtomic } from './durableState.js';
+import { writeJsonAtomic } from './durableState.ts';
 import { defaultStateDir } from './stateLayout.js';
+import { z } from 'zod';
 function getConfigPath() {
   return process.env.REL_AI_MCP_CONFIG || path.join(defaultStateDir(), "config.json");
 }
@@ -38,7 +39,6 @@ function makeDefaultConfig() {
       enableStateExport: true
     },
     knowledge: {
-      proceduralLearning: true,
       maxBootstrapBytes: 4096
     },
     computerControl: {
@@ -160,105 +160,123 @@ function expandHome(value) {
 
 function normalizeConfig(config) {
   const base = makeDefaultConfig();
-  const input = config || {};
-  const next = mergeConfigBase(base, input);
-  normalizeCorePaths(next, base);
-  normalizeTrustedBudget(next, input);
-  normalizeProductSettings(next, base, input);
-  normalizeWorkspaces(next);
-  return next;
-}
-
-function mergeConfigBase(base, input) {
-  return {
-    ...base,
-    stateDir: input.stateDir ?? base.stateDir,
-    auditLogPath: input.auditLogPath ?? base.auditLogPath,
-    trustedBudgetMultiplier: input.trustedBudgetMultiplier ?? base.trustedBudgetMultiplier,
-    productUx: { ...base.productUx, ...objectOrEmpty(input.productUx) },
-    knowledge: { ...base.knowledge, ...objectOrEmpty(input.knowledge) },
-    computerControl: { ...base.computerControl, ...objectOrEmpty(input.computerControl) },
-    release: { ...base.release, ...objectOrEmpty(input.release) },
-    telemetry: { ...base.telemetry, ...objectOrEmpty(input.telemetry) },
-    processEnvironment: { ...base.processEnvironment, ...objectOrEmpty(input.processEnvironment) },
-    workspaces: { ...objectOrEmpty(input.workspaces) }
-  };
-}
-
-function normalizeCorePaths(next, base) {
+  const next = configSchema(base).parse(config);
   next.version = 7;
   next.stateDir = expandHome(next.stateDir || base.stateDir);
   if (!path.isAbsolute(next.stateDir)) next.stateDir = path.resolve(next.stateDir);
-  next.auditLogPath = next.auditLogPath ? expandHome(next.auditLogPath) : path.join(next.stateDir, "audit.jsonl");
+  next.auditLogPath = next.auditLogPath ? expandHome(next.auditLogPath) : path.join(next.stateDir, 'audit.jsonl');
   if (!path.isAbsolute(next.auditLogPath)) next.auditLogPath = path.resolve(next.auditLogPath);
-}
-
-function normalizeTrustedBudget(next, input) {
-  next.trustedBudgetMultiplier = normalizeTrustedBudgetMultiplier(input.trustedBudgetMultiplier);
-}
-
-function normalizeTrustedBudgetMultiplier(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 1 || number > 10) return 2;
-  return Math.floor(number);
-}
-
-function normalizeProductSettings(next, base, input) {
-  const product = { ...base.productUx, ...objectOrEmpty(input.productUx) };
-  next.productUx = {
-    staleHours: clampNumber(product.staleHours, 1, 24 * 365, base.productUx.staleHours),
-    enableStateExport: normalizeBoolean(product.enableStateExport, base.productUx.enableStateExport)
-  };
-  const knowledge = { ...base.knowledge, ...objectOrEmpty(input.knowledge) };
-  next.knowledge = {
-    proceduralLearning: normalizeBoolean(knowledge.proceduralLearning, base.knowledge.proceduralLearning),
-    maxBootstrapBytes: clampNumber(knowledge.maxBootstrapBytes, 1024, 16384, base.knowledge.maxBootstrapBytes)
-  };
-  const computerControl = { ...base.computerControl, ...objectOrEmpty(input.computerControl) };
-  next.computerControl = {
-    enabled: normalizeBoolean(computerControl.enabled, base.computerControl.enabled)
-  };
-  next.release = { ...base.release, ...objectOrEmpty(input.release) };
-  next.release.minimumReadinessScore = clampNumber(next.release.minimumReadinessScore, 0, 100, base.release.minimumReadinessScore);
-  next.release.requireHttpToken = normalizeBoolean(next.release.requireHttpToken, base.release.requireHttpToken);
-  const telemetry = { ...base.telemetry, ...objectOrEmpty(input.telemetry) };
-  next.telemetry = {
-    enabled: normalizeBoolean(telemetry.enabled, base.telemetry.enabled),
-    endpoint: String(telemetry.endpoint || '').trim(),
-    sampleRatio: clampRatio(telemetry.sampleRatio, base.telemetry.sampleRatio)
-  };
-  const processEnvironment = { ...base.processEnvironment, ...objectOrEmpty(input.processEnvironment) };
-  next.processEnvironment = {
-    allow: normalizeAllowedKeys(processEnvironment.allow)
-  };
-}
-
-function normalizeBoolean(value, fallback) {
-  if (typeof value === 'boolean') return value;
-  if (String(value).toLowerCase() === 'true') return true;
-  if (String(value).toLowerCase() === 'false') return false;
-  return fallback;
-}
-
-function normalizeWorkspaces(config) {
-  for (const [alias, workspace] of Object.entries(config.workspaces)) {
-    config.workspaces[alias] = normalizeWorkspace(workspace || {});
+  for (const [alias, workspace] of Object.entries(next.workspaces)) {
+    next.workspaces[alias] = normalizeWorkspace(workspace);
   }
+  return next;
+}
+
+function configSchema(base) {
+  return objectSchema(z.object({
+    version: z.unknown().optional(),
+    stateDir: stringSchema(base.stateDir),
+    auditLogPath: stringSchema(base.auditLogPath),
+    trustedBudgetMultiplier: boundedIntegerSchema(1, 10, base.trustedBudgetMultiplier),
+    productUx: objectSchema(z.object({
+      staleHours: boundedIntegerSchema(1, 24 * 365, base.productUx.staleHours),
+      enableStateExport: booleanSchema(base.productUx.enableStateExport)
+    })),
+    knowledge: objectSchema(z.object({
+      maxBootstrapBytes: boundedIntegerSchema(1024, 16384, base.knowledge.maxBootstrapBytes)
+    })),
+    computerControl: objectSchema(z.object({
+      enabled: booleanSchema(base.computerControl.enabled)
+    })),
+    release: objectSchema(z.object({
+      minimumReadinessScore: boundedIntegerSchema(0, 100, base.release.minimumReadinessScore),
+      requireHttpToken: booleanSchema(base.release.requireHttpToken)
+    })),
+    telemetry: objectSchema(z.object({
+      enabled: booleanSchema(base.telemetry.enabled),
+      endpoint: stringSchema(base.telemetry.endpoint).transform(value => value.trim()),
+      sampleRatio: boundedRatioSchema(base.telemetry.sampleRatio)
+    })),
+    processEnvironment: objectSchema(z.object({
+      allow: z.any().optional().transform(value => normalizeAllowedKeys(value))
+    })),
+    workspaces: objectSchema(z.record(z.string(), workspaceConfigSchema()))
+  }));
+}
+
+function workspaceConfigSchema() {
+  return objectSchema(z.object({
+    path: stringSchema(''),
+    sourcePaths: stringListSchema([]),
+    repoSlug: stringSchema(''),
+    context: contextConfigSchema(),
+    validationRules: objectSchema(z.record(z.string(), z.unknown()))
+  }));
+}
+
+function contextConfigSchema() {
+  const base = makeDefaultContextConfig();
+  return objectSchema(z.object({
+    snapshotMaxFiles: boundedIntegerSchema(1, 100000, base.snapshotMaxFiles),
+    includeRoots: stringListSchema(base.includeRoots),
+    excludePaths: stringListSchema(base.excludePaths)
+  }));
+}
+
+function objectSchema(schema) {
+  return z.preprocess(value => value && typeof value === 'object' && !Array.isArray(value) ? value : {}, schema);
+}
+
+function stringSchema(fallback = '') {
+  return z.preprocess(value => value == null ? fallback : String(value), z.string());
+}
+
+function booleanSchema(fallback) {
+  return z.preprocess(value => {
+    if (typeof value === 'boolean') return value;
+    const text = String(value).toLowerCase();
+    if (text === 'true') return true;
+    if (text === 'false') return false;
+    return fallback;
+  }, z.boolean());
+}
+
+function boundedIntegerSchema(min, max, fallback) {
+  return z.preprocess(value => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.floor(number))) : fallback;
+  }, z.number().int().min(min).max(max));
+}
+
+function boundedRatioSchema(fallback) {
+  return z.preprocess(value => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.min(1, Math.max(0, number)) : fallback;
+  }, z.number().min(0).max(1));
+}
+
+function stringListSchema(fallback = []) {
+  return z.preprocess(value => {
+    if (value == null || value === '') return [...fallback];
+    if (Array.isArray(value)) return value.map(String).map(item => item.trim()).filter(Boolean);
+    return String(value).split(/[\n,]/).map(item => item.trim()).filter(Boolean);
+  }, z.array(z.string()));
 }
 
 function normalizeWorkspace(workspace) {
-  const sourcePaths = normalizeWorkspaceSourcePaths(workspace);
+  const parsed = workspaceConfigSchema().parse(workspace);
+  const sourcePaths = normalizeWorkspaceSourcePaths(parsed);
   return {
-    path: sourcePaths[0] || workspace.path,
+    path: sourcePaths[0] || parsed.path,
     sourcePaths,
-    repoSlug: workspace.repoSlug || "",
-    context: normalizeContextConfig(workspace.context),
-    validationRules: workspace.validationRules && typeof workspace.validationRules === "object" ? workspace.validationRules : {}
+    repoSlug: parsed.repoSlug,
+    context: parsed.context,
+    validationRules: parsed.validationRules
   };
 }
 
 function normalizeWorkspaceSourcePaths(workspace) {
-  const values = [workspace?.path, ...normalizeStringList(workspace?.sourcePaths)]
+  const values = [workspace?.path, ...(Array.isArray(workspace?.sourcePaths) ? workspace.sourcePaths : stringListSchema([]).parse(workspace?.sourcePaths))]
     .map(value => String(value || '').trim())
     .filter(Boolean);
   const seen = new Set();
@@ -271,24 +289,7 @@ function normalizeWorkspaceSourcePaths(workspace) {
 }
 
 function normalizeContextConfig(value) {
-  const base = makeDefaultContextConfig();
-  const raw = value && typeof value === "object" ? value : {};
-  return {
-    ...base,
-    snapshotMaxFiles: clampNumber(raw.snapshotMaxFiles, 1, 100000, base.snapshotMaxFiles),
-    includeRoots: normalizeStringList(raw.includeRoots || base.includeRoots),
-    excludePaths: normalizeStringList(raw.excludePaths || base.excludePaths)
-  };
-}
-
-function objectOrEmpty(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function normalizeStringList(value) {
-  if (value == null || value === "") return [];
-  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
-  return String(value).split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+  return contextConfigSchema().parse(value);
 }
 
 function workspaceResolutionError(code, message, details = {}) {
@@ -523,18 +524,6 @@ function safeDetectValidationChecks(workspacePath) {
     if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] detect validation checks:', error);
     return [];
   }
-}
-
-function clampRatio(value, fallback) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(1, Math.max(0, number));
-}
-
-function clampNumber(value, min, max, fallback) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(Math.max(Math.floor(n), min), max);
 }
 
 export { getConfigPath, makeDefaultConfig, makeDefaultContextConfig, readConfig, invalidateConfigCache, ensureConfig, writeConfig, normalizeConfig, resolveWorkspaceInput, normalizeWorkspacePathForComparison, resolveWorkspace, publicConfigSummary, allWorkspaceAliases };

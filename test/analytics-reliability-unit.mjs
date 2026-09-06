@@ -4,10 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { OUTCOME_CLASSES, classifyAnalyticsOutcome } from '../src/analyticsOutcome.js';
-import { withStateDatabase } from '../src/stateDatabase.js';
+import { withStateDatabase } from '../src/stateDatabase.ts';
 import { flushLocalAnalytics, recordLocalToolOutcome, readLocalUsageSnapshot } from '../src/localAnalytics.js';
 import { analyticsBounds, analyticsRangeScope, normalizeUsageSnapshot } from '../src/ui/features/usage/range-model.js';
-import { renderUsage } from '../src/ui/features/usage/render.js';
+import { analyticsMetrics } from '../src/ui/features/usage/render.js';
 
 assert.equal(classifyAnalyticsOutcome({ ok: true }), OUTCOME_CLASSES.SUCCESS);
 assert.equal(classifyAnalyticsOutcome({ ok: false, operationName: 'relai_validate', errorMessage: 'test exited 1' }), OUTCOME_CLASSES.OPERATION_FAILURE);
@@ -53,14 +53,9 @@ try {
   assert.equal(legacyScope.reliabilityRate, null, 'legacy analytics must not be guessed into the new reliability denominator');
   assert.equal(legacyScope.reliabilityCalls, 0);
 
-  const legacyContent = {
-    innerHTML: '',
-    querySelector: () => null,
-    querySelectorAll: () => []
-  };
-  renderUsage(legacyContent, { bounds, current: legacyScope, previous: analyticsRangeScope([], bounds) });
-  assert.match(legacyContent.innerHTML, /Measured after new actions run/);
-  assert.doesNotMatch(legacyContent.innerHTML, /Operation success/);
+  const legacyMetrics = analyticsMetrics(legacyScope, analyticsRangeScope([], bounds));
+  assert.equal(legacyMetrics.find(metric => metric.key === 'reliabilityRate')?.detail, 'Measured after new actions run');
+  assert.equal(legacyMetrics.some(metric => metric.label === 'Operation success'), false);
 
   const legacyStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-reliability-v1-'));
   try {
@@ -104,21 +99,11 @@ try {
     fs.rmSync(legacyStateDir, { recursive: true, force: true });
   }
 
-  const content = {
-    innerHTML: '',
-    querySelector: () => null,
-    querySelectorAll: () => []
-  };
-  renderUsage(content, { bounds, current: scope, previous: analyticsRangeScope([], bounds) });
-  assert.match(content.innerHTML, />Reliable (?:calls|actions)</);
-  assert.doesNotMatch(content.innerHTML, />Operation success</);
-  assert.match(content.innerHTML, />System errors</);
-  assert.match(content.innerHTML, /Rel\.AI internal errors only/);
-  assert.doesNotMatch(content.innerHTML, />Retryable errors</);
-  assert.match(content.innerHTML, /usage-side-by-side/);
-  const failureHeading = content.innerHTML.includes('What went wrong') ? 'What went wrong' : 'Failure categories';
-  const projectHeading = content.innerHTML.includes('Project activity') ? 'Project activity' : 'Workspace activity';
-  assert.ok(content.innerHTML.indexOf(failureHeading) < content.innerHTML.indexOf(projectHeading), 'failure categories should sit beside project activity in the compact final row');
+  const metrics = analyticsMetrics(scope, analyticsRangeScope([], bounds));
+  assert.equal(metrics.some(metric => metric.label === 'Reliable actions'), true);
+  assert.equal(metrics.some(metric => metric.label === 'Operation success'), false);
+  assert.equal(metrics.find(metric => metric.label === 'System errors')?.detail, 'Rel.AI internal errors only');
+  assert.equal(metrics.some(metric => metric.label === 'Retryable errors'), false);
 
   await flushLocalAnalytics(config);
   const persisted = withStateDatabase(config, db => String(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08')?.payload || ''));

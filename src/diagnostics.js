@@ -43,43 +43,13 @@ function buildDiagnosticReport(input = {}) {
   ];
   const ordered = dedupeFindings(findings).sort(compareDiagnosticFindings);
   const failedActivity = normalizeFailedActivity(input.auditLogs);
-  const activeTaskCount = Math.max(0, Number(input.activeTaskCount || 0), Number(input.activeCalls || 0));
-  const activeTaskReason = activeTaskCount > 0
-    ? `${activeTaskCount} Rel.AI task${activeTaskCount === 1 ? ' is' : 's are'} still active.`
-    : '';
   const report = {
     ok: true,
     generatedAt: new Date().toISOString(),
     scope: workspace ? { workspace } : { workspace: '' },
     summary: countFindings(ordered),
     findings: ordered,
-    logs: { runtime, failedActivity },
-    maintenance: {
-      history: {
-        available: true,
-        blocked: activeTaskCount > 0,
-        reason: activeTaskReason,
-        endpoint: '/api/diagnostics/reset',
-        target: 'history'
-      },
-      runtimeLogs: {
-        available: runtime.available,
-        blocked: false,
-        reason: runtime.available ? '' : 'Service logs are available only in the desktop app.',
-        endpoint: '/api/diagnostics/reset',
-        target: 'runtime_logs'
-      },
-      all: {
-        available: runtime.available,
-        blocked: activeTaskCount > 0,
-        reason: activeTaskCount > 0
-          ? activeTaskReason
-          : runtime.available ? '' : 'Full reset is available only in the desktop app.',
-        endpoint: '/api/diagnostics/reset',
-        target: 'all',
-        confirmation: 'RESET'
-      }
-    }
+    logs: { runtime, failedActivity }
   };
   report.reportText = formatDiagnosticReport(report);
   return report;

@@ -7,6 +7,9 @@ import { createDesktopLocalDataManager } from '../electron/desktop-local-data.js
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-local-data-'));
 const stateDir = path.join(root, 'state');
+const connectionStateDir = path.join(root, 'connection-state');
+const userDataDir = path.join(root, 'electron-user-data');
+const projectDir = path.join(root, 'project');
 const logPath = path.join(root, 'service.log');
 const auditPath = path.join(stateDir, 'audit.jsonl');
 let activeTaskCount = 0;
@@ -25,11 +28,19 @@ try {
   write('output-spills/task/output.log', 19);
   write('repository-intelligence/repo/graph.db', 23);
   fs.writeFileSync(logPath, 'x'.repeat(29));
+  fs.mkdirSync(connectionStateDir, { recursive: true });
+  fs.writeFileSync(path.join(connectionStateDir, 'connection.json'), '{}');
+  fs.mkdirSync(userDataDir, { recursive: true });
+  fs.writeFileSync(path.join(userDataDir, 'desktop-lifecycle.json'), '{}');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'keep.txt'), 'project data');
 
   const manager = createDesktopLocalDataManager({
-    getConfig: () => ({ stateDir, auditLogPath: auditPath }),
+    getAdditionalDataRoots: () => [connectionStateDir],
+    getConfig: () => ({ stateDir, auditLogPath: auditPath, workspaces: { app: { path: projectDir } } }),
     getServiceLogPath: () => logPath,
     getTaskActivity: () => ({ activeTaskCount }),
+    getUserDataPath: () => userDataDir,
     openPath: async target => { openedPath = target; return ''; }
   });
 
@@ -55,6 +66,23 @@ try {
 
   assert.equal((await manager.openDataFolder()).ok, true);
   assert.equal(openedPath, path.resolve(stateDir));
+
+  const plan = manager.prepareClearAll();
+  assert.equal(plan.ok, true);
+  assert.deepEqual(new Set(plan.roots), new Set([path.resolve(stateDir), path.resolve(connectionStateDir), path.resolve(userDataDir)]));
+  const allCleared = await manager.clearAll(plan);
+  assert.equal(allCleared.ok, true);
+  assert.equal(fs.existsSync(stateDir), false);
+  assert.equal(fs.existsSync(connectionStateDir), false);
+  assert.equal(fs.existsSync(userDataDir), false);
+  assert.equal(fs.readFileSync(path.join(projectDir, 'keep.txt'), 'utf8'), 'project data');
+
+  const unsafe = createDesktopLocalDataManager({
+    getConfig: () => ({ stateDir: root, workspaces: { app: { path: projectDir } } }),
+    getTaskActivity: () => ({ activeTaskCount: 0 }),
+    getUserDataPath: () => path.join(root, 'other-user-data')
+  });
+  assert.throws(() => unsafe.prepareClearAll(), /contains project files/);
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

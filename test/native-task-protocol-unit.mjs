@@ -12,7 +12,7 @@ import {
   createNativeTask,
   requestNativeTaskInput
 } from '../src/mcp/nativeTaskService.js';
-import { withStateDatabase } from '../src/stateDatabase.js';
+import { withStateDatabase } from '../src/stateDatabase.ts';
 import {
   INVALID_TASKS_CAPABILITY_CODE,
   MCP_PROTOCOL_VERSION,

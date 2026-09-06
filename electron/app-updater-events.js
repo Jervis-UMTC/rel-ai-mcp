@@ -1,6 +1,6 @@
 
 
-import { assessUpdateSynchronization, cleanText, isoNow, progressPayload, updateCompatibilityMetadata } from "./app-updater-state.js";
+import { assessUpdateSynchronization, cleanText, isoNow, progressPayload, updateCompatibilityMetadata } from './app-updater-status.js';
 import { compareVersions, isStableVersion } from "./update-version.js";
 
 function bindUpdaterEvents({ autoUpdater, handlers, status, emit, handleError, handleEventError = handleError, store, now, log, currentCompatibility = {} }) {

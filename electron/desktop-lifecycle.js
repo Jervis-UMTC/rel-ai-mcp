@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { importResourceModule } from './resource-path.js';
 
-const { readJsonFileAsync, writeJsonAtomicAsync } = await importResourceModule('src/durableState.js');
+const { readJsonFileAsync, writeJsonAtomicAsync } = await importResourceModule('src/durableState.ts');
 
 function createDesktopLifecycleManager(options = {}) {
   const {

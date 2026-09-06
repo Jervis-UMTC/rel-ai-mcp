@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createValidationFingerprint } from '../src/bridge/validationPlan.js';
 import { relaiVerify } from '../src/bridge/validation.js';
-import { recordTaskHistoryEvent, recordWorkflowEvidence } from '../src/taskHistoryStore.js';
+import { recordTaskHistoryEvent, recordWorkflowEvidence } from '../src/taskHistoryStore.ts';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-validation-reuse-'));
 const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-validation-state-'));

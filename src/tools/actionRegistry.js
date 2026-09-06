@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { OPERATION_DEFINITION_VALUES } from './operationDefinitionValues.js';
 import { OPERATION_IDS as OP } from './operationIds.js';
+import { AUTHORIZATION_CAPABILITY } from './contracts.ts';
 
 const PUBLIC_CONTRACT_SCHEMA = z.object({
   required: z.array(z.string()).default([]),
@@ -10,12 +11,12 @@ const PUBLIC_CONTRACT_SCHEMA = z.object({
   extra: z.record(z.string(), z.unknown()).default({})
 }).strict();
 
-const READ = 'repository:read';
-const WRITE = 'repository:write';
-const EXECUTE = 'command:execute';
-const PROCESS = 'process:manage';
-const COMPUTER = 'computer:control';
-const PUBLISH = 'git:publish';
+const READ = AUTHORIZATION_CAPABILITY.REPOSITORY_READ;
+const WRITE = AUTHORIZATION_CAPABILITY.REPOSITORY_WRITE;
+const EXECUTE = AUTHORIZATION_CAPABILITY.COMMAND_EXECUTE;
+const PROCESS = AUTHORIZATION_CAPABILITY.PROCESS_MANAGE;
+const COMPUTER = AUTHORIZATION_CAPABILITY.COMPUTER_CONTROL;
+const PUBLISH = AUTHORIZATION_CAPABILITY.GIT_PUBLISH;
 
 const INSPECT_LOCATION_OR_SYMBOL = Object.freeze({
   anyOf: [
@@ -81,12 +82,6 @@ const PUBLIC_BINDINGS_BY_OPERATION = Object.freeze({
   [OP.INSPECT]: Object.entries(INSPECT_FIELDS).map(([action, publicContract]) =>
     expose('relai_inspect', action, { capability: READ, keepAction: true, publicContract })),
   [OP.EDIT]: [expose('relai_edit', 'default', { capability: WRITE })],
-  [OP.SKILL_MANAGE]: [
-    expose('relai_skill', 'create', { capability: WRITE, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['content'], omit: ['oldText', 'newText'] }) }),
-    expose('relai_skill', 'edit', { capability: WRITE, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['content'], omit: ['oldText', 'newText'] }) }),
-    expose('relai_skill', 'patch', { capability: WRITE, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['oldText', 'newText'], omit: ['content'] }) }),
-    expose('relai_skill', 'delete', { capability: WRITE, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ omit: ['content', 'oldText', 'newText'] }) })
-  ],
   [OP.EXEC]: [expose('relai_exec', 'default', { capability: EXECUTE, behavior: { taskScope: 'optional' } })],
   [OP.PROCESS_START]: [expose('relai_process', 'start', { capability: PROCESS, behavior: { taskScope: 'optional' } })],
   [OP.PROCESS_READ]: [expose('relai_process', 'read', { capability: READ })],

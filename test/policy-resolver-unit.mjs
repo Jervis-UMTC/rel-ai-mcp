@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { resolvePolicy, writeSessionPolicy, clearSessionPolicy, readSessionPolicy } from '../src/policyResolver.js';
-import { withStateDatabase } from '../src/stateDatabase.js';
+import { withStateDatabase } from '../src/stateDatabase.ts';
 
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-policy-'));
 const config = { stateDir };

@@ -36,9 +36,9 @@ const { readConfig } = await import('../src/config.js');
 const { flushLocalAnalytics } = await import('../src/localAnalytics.js');
 const { repositoryIntelligence } = await import('../src/repository/intelligence/service.js');
 const { describeTaskCodeWorkspace, readTaskCodeDiff } = await import('../src/taskCodeWorkspace.js');
-const { flushTaskHistoryPersistence } = await import('../src/taskHistoryStore.js');
-const { readTaskIntegrity } = await import('../src/taskIntegrity.js');
-const { resetTaskHistoryCaches } = await import('../src/taskHistoryStorage.js');
+const { flushTaskHistoryPersistence } = await import('../src/taskHistoryStore.ts');
+const { readTaskIntegrity } = await import('../src/taskIntegrity.ts');
+const { resetTaskHistoryCaches } = await import('../src/taskHistoryStorage.ts');
 const { callTool } = await import('../src/tools.js');
 const { resetToolActivity } = await import('../src/toolActivity.js');
 

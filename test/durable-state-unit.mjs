@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { DurableStateError, readJsonFile, readJsonFileAsync, writeJsonAtomic, writeJsonAtomicAsync } from '../src/durableState.js';
+import { DurableStateError, readJsonFile, readJsonFileAsync, writeJsonAtomic, writeJsonAtomicAsync } from '../src/durableState.ts';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-durable-state-'));
 const file = path.join(root, 'state.json');

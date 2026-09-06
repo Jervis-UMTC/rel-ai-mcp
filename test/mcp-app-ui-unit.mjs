@@ -24,7 +24,6 @@ const invocationLabels = new Map([
   ['relai_search', ['Searching repository…', 'Repository searched']],
   ['relai_inspect', ['Inspecting code…', 'Code inspected']],
   ['relai_edit', ['Applying changes…', 'Changes applied']],
-  ['relai_skill', ['Saving learned skill…', 'Learned skill saved']],
   ['relai_exec', ['Running command…', 'Command finished']],
   ['relai_process', ['Managing process…', 'Process updated']],
   ['relai_ui', ['Testing local UI…', 'Local UI tested']],

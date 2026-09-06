@@ -10,6 +10,7 @@ assert.equal(auditSource('test/example.mjs', "assert.match(filterCss, /min-heigh
 assert.equal(auditSource('test/example.mjs', "assert.equal(manifest.toolCount, TOOL_NAMES.length);").length, 0);
 
 const packageViolations = auditPackageJson({ scripts: {
+  check: 'node test/check-js.mjs',
   'test:all': 'node test/run-tests.mjs',
   'test:tool-budgets': 'node scripts/measure-tool-surface.mjs',
   'electron:size': 'node scripts/electron-package-size.mjs --strict'
@@ -21,7 +22,8 @@ assert.deepEqual(packageViolations.map(item => item.kind).sort(), [
 ]);
 
 assert.equal(auditPackageJson({ scripts: {
-  'test:all': 'npm run audit:test-rigidity && node test/run-tests.mjs',
+  check: 'npm run audit:test-rigidity',
+  'test:all': 'node test/run-tests.mjs',
   'measure:tool-surface': 'node scripts/measure-tool-surface.mjs',
   'electron:size': 'node scripts/electron-package-size.mjs',
   'benchmark:observability': 'node scripts/observability-benchmark.mjs',

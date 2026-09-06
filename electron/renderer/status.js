@@ -1,13 +1,4 @@
-let currentStatus = {
-  serverRunning: false,
-  tunnelStatus: 'stopped',
-  tunnelId: '',
-  localMcpUrl: '',
-  error: '',
-  localUrl: '',
-  version: '',
-  taskActivity: { state: 'idle', activeCalls: 0, activeTaskCount: 0, tasks: [], workspace: '', tool: '', operation: '', completionKnown: false, startedAt: null, lastTask: null }
-};
+let currentStatus = {};
 let previousAnnouncementKey = '';
 let actionError = '';
 let clockTimer = null;

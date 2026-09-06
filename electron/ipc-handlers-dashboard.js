@@ -1,10 +1,10 @@
-function registerAnalyticsIpc({ ipcMain, dashboardOnly, getLocalUsage }) {
-  ipcMain.handle('desktop:analytics:local', (event, month) => dashboardOnly(event, () => getLocalUsage(normalizeAnalyticsMonth(month))));
+function registerAnalyticsIpc({ ipc, channels, getLocalUsage }) {
+  ipc.handle(channels.DESKTOP_ANALYTICS_LOCAL, 'Local analytics', (_event, month) => getLocalUsage(normalizeAnalyticsMonth(month)));
 }
 
 function registerDesktopSettingsIpc({
-  ipcMain,
-  dashboardOnly,
+  ipc,
+  channels,
   getDesktopSettings,
   saveDesktopSettings,
   getLifecycleStatus,
@@ -16,34 +16,34 @@ function registerDesktopSettingsIpc({
   getNotificationPreferences,
   updateNotificationPreferences
 }) {
-  ipcMain.handle('desktop:settings:get', event => dashboardOnly(event, getDesktopSettings));
-  ipcMain.handle('desktop:settings:save', (event, settings) => dashboardOnly(event, () => saveDesktopSettings(settings)));
-  ipcMain.handle('desktop:lifecycle:get', event => dashboardOnly(event, getLifecycleStatus));
-  ipcMain.handle('desktop:startup:set', (event, enabled) => dashboardOnly(event, () => setLaunchAtLogin(enabled)));
-  ipcMain.handle('desktop:keep-awake:set', (event, enabled) => dashboardOnly(event, () => setKeepAwake(enabled)));
-  ipcMain.handle('desktop:app-preferences:set', (event, patch) => dashboardOnly(event, () => setAppPreferences(patch)));
-  ipcMain.handle('desktop:notifications:get', event => dashboardOnly(event, () => ({ ok: true, enabled: getNotificationsEnabled() })));
-  ipcMain.handle('desktop:notifications:set', (event, enabled) => dashboardOnly(event, () => ({ ok: true, enabled: setNotificationsEnabled(enabled) })));
-  ipcMain.handle('desktop:notification-preferences:get', event => dashboardOnly(event, () => ({ ok: true, preferences: getNotificationPreferences() })));
-  ipcMain.handle('desktop:notification-preferences:set', (event, patch) => dashboardOnly(event, () => updateNotificationPreferences(patch)));
+  ipc.handle(channels.DESKTOP_SETTINGS_GET, 'Desktop settings', () => getDesktopSettings());
+  ipc.handle(channels.DESKTOP_SETTINGS_SAVE, 'Desktop settings', (_event, settings) => saveDesktopSettings(settings));
+  ipc.handle(channels.DESKTOP_LIFECYCLE_GET, 'Desktop lifecycle', () => getLifecycleStatus());
+  ipc.handle(channels.DESKTOP_STARTUP_SET, 'Launch at login', (_event, enabled) => setLaunchAtLogin(enabled));
+  ipc.handle(channels.DESKTOP_KEEP_AWAKE_SET, 'Keep awake', (_event, enabled) => setKeepAwake(enabled));
+  ipc.handle(channels.DESKTOP_APP_PREFERENCES_SET, 'App preferences', (_event, patch) => setAppPreferences(patch));
+  ipc.handle(channels.DESKTOP_NOTIFICATIONS_GET, 'Desktop notifications', () => ({ ok: true, enabled: getNotificationsEnabled() }));
+  ipc.handle(channels.DESKTOP_NOTIFICATIONS_SET, 'Desktop notifications', (_event, enabled) => ({ ok: true, enabled: setNotificationsEnabled(enabled) }));
+  ipc.handle(channels.DESKTOP_NOTIFICATION_PREFERENCES_GET, 'Notification preferences', () => ({ ok: true, preferences: getNotificationPreferences() }));
+  ipc.handle(channels.DESKTOP_NOTIFICATION_PREFERENCES_SET, 'Notification preferences', (_event, patch) => updateNotificationPreferences(patch));
 }
 
-function registerUpdaterIpc({ ipcMain, dashboardOnly, getUpdateStatus, checkForUpdates, downloadUpdate, installUpdate }) {
-  ipcMain.handle('desktop:update:get', event => dashboardOnly(event, getUpdateStatus));
-  ipcMain.handle('desktop:update:check', event => dashboardOnly(event, checkForUpdates));
-  ipcMain.handle('desktop:update:download', event => dashboardOnly(event, downloadUpdate));
-  ipcMain.handle('desktop:update:install', event => dashboardOnly(event, installUpdate));
+function registerUpdaterIpc({ ipc, channels, getUpdateStatus, checkForUpdates, downloadUpdate, installUpdate }) {
+  ipc.handle(channels.DESKTOP_UPDATE_GET, 'Update status', () => getUpdateStatus());
+  ipc.handle(channels.DESKTOP_UPDATE_CHECK, 'Update check', () => checkForUpdates());
+  ipc.handle(channels.DESKTOP_UPDATE_DOWNLOAD, 'Update download', () => downloadUpdate());
+  ipc.handle(channels.DESKTOP_UPDATE_INSTALL, 'Update install', () => installUpdate());
 }
 
-function registerDiagnosticsIpc({ ipcMain, dashboardOnly, exportDiagnosticState, openDiagnosticsFolder }) {
-  ipcMain.handle('desktop:diagnostics:export', (event, report) => dashboardOnly(event, () => exportDiagnosticState(report)));
-  ipcMain.handle('desktop:diagnostics:open-folder', event => dashboardOnly(event, openDiagnosticsFolder));
+function registerDiagnosticsIpc({ ipc, channels, exportDiagnosticState, openDiagnosticsFolder }) {
+  ipc.handle(channels.DESKTOP_DIAGNOSTICS_EXPORT, 'Diagnostic export', (_event, report) => exportDiagnosticState(report));
+  ipc.handle(channels.DESKTOP_DIAGNOSTICS_OPEN_FOLDER, 'Diagnostics folder', () => openDiagnosticsFolder());
 }
 
-function registerLocalDataIpc({ ipcMain, dashboardOnly, getLocalDataUsage, clearTemporaryLocalData, openLocalDataFolder }) {
-  ipcMain.handle('desktop:local-data:get', event => dashboardOnly(event, getLocalDataUsage));
-  ipcMain.handle('desktop:local-data:clear-temporary', event => dashboardOnly(event, clearTemporaryLocalData));
-  ipcMain.handle('desktop:local-data:open-folder', event => dashboardOnly(event, openLocalDataFolder));
+function registerLocalDataIpc({ ipc, channels, getLocalDataUsage, clearTemporaryLocalData, openLocalDataFolder }) {
+  ipc.handle(channels.DESKTOP_LOCAL_DATA_GET, 'Local data', () => getLocalDataUsage());
+  ipc.handle(channels.DESKTOP_LOCAL_DATA_CLEAR_TEMPORARY, 'Local data cleanup', () => clearTemporaryLocalData());
+  ipc.handle(channels.DESKTOP_LOCAL_DATA_OPEN_FOLDER, 'Local data folder', () => openLocalDataFolder());
 }
 
 function normalizeAnalyticsMonth(month) {

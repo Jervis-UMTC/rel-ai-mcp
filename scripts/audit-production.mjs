@@ -14,7 +14,7 @@ function isTransientAuditFailure(result = {}) {
 }
 
 function runAudit(npmCli, prefix) {
-  const args = [npmCli, 'audit', '--omit=dev', '--audit-level=high', ...AUDIT_NETWORK_ARGS];
+  const args = [npmCli, 'audit', '--omit=dev', ...(prefix ? [] : ['--omit=peer']), '--audit-level=high', ...AUDIT_NETWORK_ARGS];
   if (prefix) args.push('--prefix', prefix);
   return spawnSync(process.execPath, args, {
     cwd: root,

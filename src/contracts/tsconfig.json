@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "../../node_modules/.cache/rel-ai-ts/contracts",
+    "tsBuildInfoFile": "../../node_modules/.cache/rel-ai-ts/contracts.tsbuildinfo"
+  },
+  "include": ["./*.ts"]
+}

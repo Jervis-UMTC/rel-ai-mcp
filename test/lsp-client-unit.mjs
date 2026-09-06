@@ -16,6 +16,13 @@ function dispatch(message) {
     send({ jsonrpc: '2.0', method: 'test/cancelled', params: { id: message.params?.id } });
     return;
   }
+  if (message?.method === 'test/ping' && Object.hasOwn(message, 'id')) {
+    send({ jsonrpc: '2.0', id: message.id, result: { ok: true } });
+    return;
+  }
+  if (message?.method === 'test/crash' && Object.hasOwn(message, 'id')) {
+    process.exit(7);
+  }
   if (message?.method === 'shutdown' && Object.hasOwn(message, 'id')) {
     send({ jsonrpc: '2.0', id: message.id, result: null });
     return;
@@ -53,36 +60,55 @@ const client = new LspClient({
 
 try {
   await client.start();
-  const cancelled = new Promise(resolve => {
-    const remove = client.onNotification('test/cancelled', params => {
-      remove();
-      resolve(params);
-    });
-  });
+  assert.equal(client.state, 'running');
 
+  const timedOutCancellation = nextCancellation(client);
   await assert.rejects(
     () => client.request('test/slow', {}, { timeoutMs: 100 }),
     /request timed out: test\/slow/
   );
-  assert.equal(client.pending.size, 0, 'timed-out LSP requests must be removed from the pending request map');
-  assert.deepEqual(await withTimeout(cancelled, 1_000), { id: 1 }, 'request timeout must notify the server with $/cancelRequest');
+  const timedOut = await withTimeout(timedOutCancellation, 1_000);
+  assert.ok(Number.isInteger(timedOut?.id), 'request timeout must notify the server with $/cancelRequest');
+  assert.deepEqual(await client.request('test/ping', {}), { ok: true }, 'a timed-out request must not poison later requests');
 
   const controller = new AbortController();
-  const aborted = new Promise(resolve => {
+  const abortedCancellation = nextCancellation(client);
+  const request = client.request('test/abort', {}, { signal: controller.signal, timeoutMs: 1_000 });
+  controller.abort();
+  await assert.rejects(request, error => error?.name === 'AbortError');
+  const aborted = await withTimeout(abortedCancellation, 1_000);
+  assert.ok(Number.isInteger(aborted?.id), 'explicit abort must notify the server with $/cancelRequest');
+  assert.notEqual(aborted.id, timedOut.id, 'distinct requests must retain distinct JSON-RPC cancellation identities');
+  assert.deepEqual(await client.request('test/ping', {}), { ok: true }, 'an aborted request must not poison later requests');
+
+  const interrupted = assert.rejects(
+    client.request('test/slow', {}, { timeoutMs: 5_000 }),
+    /stopped|closed|exited/i
+  );
+  await client.stop();
+  await interrupted;
+  assert.equal(client.state, 'stopped');
+
+  await client.start();
+  assert.equal(client.state, 'running');
+  assert.deepEqual(await client.request('test/ping', {}), { ok: true }, 'a stopped client must be restartable');
+
+  await assert.rejects(() => client.request('test/crash', {}, { timeoutMs: 1_000 }));
+  assert.equal(client.state, 'failed', 'an unexpected language-server exit must become an explicit failed state');
+  assert.ok(client.lastError, 'language-server failure state must retain a useful error');
+
+  console.log('LSP lifecycle, timeout, cancellation, restart, and failure-state behavior passed.');
+} finally {
+  await client.stop().catch(() => {});
+}
+
+function nextCancellation(client) {
+  return new Promise(resolve => {
     const remove = client.onNotification('test/cancelled', params => {
       remove();
       resolve(params);
     });
   });
-  const request = client.request('test/abort', {}, { signal: controller.signal, timeoutMs: 1_000 });
-  controller.abort();
-  await assert.rejects(request, error => error?.name === 'AbortError');
-  assert.equal(client.pending.size, 0, 'aborted LSP requests must be removed from the pending request map');
-  assert.deepEqual(await withTimeout(aborted, 1_000), { id: 2 }, 'explicit abort must retain LSP cancellation semantics');
-
-  console.log('LSP request timeout and abort cancellation cleanup passed.');
-} finally {
-  await client.stop().catch(() => {});
 }
 
 async function withTimeout(promise, timeoutMs) {

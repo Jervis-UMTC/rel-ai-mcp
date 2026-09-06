@@ -10,8 +10,8 @@ import { readValidationPlan } from '../src/bridge/validationPlan.js';
 import { flushAuditWrites } from '../src/audit.js';
 import { flushLocalAnalytics } from '../src/localAnalytics.js';
 import { repositoryIntelligence } from '../src/repository/intelligence/service.js';
-import { resetTaskHistoryCaches } from '../src/taskHistoryStorage.js';
-import { flushTaskHistoryPersistence } from '../src/taskHistoryStore.js';
+import { resetTaskHistoryCaches } from '../src/taskHistoryStorage.ts';
+import { flushTaskHistoryPersistence } from '../src/taskHistoryStore.ts';
 import { resetToolActivity } from '../src/toolActivity.js';
 
 const callTool = (name, args, context = {}) => rawCallTool(name, args, { principal: 'local:trusted', ...context });

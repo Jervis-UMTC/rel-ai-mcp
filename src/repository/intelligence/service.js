@@ -11,6 +11,15 @@ import {
   shutdownRepositoryIndexes
 } from './indexer.js';
 import { disposeRepositoryQueryWorker, runRepositoryQuery, shutdownRepositoryQueryWorkers } from './queryWorkerClient.js';
+import { repositoryIndexChanged } from './state.js';
+import {
+  disposeLspWorkspace,
+  noteLspMutation,
+  planSemanticRename,
+  providerStatuses,
+  shutdownLspSessions
+} from '../../codeIntelligence/lspManager.js';
+import { inspectRepositoryCode } from './inspection.js';
 import {
   parseWorkspaceSourcePath,
   qualifyWorkspaceSourcePath,
@@ -49,11 +58,7 @@ function createRepositoryIntelligenceService() {
       }
 
       const status = repositoryIndexStatus(workspace, config);
-      const currentGeneration = Number(status.metadata?.generation || 0);
-      const expectedGeneration = Number(index.generation || 0);
-      const changedDuringQuery = status.dirty === true
-        || (currentGeneration > 0 && expectedGeneration > 0 && currentGeneration !== expectedGeneration);
-      if (!changedDuringQuery) return result;
+      if (!repositoryIndexChanged(status, index.generation)) return result;
       if (attempt + 1 < MAX_INDEXED_QUERY_ATTEMPTS) continue;
 
       const error = new Error('Repository changed while Repository Intelligence was answering the query. Retry against the refreshed index.');
@@ -73,21 +78,32 @@ function createRepositoryIntelligenceService() {
     return singleIndexedQuery(kind, workspace, config, args, options);
   };
 
+  const nativeCodeInspect = (workspace, config = {}, args = {}, options = {}) =>
+    indexedQuery('codeInspect', workspace, config, args, options);
+
   return Object.freeze({
     ensure: (workspace, config = {}, options = {}) => ensureRepositoryIndex(workspace, config, options),
-    codeInspect: (workspace, config = {}, args = {}, options = {}) => indexedQuery('codeInspect', workspace, config, args, options),
-    architecture: (workspace, config = {}, args = {}, options = {}) => indexedQuery('codeInspect', workspace, config, { ...args, action: 'architecture' }, options),
+    codeInspect: (workspace, config = {}, args = {}, options = {}) =>
+      inspectRepositoryCode(nativeCodeInspect, workspace, config, args, options),
+    architecture: (workspace, config = {}, args = {}, options = {}) =>
+      nativeCodeInspect(workspace, config, { ...args, action: 'architecture' }, options),
     cachedContext: (workspace, config = {}, options = {}) => runRepositoryQuery('cachedContext', workspace, config, {}, options),
     cachedSummary: (workspace, config = {}, options = {}) => runRepositoryQuery('cachedSummary', workspace, config, {}, options),
     searchGraphContext: (workspace, config = {}, matches = [], options = {}) => runRepositoryQuery('searchGraphContext', workspace, config, { matches }, options),
     semanticSearch: (workspace, config = {}, args = {}, options = {}) => indexedQuery('semanticSearch', workspace, config, args, options),
-    noteMutation: (workspace, config = {}, paths = []) => noteRepositoryMutation(workspace, config, paths),
+    semanticRename: (workspace, semantic, options = {}) => planSemanticRename(workspace, semantic, options),
+    noteMutation: (workspace, config = {}, paths = []) => {
+      noteRepositoryMutation(workspace, config, paths);
+      noteLspMutation(workspace, paths);
+    },
     status: (workspace, config = {}) => repositoryIndexStatus(workspace, config),
+    languageServers: workspace => providerStatuses(workspace),
     rebuild: (workspace, config = {}, options = {}) => rebuildRepositoryIndex(workspace, config, options),
     recover: (workspace, config = {}, options = {}) => recoverRepositoryIndex(workspace, config, options),
     cancel: (workspace, config = {}, reason) => cancelRepositoryIndex(workspace, config, reason),
     dispose: (workspace, config = {}, options = {}) => disposeWorkspaceIntelligence(workspace, config, options),
     shutdown: () => Promise.all([
+      shutdownLspSessions(),
       shutdownRepositoryQueryWorkers(),
       shutdownRepositoryIndexes()
     ])
@@ -95,6 +111,7 @@ function createRepositoryIntelligenceService() {
 }
 
 async function disposeWorkspaceIntelligence(workspace, config = {}, options = {}) {
+  await disposeLspWorkspace(workspace);
   const results = [];
   for (const source of workspaceSourceEntries(workspace)) {
     const scopedWorkspace = sourceWorkspace(workspace, source);

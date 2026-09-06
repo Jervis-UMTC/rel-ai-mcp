@@ -85,7 +85,6 @@
 .diagnostic-log-row.warning { box-shadow: inset 2px 0 var(--ui-status-warning-foreground); }
 .diagnostic-log-row.error { box-shadow: inset 2px 0 var(--ui-status-danger-foreground); }
 .diagnostic-log-row.debug { opacity: .82; }
-.diagnostic-maintenance-row { @apply flex flex-wrap items-center justify-between gap-3 border-t py-3; border-color: var(--ui-border-subtle); }
 
 .connection-controls-section { @apply mt-2 grid gap-3 border-t pt-4; border-color: var(--ui-border-default); }
 .copy-box { @apply min-h-24 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 text-[11px] leading-5; background: var(--ui-canvas); border: 1px solid var(--ui-border-default); color: var(--ui-text-primary); }
@@ -116,7 +115,7 @@
 .diagnostic-context-row { @apply grid items-center gap-3 border-b px-3 py-2 last:border-b-0; grid-template-columns: auto auto minmax(0,1fr); border-color: var(--ui-border-subtle); }
 .diagnostic-context-row code, .diagnostic-context-row span, .diagnostic-context-row small { @apply text-[11px]; }
 .diagnostic-context-row small { @apply truncate; color: var(--ui-text-secondary); }
-.diagnostic-log-card .card-head p, .diagnostic-maintenance .card-head p { @apply mt-1 text-[11px] leading-5; color: var(--ui-text-secondary); }
+.diagnostic-log-card .card-head p { @apply mt-1 text-[11px] leading-5; color: var(--ui-text-secondary); }
 .diagnostic-log-list { @apply flex max-h-[520px] flex-col gap-2 overflow-auto; }
 .diagnostic-log-row > summary::-webkit-details-marker { display: none; }
 .diagnostic-log-summary { @apply grid min-h-11 cursor-pointer items-center gap-2 px-3 py-2; grid-template-columns: auto auto minmax(90px,auto) minmax(0,1fr) auto; }
@@ -135,14 +134,6 @@
 .diagnostic-clear { @apply flex flex-col gap-1 rounded-xl p-4; background: var(--ui-status-success-background); border: 1px solid color-mix(in srgb, var(--ui-status-success-foreground) 28%, transparent); }
 .diagnostic-clear span { @apply text-[11px]; color: var(--ui-text-secondary); }
 .diagnostic-unavailable { background: var(--ui-status-warning-background); border-color: color-mix(in srgb, var(--ui-status-warning-foreground) 28%, transparent); }
-.diagnostic-maintenance-list { @apply p-0; }
-.diagnostic-maintenance-row { @apply px-4 py-3; }
-.diagnostic-maintenance-row > div { @apply min-w-0; }
-.diagnostic-maintenance-row strong { @apply block text-[12px]; }
-.diagnostic-maintenance-row span { @apply mt-1 block text-[11px] leading-5; color: var(--ui-text-secondary); }
-.diagnostic-reset-form { @apply flex flex-col gap-4; }
-.diagnostic-reset-warning { @apply flex flex-col gap-2 rounded-xl p-4; background: var(--ui-status-danger-background); border: 1px solid color-mix(in srgb, var(--ui-status-danger-foreground) 32%, transparent); }
-.diagnostic-reset-warning span { @apply text-[11px] leading-5; color: var(--ui-text-secondary); }
 }
 
 @media (max-width: 980px) {

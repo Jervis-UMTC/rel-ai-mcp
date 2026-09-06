@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import * as taskIntegrity from '../src/taskIntegrity.js';
+import * as taskIntegrity from '../src/taskIntegrity.ts';
+import { openStateDatabase } from '../src/stateDatabase.ts';
 const { readTaskIntegrity, readWorkspaceIntegrity, recordTaskIntegrityEvent } = taskIntegrity;
 
-const taskIntegritySource = fs.readFileSync(new URL('../src/taskIntegrity.js', import.meta.url), 'utf8');
+const taskIntegritySource = fs.readFileSync(new URL('../src/taskIntegrity.ts', import.meta.url), 'utf8');
 assert.doesNotMatch(taskIntegritySource, /execFileSync/, 'task-integrity Git probes must never block the MCP event loop');
 assert.match(taskIntegritySource, /await runProcess\('git'/, 'task-integrity Git probes must use the asynchronous process runner');
 
@@ -49,16 +50,18 @@ const event = (taskId, tool, extra = {}) => ({
 });
 
 try {
-  const integrityLockDir = path.join(stateDir, 'task-integrity');
-  const integrityLock = path.join(integrityLockDir, '.lock');
-  fs.mkdirSync(integrityLockDir, { recursive: true });
-  fs.writeFileSync(integrityLock, 'other-runtime\n', 'utf8');
+  readWorkspaceIntegrity(config, 'app');
+  const lockHolder = openStateDatabase(config);
+  lockHolder.exec('BEGIN IMMEDIATE');
+  const contentionStartedAt = Date.now();
   await assert.rejects(
     () => recordTaskIntegrityEvent(config, event('lock-contention-task', 'work.begin')),
     error => error?.code === 'TASK_INTEGRITY_PERSISTENCE_FAILED',
-    'fresh task-integrity lock contention must fail fast rather than block the MCP event loop'
+    'fresh SQLite task-integrity contention must fail rather than block the MCP event loop'
   );
-  fs.rmSync(integrityLock, { force: true });
+  assert.ok(Date.now() - contentionStartedAt < 1000, 'SQLite task-integrity contention must fail fast');
+  lockHolder.exec('ROLLBACK');
+  lockHolder.close();
 
   await recordTaskIntegrityEvent(config, event(taskOne, 'work.begin'));
   const initial = readTaskIntegrity(config, taskOne, 'app');

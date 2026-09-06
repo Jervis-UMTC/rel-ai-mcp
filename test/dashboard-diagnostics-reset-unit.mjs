@@ -1,4 +1,4 @@
-import { startHttpServer } from "../src/httpServer.js";
+import { startHttpServer } from "../src/httpServer.ts";
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';

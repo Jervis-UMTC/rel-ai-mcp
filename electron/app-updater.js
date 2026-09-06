@@ -1,6 +1,7 @@
 
 
-import { AUTO_CHECK_INTERVAL_MS, AUTO_CHECK_DELAY_MS, cleanText, createLogger, createUpdateStateStore, detectUpdateSupport, isoNow, normalizeStatus, progressPayload } from "./app-updater-state.js";
+import { AUTO_CHECK_INTERVAL_MS, AUTO_CHECK_DELAY_MS, createLogger, createUpdateStateStore, detectUpdateSupport } from './app-updater-state.js';
+import { cleanText, isoNow, normalizeStatus, progressPayload } from './app-updater-status.js';
 import { importResourceModule } from './resource-path.js';
 
 const { runtimeMetadata } = await importResourceModule('src/runtimeCompatibility.js');

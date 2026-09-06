@@ -1,28 +1,18 @@
-// Hash-based section router with persistent workspace scope.
+// Hash-based dashboard navigation with persistent workspace scope.
 import { clearUnsavedChanges, hasUnsavedChanges, initInteractionSafety } from './interaction-safety.js';
 import { confirmAction } from './components/confirm-dialog.js';
 import { normalizeRouteKey } from './route-policy.js';
-import { desktopNavigationOwner, routeMetadata } from './navigation-catalog.js';
 
-let _sections = {};
 let _currentRouteKey = null;
-let _container = null;
 let _bound = false;
-let _mountGeneration = 0;
 
-export function initRouter(container, sections) {
+export function initRouter() {
   initInteractionSafety();
-  _container = container;
-  _sections = sections || {};
   if (!_bound) {
     window.addEventListener('hashchange', _route);
     _bound = true;
   }
-  _route();
-}
-
-export function currentSection() {
-  return routeParts().path.split('/')[0] || 'home';
+  void _route();
 }
 
 export function currentRoutePath() {
@@ -71,10 +61,6 @@ export function navigate(sectionId, params = {}) {
   location.hash = routeHref(sectionId, params);
 }
 
-export function rerender(options = {}) {
-  return _mount(currentSection(), { preserveView: options.preserveView !== false });
-}
-
 function querySuffix(params) {
   const value = params.toString();
   return value ? `?${value}` : '';
@@ -106,6 +92,7 @@ async function _route() {
   const routeKey = normalizeRouteKey(rawKey);
   if (routeKey !== rawKey) replaceRouteState(routeKey);
   if (routeKey === _currentRouteKey) return;
+
   if (_currentRouteKey && hasUnsavedChanges()) {
     const previousRouteKey = _currentRouteKey;
     replaceRouteState(previousRouteKey);
@@ -121,144 +108,11 @@ async function _route() {
     replaceRouteState(routeKey);
     return _route();
   }
+
   const id = routeKey.split(/[/?]/)[0] || 'home';
-  const shouldFocusHeading = _currentRouteKey !== null;
   _currentRouteKey = routeKey;
   try { localStorage.setItem('relai_dashboard_route', routeKey); } catch {}
-  _mount(id, { focusHeading: shouldFocusHeading });
-  window.dispatchEvent(new CustomEvent('relai:route-change', { detail: { section: id, params: getRouteParams() } }));
-}
-
-function _updateNavActive(id) {
-  const owner = desktopNavigationOwner(id);
-  const path = currentRoutePath();
-  document.querySelectorAll('.nav a, .mobile-nav a, .secondary-nav a, .sidebar-subnav a').forEach(anchor => {
-    const href = anchor.getAttribute('href') || '';
-    const targetPath = normalizeRouteKey(href.replace(/^#/, '').split('?')[0]);
-    const target = anchor.dataset.navId || targetPath.split('/')[0];
-    const active = anchor.closest('.sidebar-subnav') ? targetPath === path : target === owner;
-    anchor.classList.toggle('active', active);
-    if (active) anchor.setAttribute('aria-current', 'page');
-    else anchor.removeAttribute('aria-current');
-  });
-  document.querySelectorAll('[data-nav-accordion]').forEach(details => {
-    const active = details.dataset.navAccordion === owner;
-    details.querySelector(':scope > summary')?.classList.toggle('active', active);
-    if (active) details.open = true;
-  });
-  const mobileMore = document.querySelector('.mobile-nav-more');
-  if (mobileMore) {
-    const active = Boolean(mobileMore.querySelector('a.active'));
-    mobileMore.classList.toggle('active', active);
-    mobileMore.querySelector(':scope > summary')?.classList.toggle('active', active);
-    mobileMore.open = false;
-  }
-}
-
-function _updatePageIdentity(id) {
-  const title = pageTitleFor(id);
-  const heading = document.getElementById('pageTitle');
-  if (heading) {
-    heading.textContent = title;
-    heading.tabIndex = -1;
-  }
-  const subtitle = document.getElementById('subtitle');
-  if (subtitle) subtitle.textContent = pageDescriptionFor(id);
-  const windowContext = document.getElementById('windowContext');
-  if (windowContext) windowContext.textContent = title;
-  const announcer = document.getElementById('routeAnnouncer');
-  if (announcer) announcer.textContent = `${title} page loaded.`;
-  document.title = `${title} · Rel.AI MCP`;
-}
-
-function pageTitleFor() {
-  const path = currentRoutePath();
-  const metadata = routeMetadata(path);
-  return path.startsWith('settings/') || path === 'settings'
-    ? `Settings · ${metadata.label}`
-    : metadata.label;
-}
-
-function pageDescriptionFor() {
-  return routeMetadata(currentRoutePath()).description;
-}
-
-function _mount(id, options = {}) {
-  if (!_container) return;
-  const generation = ++_mountGeneration;
-  const view = options.preserveView ? captureViewState() : null;
-  if (view) _container.style.minHeight = `${Math.ceil(_container.getBoundingClientRect().height)}px`;
-  _container.setAttribute('aria-busy', 'true');
-  const mount = _sections[id] || _sections.home;
-  const context = {
-    generation,
-    isCurrent: () => generation === _mountGeneration && currentSection() === id
-  };
-  let result;
-  try {
-    result = mount ? mount(_container, context) : null;
-  } catch (error) {
-    finishMount(generation, id, view, options.focusHeading === true);
-    throw error;
-  }
-  return Promise.resolve(result).finally(() => finishMount(generation, id, view, options.focusHeading === true));
-}
-
-function captureViewState() {
-  const active = document.activeElement;
-  const scroller = pageScroller();
-  return {
-    routeKey: currentRouteKey(),
-    scrollX: scroller === window ? window.scrollX : scroller.scrollLeft,
-    scrollY: scroller === window ? window.scrollY : scroller.scrollTop,
-    activeId: active instanceof HTMLElement ? active.id : '',
-    activeFocusKey: active instanceof HTMLElement ? String(active.dataset.focusKey || '') : ''
-  };
-}
-
-function pageScroller() {
-  const main = document.getElementById('main');
-  return document.documentElement.dataset.windowChrome === 'custom' && main ? main : window;
-}
-
-function finishMount(generation, id, view, focusHeading = false) {
-  if (generation !== _mountGeneration || !_container || currentSection() !== id) return;
-  _updatePageIdentity(id);
-  _updateNavActive(id);
-  if (!view) {
-    _container.style.minHeight = '';
-    _container.removeAttribute('aria-busy');
-    if (focusHeading) document.getElementById('pageTitle')?.focus({ preventScroll: true });
-    announceRouteMounted();
-    return;
-  }
-  requestAnimationFrame(() => {
-    if (generation !== _mountGeneration || currentRouteKey() !== view.routeKey) return;
-    pageScroller().scrollTo(view.scrollX, view.scrollY);
-    restoreFocus(view);
-    _container.style.minHeight = '';
-    _container.removeAttribute('aria-busy');
-    announceRouteMounted();
-  });
-}
-
-function restoreFocus(view) {
-  const byId = view.activeId ? document.getElementById(view.activeId) : null;
-  if (byId) {
-    byId.focus({ preventScroll: true });
-    return;
-  }
-  if (!view.activeFocusKey) return;
-  for (const element of document.querySelectorAll('[data-focus-key]')) {
-    if (element instanceof HTMLElement && element.dataset.focusKey === view.activeFocusKey) {
-      element.focus({ preventScroll: true });
-      return;
-    }
-  }
-}
-
-function announceRouteMounted() {
-  window.dispatchEvent(new CustomEvent('relai:route-mounted', {
-    detail: { section: currentSection(), path: currentRoutePath(), params: getRouteParams() }
+  window.dispatchEvent(new CustomEvent('relai:route-change', {
+    detail: { section: id, path: currentRoutePath(), params: getRouteParams() }
   }));
 }

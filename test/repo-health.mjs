@@ -62,7 +62,7 @@ for (const file of walk(ciDir)) {
 }
 
 const allowedSynchronousProcessDiscovery = new Set([
-  'src/bridge/exec.js',
+  'src/executionInvocation.js',
   'src/release.js',
   'src/webAutomationManager.js'
 ]);

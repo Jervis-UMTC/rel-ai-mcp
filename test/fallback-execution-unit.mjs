@@ -21,7 +21,7 @@ import {
   readTaskHistorySessionRecord,
   recordTaskBackgroundOperation,
   recordTaskHistoryEvent
-} from '../src/taskHistoryStore.js';
+} from '../src/taskHistoryStore.ts';
 
 function message(id, workId, command = 'node test.js') {
   return {

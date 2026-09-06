@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import {
   parseAssetList,
   parseChecksumManifest,
-  parseLatestMetadata
+  parseLatestMetadata,
+  releaseArtifactNames
 } from './release-artifacts.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,8 +24,35 @@ function parseArguments(argv) {
     assetList: path.resolve(root, valueAfter('--asset-list', 'dist/release-assets.txt')),
     metadata: valueAfter('--metadata', 'latest.yml'),
     checksums: valueAfter('--checksums', 'SHA256SUMS.txt'),
-    requireBlockmaps: !argv.includes('--no-blockmaps')
+    requireBlockmaps: !argv.includes('--no-blockmaps'),
+    platform: valueAfter('--platform', '')
   };
+}
+
+function verifyPlatformUpdaterArtifacts(options) {
+  const platform = String(options.platform || '').trim().toLowerCase();
+  if (!['win32', 'linux'].includes(platform)) {
+    throw new Error('--platform must be win32 or linux.');
+  }
+  const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  const names = releaseArtifactNames(version);
+  const expectedArtifact = platform === 'win32' ? names.installer : names.linuxAppImage;
+  const metadata = platform === 'win32' ? names.metadata : names.linuxMetadata;
+  const metadataPath = path.join(options.directory, metadata);
+  requireFile(metadataPath, 'Updater metadata');
+  const references = parseLatestMetadata(fs.readFileSync(metadataPath, 'utf8'));
+  if (references.length !== 1 || references[0].basename !== expectedArtifact) {
+    throw new Error(`Updater metadata must reference only the canonical ${platform} artifact: ${expectedArtifact}.`);
+  }
+  const reference = references[0];
+  const artifactPath = path.join(options.directory, reference.basename);
+  requireFile(artifactPath, 'Updater artifact');
+  const actualSha512 = hashFile(artifactPath, 'sha512', 'base64');
+  if (!constantTimeEqual(actualSha512, reference.sha512)) {
+    throw new Error(`SHA-512 mismatch for ${reference.basename}.`);
+  }
+  if (platform === 'win32') requireFile(path.join(options.directory, names.blockmap), 'Updater blockmap');
+  return { platform, referencedArtifacts: [reference.basename] };
 }
 
 function verifyUpdaterArtifacts(options) {
@@ -85,7 +113,8 @@ function constantTimeEqual(left, right) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const report = verifyUpdaterArtifacts(parseArguments(process.argv.slice(2)));
+    const options = parseArguments(process.argv.slice(2));
+    const report = options.platform ? verifyPlatformUpdaterArtifacts(options) : verifyUpdaterArtifacts(options);
     console.log(`Updater artifact contract verified for ${report.referencedArtifacts.join(', ')}.`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
@@ -93,4 +122,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
 }
 
-export { parseArguments, verifyUpdaterArtifacts };
+export { parseArguments, verifyPlatformUpdaterArtifacts, verifyUpdaterArtifacts };

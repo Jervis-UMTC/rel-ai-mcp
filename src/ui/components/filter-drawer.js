@@ -1,4 +1,7 @@
-import { openDrawer, closeDrawer } from './drawer.js';
+import React, { useMemo, useState } from 'react';
+import { closeDrawer, openDrawer } from './drawer.js';
+
+const h = React.createElement;
 
 function clone(value) {
   return typeof structuredClone === 'function'
@@ -13,111 +16,92 @@ export function openFilterDrawer({
   renderFields,
   onApply
 } = {}) {
-  let draft = clone(value);
-  const content = document.createElement('form');
-  content.className = 'filter-drawer-form';
-  const fields = document.createElement('div');
-  fields.className = 'filter-drawer-fields';
-  const footer = document.createElement('div');
-  footer.className = 'filter-drawer-footer';
-
-  const render = () => {
-    fields.replaceChildren();
-    renderFields?.(fields, draft);
-  };
-
-  const reset = document.createElement('button');
-  reset.type = 'button';
-  reset.className = 'secondary';
-  reset.textContent = 'Reset';
-  reset.addEventListener('click', () => {
-    draft = clone(resetValue);
-    render();
+  return openDrawer({
+    title,
+    panelClass: 'filter-drawer',
+    content: h(FilterDrawerContent, { value, resetValue, renderFields, onApply })
   });
+}
 
-  const cancel = document.createElement('button');
-  cancel.type = 'button';
-  cancel.className = 'secondary';
-  cancel.textContent = 'Cancel';
-  cancel.addEventListener('click', closeDrawer);
+function FilterDrawerContent({ value, resetValue, renderFields, onApply }) {
+  const [draft, setDraft] = useState(() => clone(value));
+  const [busy, setBusy] = useState(false);
+  const fields = useMemo(() => {
+    const collected = [];
+    const collector = {
+      append: (...items) => collected.push(...items.filter(Boolean)),
+      appendChild: item => { if (item) collected.push(item); }
+    };
+    renderFields?.(collector, draft);
+    return collected;
+  }, [draft, renderFields]);
 
-  const apply = document.createElement('button');
-  apply.type = 'submit';
-  apply.className = 'primary';
-  apply.textContent = 'Apply filters';
-
-  const secondary = document.createElement('div');
-  secondary.className = 'filter-drawer-secondary-actions';
-  secondary.append(reset, cancel);
-  footer.append(secondary, apply);
-  content.append(fields, footer);
-  content.addEventListener('submit', async event => {
+  const changeField = (field, nextValue) => {
+    field.onChange?.(nextValue);
+    setDraft(clone(draft));
+  };
+  const submit = async event => {
     event.preventDefault();
-    apply.disabled = true;
-    apply.textContent = 'Applying…';
+    if (busy) return;
+    setBusy(true);
     try {
       await onApply?.(clone(draft));
       closeDrawer();
     } catch (error) {
-      apply.disabled = false;
-      apply.textContent = 'Apply filters';
+      setBusy(false);
       throw error;
     }
-  });
+  };
 
-  render();
-  const drawer = openDrawer({ title, content, panelClass: 'filter-drawer' });
-  queueMicrotask(() => fields.querySelector('input, select, button')?.focus());
-  return drawer;
+  return h('form', { className: 'filter-drawer-form', onSubmit: submit },
+    h('div', { className: 'filter-drawer-fields' }, fields.map((field, index) => h(FilterField, {
+      field,
+      key: field.key || `${field.type}-${field.label}-${index}`,
+      onChange: value => changeField(field, value)
+    }))),
+    h('div', { className: 'filter-drawer-footer' },
+      h('div', { className: 'filter-drawer-secondary-actions' },
+        h('button', { type: 'button', className: 'secondary', disabled: busy, onClick: () => setDraft(clone(resetValue)) }, 'Reset'),
+        h('button', { type: 'button', className: 'secondary', disabled: busy, onClick: closeDrawer }, 'Cancel')
+      ),
+      h('button', { type: 'submit', className: 'primary', disabled: busy }, busy ? 'Applying…' : 'Apply filters')
+    )
+  );
 }
 
-export function filterSelectField({ label, value, options, onChange, disabled = false, help = '' }) {
-  const field = document.createElement('label');
-  field.className = 'filter-field';
-  const title = document.createElement('span');
-  title.textContent = label;
-  const select = document.createElement('select');
-  select.disabled = disabled;
-  for (const option of options || []) {
-    const element = document.createElement('option');
-    element.value = option.value;
-    element.textContent = option.label;
-    select.appendChild(element);
+function FilterField({ field, onChange }) {
+  if (field.type === 'radio') {
+    const name = `filter-${String(field.label || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    return h('fieldset', { className: 'filter-field filter-radio-field' },
+      h('legend', null, field.label),
+      h('div', { className: 'filter-radio-options' }, (field.options || []).map(option => h('label', { key: option.value },
+        h('input', {
+          type: 'radio',
+          name,
+          value: option.value,
+          checked: option.value === field.value,
+          onChange: event => { if (event.currentTarget.checked) onChange(event.currentTarget.value); }
+        }),
+        h('span', null, option.label)
+      )))
+    );
   }
-  select.value = value;
-  select.addEventListener('change', () => onChange?.(select.value));
-  field.append(title, select);
-  if (help) {
-    const hint = document.createElement('small');
-    hint.textContent = help;
-    field.appendChild(hint);
-  }
-  return field;
+  return h('label', { className: 'filter-field' },
+    h('span', null, field.label),
+    h('select', {
+      disabled: field.disabled === true,
+      value: field.value,
+      autoFocus: field.autoFocus === true,
+      onChange: event => onChange(event.currentTarget.value)
+    }, (field.options || []).map(option => h('option', { key: option.value, value: option.value }, option.label))),
+    field.help ? h('small', null, field.help) : null
+  );
 }
 
-export function filterRadioField({ label, value, options, onChange }) {
-  const group = document.createElement('fieldset');
-  group.className = 'filter-field filter-radio-field';
-  const legend = document.createElement('legend');
-  legend.textContent = label;
-  group.appendChild(legend);
-  const choices = document.createElement('div');
-  choices.className = 'filter-radio-options';
-  for (const option of options || []) {
-    const choice = document.createElement('label');
-    const input = document.createElement('input');
-    input.type = 'radio';
-    input.name = `filter-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-    input.value = option.value;
-    input.checked = option.value === value;
-    input.addEventListener('change', () => {
-      if (input.checked) onChange?.(input.value);
-    });
-    const text = document.createElement('span');
-    text.textContent = option.label;
-    choice.append(input, text);
-    choices.appendChild(choice);
-  }
-  group.appendChild(choices);
-  return group;
+export function filterSelectField({ label, value, options, onChange, disabled = false, help = '', key = '' }) {
+  return { type: 'select', key, label, value, options: options || [], onChange, disabled, help };
+}
+
+export function filterRadioField({ label, value, options, onChange, key = '' }) {
+  return { type: 'radio', key, label, value, options: options || [], onChange };
 }

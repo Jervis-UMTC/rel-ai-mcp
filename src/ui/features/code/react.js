@@ -1,0 +1,596 @@
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from '../../components/toast.js';
+import { Icon } from '../../components/icons.js';
+import { getRouteParams, replaceRouteParams, routeHref } from '../../router.js';
+import { classifyTaskChangedFiles } from '../../../taskSemanticProgress.js';
+
+const h = React.createElement;
+const CODE_STORE_KEYS = Object.freeze(['tasks', 'live']);
+let monacoPromise = null;
+
+export function createCodeRoute(useDashboardSlices) {
+  return function CodeRoute() {
+    const data = useDashboardSlices(CODE_STORE_KEYS);
+    return h(ChangesRoute, { data });
+  };
+}
+
+function ChangesRoute({ data = {} }) {
+  const bridge = window.relaiDesktop?.codeWorkspace;
+  const tasks = useMemo(() => codeTasks(data), [data.tasks]);
+
+  if (!bridge) return h(DesktopOnlyState);
+  if (!tasks.length) return h(EmptyChangesState);
+  return h(ChangesDesktop, {
+    bridge,
+    taskRevision: Number(data.live?.revisions?.task || 0),
+    taskSource: data.tasks,
+    tasks
+  });
+}
+
+function ChangesDesktop({ bridge, taskRevision, taskSource, tasks }) {
+  const { selectedTaskId, selectTask } = useRouteTaskId(tasks);
+  const selectedTask = tasks.find(task => task.id === selectedTaskId) || null;
+  const [workspace, setWorkspace] = useState(null);
+  const [workspaceError, setWorkspaceError] = useState('');
+  const [filePath, setFilePath] = useState('');
+  const [diffFile, setDiffFile] = useState(null);
+  const [viewerMessage, setViewerMessage] = useState('Loading task changes…');
+  const [viewerTone, setViewerTone] = useState('');
+  const [query, setQuery] = useState('');
+  const [editors, setEditors] = useState(null);
+  const [editorLoadFailed, setEditorLoadFailed] = useState(false);
+  const [editorId, setEditorId] = useState('');
+  const [openingIde, setOpeningIde] = useState(false);
+  const workspaceRequestRef = useRef(0);
+  const diffRequestRef = useRef(0);
+  const taskIdRef = useRef(selectedTaskId);
+  const filePathRef = useRef(filePath);
+
+  taskIdRef.current = selectedTaskId;
+  filePathRef.current = filePath;
+
+  const loadDiff = useCallback(async (taskId, path) => {
+    const normalizedTaskId = String(taskId || '').trim();
+    const normalizedPath = String(path || '').trim();
+    if (!normalizedTaskId || !normalizedPath) return false;
+    const request = ++diffRequestRef.current;
+    try {
+      const file = await bridge.diff(normalizedTaskId, normalizedPath);
+      if (request !== diffRequestRef.current || taskIdRef.current !== normalizedTaskId) return false;
+      filePathRef.current = normalizedPath;
+      setFilePath(normalizedPath);
+      setDiffFile(file);
+      setViewerMessage('');
+      setViewerTone('');
+      return true;
+    } catch (error) {
+      if (request !== diffRequestRef.current || taskIdRef.current !== normalizedTaskId) return false;
+      setDiffFile(null);
+      setViewerMessage(messageFor(error));
+      setViewerTone('error');
+      return false;
+    }
+  }, [bridge]);
+
+  const refreshWorkspace = useCallback(async (taskId, { refreshCurrent = false } = {}) => {
+    const normalizedTaskId = String(taskId || '').trim();
+    if (!normalizedTaskId) return;
+    const request = ++workspaceRequestRef.current;
+    try {
+      const nextWorkspace = await bridge.get(normalizedTaskId);
+      if (request !== workspaceRequestRef.current || taskIdRef.current !== normalizedTaskId) return;
+      setWorkspace(nextWorkspace);
+      setWorkspaceError('');
+
+      const changedFiles = changedTextFiles(nextWorkspace);
+      const currentPath = filePathRef.current;
+      const requestedPath = readRequestedFilePath();
+      const currentStillExists = Boolean(currentPath && changedFiles.includes(currentPath));
+      if (currentPath && !currentStillExists) {
+        diffRequestRef.current += 1;
+        filePathRef.current = '';
+        setFilePath('');
+        setDiffFile(null);
+        setViewerMessage(emptyViewerMessage(nextWorkspace));
+        setViewerTone('');
+      }
+
+      const nextPath = currentStillExists
+        ? currentPath
+        : (changedFiles.includes(requestedPath) ? requestedPath : (changedFiles[0] || ''));
+      if (!nextPath) {
+        diffRequestRef.current += 1;
+        filePathRef.current = '';
+        setFilePath('');
+        setDiffFile(null);
+        setViewerMessage(emptyViewerMessage(nextWorkspace));
+        setViewerTone('');
+        return;
+      }
+      if (!currentStillExists || refreshCurrent) await loadDiff(normalizedTaskId, nextPath);
+    } catch (error) {
+      if (request !== workspaceRequestRef.current || taskIdRef.current !== normalizedTaskId) return;
+      diffRequestRef.current += 1;
+      setWorkspace(null);
+      setWorkspaceError(messageFor(error));
+      setDiffFile(null);
+      setViewerMessage(messageFor(error));
+      setViewerTone('error');
+    }
+  }, [bridge, loadDiff]);
+
+  useEffect(() => {
+    workspaceRequestRef.current += 1;
+    diffRequestRef.current += 1;
+    filePathRef.current = '';
+    setWorkspace(null);
+    setWorkspaceError('');
+    setFilePath('');
+    setDiffFile(null);
+    setViewerMessage('Loading task changes…');
+    setViewerTone('');
+  }, [selectedTaskId]);
+
+  useEffect(() => {
+    void refreshWorkspace(selectedTaskId);
+  }, [refreshWorkspace, selectedTaskId, taskRevision, taskSource]);
+
+  useEffect(() => {
+    let active = true;
+    setEditors(null);
+    setEditorLoadFailed(false);
+    setEditorId('');
+    Promise.resolve(bridge.editors()).then(result => {
+      if (!active) return;
+      const available = Array.isArray(result?.editors) ? result.editors : [];
+      setEditors(available);
+      setEditorId(String(available[0]?.id || ''));
+    }).catch(() => {
+      if (!active) return;
+      setEditors([]);
+      setEditorLoadFailed(true);
+    });
+    return () => { active = false; };
+  }, [bridge]);
+
+  const changedFiles = useMemo(() => changedTextFiles(workspace), [workspace]);
+  const visibleFiles = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return changedFiles.filter(file => !normalized || file.toLowerCase().includes(normalized));
+  }, [changedFiles, query]);
+  const meta = workspaceMeta(workspace, workspaceError);
+  const viewState = workspace?.historyMode === 'unavailable' ? 'Recorded files only' : 'Read-only diff';
+  const ideDisabled = openingIde || !editorId || !editors?.length;
+
+  const openIde = async () => {
+    if (ideDisabled || !selectedTaskId) return;
+    setOpeningIde(true);
+    try {
+      const result = await bridge.openIde(selectedTaskId, editorId);
+      toast(`Opened this project in ${result?.editor?.label || 'the selected application'}.`, { variant: 'success' });
+    } catch (error) {
+      toast(messageFor(error), { variant: 'error' });
+    } finally {
+      setOpeningIde(false);
+    }
+  };
+
+  const openFile = path => {
+    if (!path || path === filePathRef.current) return;
+    replaceRouteParams({ file: path });
+    void loadDiff(selectedTaskId, path);
+  };
+
+  return h('div', { className: 'section code-page', 'data-code-react': '' },
+    h('div', { className: 'feature-toolbar code-toolbar' },
+      h('div', { className: 'code-task-control' },
+        h('label', { htmlFor: 'codeTaskSelect' }, 'Task'),
+        h('select', {
+          id: 'codeTaskSelect',
+          'data-code-task': '',
+          value: selectedTaskId,
+          onChange: event => selectTask(event.target.value)
+        }, tasks.map(task => h('option', { key: task.id, value: task.id }, task.label)))
+      ),
+      h('div', { className: 'code-toolbar-actions' },
+        h('a', {
+          className: 'buttonlike secondary',
+          'data-code-task-link': '',
+          href: routeHref('tasks', { workspace: selectedTask?.workspace, task: selectedTaskId })
+        }, h(Icon, { name: 'chevronLeft' }), h('span', null, 'Task')),
+        h('select', {
+          'data-code-ide': '',
+          'aria-label': 'Application for project',
+          value: editorId,
+          onChange: event => setEditorId(event.target.value)
+        }, editorLoadFailed
+          ? h('option', { value: '' }, 'IDE unavailable')
+          : editors == null
+            ? h('option', { value: '' }, 'Loading applications…')
+            : editors.map(editor => h('option', { key: editor.id, value: editor.id }, editor.label))),
+        h('button', {
+          className: 'secondary',
+          type: 'button',
+          'data-code-open-ide': '',
+          disabled: ideDisabled,
+          onClick: () => { void openIde(); }
+        }, h(Icon, { name: 'externalLink' }), h('span', null, openingIde ? 'Opening…' : 'IDE')),
+        h('button', {
+          className: 'secondary',
+          type: 'button',
+          'data-code-refresh': '',
+          onClick: () => { void refreshWorkspace(selectedTaskId, { refreshCurrent: true }); }
+        }, 'Refresh')
+      )
+    ),
+    h('div', { className: 'code-workspace-meta', 'data-code-meta': '' }, meta),
+    h('div', { className: 'code-workbench' },
+      h('aside', { className: 'code-explorer', 'aria-label': 'Changed task files' },
+        h('div', { className: 'code-explorer-head' },
+          h('strong', null, 'Changed files'),
+          h('input', {
+            type: 'search',
+            'data-code-search': '',
+            placeholder: 'Filter changed files',
+            'aria-label': 'Filter changed task files',
+            value: query,
+            onChange: event => setQuery(event.target.value)
+          })
+        ),
+        h('div', { className: 'code-file-list', 'data-code-files': '' },
+          visibleFiles.length
+            ? visibleFiles.map(file => {
+                const status = changedFileStatus(workspace, file);
+                const label = `${status.label}: ${file}`;
+                return h('button', {
+                  className: `code-file-row${file === filePath ? ' active' : ''}`,
+                  type: 'button',
+                  'data-code-file': file,
+                  title: label,
+                  'aria-label': label,
+                  key: file,
+                  onClick: () => openFile(file)
+                },
+                h('span', {
+                  className: `code-file-marker status-${status.tone}`,
+                  'aria-hidden': 'true'
+                }, status.code),
+                h('span', { className: 'code-file-name' }, file));
+              })
+            : h('div', { className: 'code-file-empty' }, query ? 'No matching changed files.' : (workspaceError ? 'Task changes are unavailable.' : 'No task-owned changes to review.'))
+        )
+      ),
+      h('section', { className: 'code-editor-pane', 'aria-label': 'Task diff viewer' },
+        h('div', { className: 'code-editor-toolbar' },
+          h('div', { className: 'code-file-heading mono', 'data-code-file-heading': '' }, filePath || 'No file selected'),
+          h('span', { className: 'code-view-state', 'data-code-view-state': '' }, viewState)
+        ),
+        h(DiffViewer, { file: diffFile, message: viewerMessage, tone: viewerTone })
+      )
+    )
+  );
+}
+
+function DiffViewer({ file, message, tone }) {
+  if (!file) {
+    return h('div', {
+      className: `code-editor-host code-editor-message${tone ? ` ${tone}` : ''}`,
+      'data-code-editor': ''
+    }, message || 'Choose a changed file to review its diff.');
+  }
+  return h(MonacoDiffViewer, { file });
+}
+
+const MonacoDiffViewer = memo(function MonacoDiffViewer({ file }) {
+  const hostRef = useRef(null);
+  const editorRef = useRef(null);
+  const monacoRef = useRef(null);
+  const modelsRef = useRef([]);
+  const fileRef = useRef(file);
+  const [loadError, setLoadError] = useState('');
+
+  fileRef.current = file;
+
+  useEffect(() => {
+    let active = true;
+    let cleanupResize = () => {};
+    let cleanupTheme = () => {};
+
+    void loadMonaco().then(monaco => {
+      if (!active || !hostRef.current) return;
+      monacoRef.current = monaco;
+      const editor = monaco.editor.createDiffEditor(hostRef.current, {
+        theme: currentMonacoTheme(),
+        readOnly: true,
+        originalEditable: false,
+        automaticLayout: false,
+        renderSideBySide: true,
+        useInlineViewWhenSpaceIsLimited: true,
+        renderIndicators: true,
+        minimap: { enabled: false },
+        scrollBeyondLastLine: false,
+        wordWrap: 'off',
+        fontLigatures: true
+      });
+      editorRef.current = editor;
+      cleanupResize = bindEditorResize(editor, hostRef.current);
+      cleanupTheme = bindEditorTheme(monaco);
+      applyDiffModels(monaco, editor, modelsRef, fileRef.current);
+    }).catch(error => {
+      if (!active) return;
+      const message = messageFor(error);
+      setLoadError(message);
+      toast(`Monaco could not start. Showing a read-only text diff fallback. ${message}`, { variant: 'warn' });
+    });
+
+    return () => {
+      active = false;
+      cleanupResize();
+      cleanupTheme();
+      clearDiffModels(editorRef.current, modelsRef);
+      try { editorRef.current?.dispose?.(); } catch {}
+      editorRef.current = null;
+      monacoRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current) return;
+    applyDiffModels(monacoRef.current, editorRef.current, modelsRef, file);
+  }, [file]);
+
+  if (loadError) {
+    return h('div', { className: 'code-editor-host', 'data-code-editor': '' }, h(DiffFallback, { file }));
+  }
+  return h('div', {
+    ref: hostRef,
+    className: 'code-editor-host',
+    'data-code-editor': '',
+    'aria-label': 'Read-only file diff'
+  });
+});
+
+function DiffFallback({ file }) {
+  return h('div', { className: 'code-diff-fallback' },
+    h(FallbackColumn, { label: 'Before', content: file?.baseContent || '' }),
+    h(FallbackColumn, { label: 'After', content: file?.content || '' })
+  );
+}
+
+function FallbackColumn({ label, content }) {
+  return h('section', { className: 'code-diff-column' },
+    h('strong', null, label),
+    h('pre', null, content)
+  );
+}
+
+function applyDiffModels(monaco, editor, modelsRef, file) {
+  clearDiffModels(editor, modelsRef);
+  if (!file) return;
+  const language = file.language || 'plaintext';
+  const original = monaco.editor.createModel(file.baseContent || '', language);
+  const modified = monaco.editor.createModel(file.content || '', language);
+  modelsRef.current = [original, modified];
+  editor.setModel({ original, modified });
+}
+
+function clearDiffModels(editor, modelsRef) {
+  try { editor?.setModel?.(null); } catch {}
+  for (const model of modelsRef.current || []) {
+    try { model?.dispose?.(); } catch {}
+  }
+  modelsRef.current = [];
+}
+
+function bindEditorResize(editor, host) {
+  const layout = () => {
+    try { editor.layout(); } catch {}
+  };
+  if (typeof ResizeObserver === 'function') {
+    const observer = new ResizeObserver(layout);
+    observer.observe(host);
+    queueMicrotask(layout);
+    return () => observer.disconnect();
+  }
+  window.addEventListener('resize', layout);
+  queueMicrotask(layout);
+  return () => window.removeEventListener('resize', layout);
+}
+
+function bindEditorTheme(monaco) {
+  const apply = () => {
+    try { monaco.editor.setTheme(currentMonacoTheme()); } catch {}
+  };
+  apply();
+  if (typeof MutationObserver !== 'function') return () => {};
+  const observer = new MutationObserver(records => {
+    if (records.some(record => record.attributeName === 'data-theme')) apply();
+  });
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  return () => observer.disconnect();
+}
+
+function currentMonacoTheme() {
+  return document.documentElement.dataset.theme === 'light' ? 'vs' : 'vs-dark';
+}
+
+function useRouteTaskId(tasks) {
+  const [requestedTaskId, setRequestedTaskId] = useState(readRequestedTaskId);
+  const taskIds = useMemo(() => tasks.map(task => task.id), [tasks]);
+  const selectedTaskId = taskIds.includes(requestedTaskId) ? requestedTaskId : (taskIds[0] || '');
+
+  useEffect(() => {
+    const sync = () => setRequestedTaskId(readRequestedTaskId());
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTaskId || requestedTaskId === selectedTaskId) return;
+    replaceRouteParams({ task: selectedTaskId, file: null });
+    setRequestedTaskId(selectedTaskId);
+  }, [requestedTaskId, selectedTaskId]);
+
+  const selectTask = taskId => {
+    const next = String(taskId || '').trim();
+    if (!taskIds.includes(next) || next === selectedTaskId) return;
+    setRequestedTaskId(next);
+    replaceRouteParams({ task: next, file: null });
+  };
+
+  return { selectedTaskId, selectTask };
+}
+
+function readRequestedTaskId() {
+  return String(getRouteParams().get('task') || '').trim();
+}
+
+function readRequestedFilePath() {
+  return String(getRouteParams().get('file') || '').trim();
+}
+
+function codeTasks(data = {}) {
+  return (Array.isArray(data.tasks) ? data.tasks : [])
+    .filter(task => classifyTaskChangedFiles(task?.changedFiles || []).productChangedFileCount > 0)
+    .map(task => ({
+      id: taskId(task),
+      label: taskLabel(task),
+      status: String(task.status || ''),
+      workspace: String(task.workspace || '')
+    }))
+    .filter(task => task.id);
+}
+
+function taskId(task) {
+  return String(task?.work_id || task?.taskId || task?.id || '').trim();
+}
+
+function taskLabel(task) {
+  const title = String(task?.title || task?.objective || task?.summary || 'Untitled task').trim();
+  const workspace = String(task?.workspace || '').trim();
+  const status = String(task?.status || '').trim();
+  return [title, workspace, status].filter(Boolean).join(' · ');
+}
+
+function changedTextFiles(workspace = {}) {
+  return [...new Set((Array.isArray(workspace?.changedFiles) ? workspace.changedFiles : [])
+    .map(file => String(file || '').trim())
+    .filter(Boolean))];
+}
+
+function changedFileStatus(workspace = {}, file = '') {
+  const raw = workspace?.changedFileStatuses?.[file];
+  if (!raw || typeof raw !== 'object') return { code: 'M', label: 'Modified', tone: 'warning' };
+  const code = String(raw.code || 'M').slice(0, 1).toUpperCase();
+  const label = String(raw.label || 'Modified');
+  const tone = ['info', 'success', 'warning', 'danger', 'neutral'].includes(raw.tone) ? raw.tone : 'neutral';
+  return { code, label, tone };
+}
+
+function workspaceMeta(workspace, error) {
+  if (error) return 'Task changes unavailable';
+  if (!workspace) return 'Loading task changes…';
+  const parts = [workspace.workspace || 'Project'];
+  if (workspace.status) parts.push(humanizeStatus(workspace.status));
+  if (workspace.historyMode === 'committed') {
+    const head = shortCommit(workspace.commitHead);
+    parts.push(head ? `Committed changes · ${head}` : 'Committed changes');
+    if (workspace.commitSource === 'inferred') parts.push('Recovered from Git history');
+  } else if (workspace.historyMode === 'unavailable') {
+    parts.push('Historical diff unavailable');
+  } else {
+    parts.push('Current task changes');
+  }
+  return parts.join(' · ');
+}
+
+function emptyViewerMessage(workspace = {}) {
+  if (workspace?.historyMode === 'unavailable') return 'This task records changed files, but its historical Git diff cannot be identified safely.';
+  const status = String(workspace?.status || '').toLowerCase();
+  if (['completed', 'cancelled', 'failed'].includes(status)) return 'This task has no recorded file changes.';
+  return 'No task-owned changes to review yet.';
+}
+
+function humanizeStatus(value) {
+  const text = String(value || '').trim().replaceAll('_', ' ');
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
+}
+
+function shortCommit(value) {
+  const text = String(value || '').trim();
+  return /^[a-f0-9]{7,64}$/i.test(text) ? text.slice(0, 8) : '';
+}
+
+function messageFor(error) {
+  return error instanceof Error ? error.message : String(error || 'The changes viewer request failed.');
+}
+
+function DesktopOnlyState() {
+  return h('div', { className: 'section code-page', 'data-code-react': '' },
+    h('div', { className: 'dashboard-state' },
+      h('div', { className: 'dashboard-state-card' },
+        h('span', { className: 'status-pill warn' }, 'Desktop feature'),
+        h('h2', null, 'Open Changes in the Rel.AI desktop app.'),
+        h('p', null, 'The browser dashboard cannot access local task diffs or IDEs.')
+      )
+    )
+  );
+}
+
+function EmptyChangesState() {
+  return h('div', { className: 'section code-page', 'data-code-react': '' },
+    h('div', { className: 'dashboard-state' },
+      h('div', { className: 'dashboard-state-card' },
+        h('h2', null, 'No task changes are available.'),
+        h('p', null, 'Start a Rel.AI task, then return here to review what changed.'),
+        h('div', { className: 'dashboard-state-actions' },
+          h('a', { className: 'buttonlike primary', href: '#tasks' },
+            h('span', null, 'Tasks'), h(Icon, { name: 'chevronRight' })
+          )
+        )
+      )
+    )
+  );
+}
+
+function loadMonaco() {
+  if (window.monaco?.editor) return Promise.resolve(window.monaco);
+  if (monacoPromise) return monacoPromise;
+  monacoPromise = new Promise((resolve, reject) => {
+    const start = () => {
+      if (typeof window.require !== 'function') {
+        reject(new Error('Monaco loader did not initialize.'));
+        return;
+      }
+      window.MonacoEnvironment = {
+        getWorkerUrl(_moduleId, label) {
+          if (label === 'json') return '/vendor/monaco/language/json/json.worker.js';
+          if (['css', 'scss', 'less'].includes(label)) return '/vendor/monaco/language/css/css.worker.js';
+          if (['html', 'handlebars', 'razor'].includes(label)) return '/vendor/monaco/language/html/html.worker.js';
+          if (['typescript', 'javascript'].includes(label)) return '/vendor/monaco/language/typescript/ts.worker.js';
+          return '/vendor/monaco/editor/editor.worker.js';
+        }
+      };
+      window.require.config({ paths: { vs: '/vendor/monaco' } });
+      window.require([
+        'vs/editor/editor.main',
+        'vs/basic-languages/monaco.contribution'
+      ], () => resolve(window.monaco), reject);
+    };
+    const existing = document.querySelector('script[data-monaco-loader]');
+    if (existing) {
+      if (typeof window.require === 'function') start();
+      else existing.addEventListener('load', start, { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = '/vendor/monaco/loader.js';
+    script.dataset.monacoLoader = 'true';
+    script.addEventListener('load', start, { once: true });
+    script.addEventListener('error', () => reject(new Error('Monaco editor assets could not load.')), { once: true });
+    document.head.appendChild(script);
+  });
+  return monacoPromise;
+}

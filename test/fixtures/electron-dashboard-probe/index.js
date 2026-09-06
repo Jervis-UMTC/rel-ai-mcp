@@ -5,7 +5,8 @@ import { createHttpMcpSession } from '../../helpers/http-mcp.mjs';
 const targetUrl = process.env.RELAI_PROBE_TARGET_URL;
 const outputPath = process.env.RELAI_PROBE_OUTPUT_PATH;
 const screenshotDir = process.env.RELAI_PROBE_SCREENSHOT_DIR;
-if (!targetUrl || !outputPath || !screenshotDir) throw new Error('Electron dashboard probe environment is incomplete.');
+const createWorkspacePath = process.env.RELAI_PROBE_CREATE_WORKSPACE_PATH;
+if (!targetUrl || !outputPath || !screenshotDir || !createWorkspacePath) throw new Error('Electron dashboard probe environment is incomplete.');
 fs.writeFileSync(outputPath, JSON.stringify({ stage: 'script_started', argv: process.argv }, null, 2));
 
 let app;
@@ -75,7 +76,9 @@ app.whenReady().then(async () => {
       longTitleAccessible: rows.some(row => row.textContent.includes('Extremely long task title') && (row.getAttribute('aria-label') || row.getAttribute('title') || row.textContent.length > 80)),
       reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
       highContrast: matchMedia('(forced-colors: active)').matches,
-      bodyWidth: document.documentElement.scrollWidth
+      bodyWidth: document.documentElement.scrollWidth,
+      reactFoundationReady: document.querySelector('[data-react-dashboard-ready="true"]')?.getAttribute('data-react-dashboard-ready') === 'true',
+      reactRevisionKey: document.querySelector('[data-react-dashboard-ready="true"]')?.getAttribute('data-store-revisions') || ''
     };
   })()`);
 
@@ -115,13 +118,15 @@ app.whenReady().then(async () => {
       requestId: window.__relaiProbeLiveToolUpdate?.requestId || '',
       beforeUpdated: ${JSON.stringify(liveToolBefore.updated)},
       afterUpdated: updated,
-      sameRouteNode: Boolean(current && current === window.__relaiProbeSessionsPage)
+      sameRouteNode: Boolean(current && current === window.__relaiProbeSessionsPage),
+      reactRevisionKey: document.querySelector('[data-react-dashboard-ready="true"]')?.getAttribute('data-store-revisions') || ''
     };
   })()`);
 
   await win.webContents.executeJavaScript(`localStorage.setItem('relai_debug', '1')`);
   const navigationInteractions = await exerciseNavigationControls(win, failures);
   const modalInteractions = await exerciseModalInteractions(win);
+  const projectPersistence = await exerciseProjectPersistence(win, createWorkspacePath);
 
   const parsedTarget = new URL(targetUrl);
   const passiveMcpSession = await createHttpMcpSession(parsedTarget.origin, {
@@ -409,6 +414,7 @@ app.whenReady().then(async () => {
     liveToolUpdate,
     navigationInteractions,
     modalInteractions,
+    projectPersistence,
     passiveRouteStability,
     taskInteraction,
     activityInteraction,
@@ -427,24 +433,67 @@ app.whenReady().then(async () => {
   app.exit(1);
 });
 
+async function exerciseProjectPersistence(win, sourcePath) {
+  await win.webContents.setZoomFactor(1);
+  win.setSize(1180, 760);
+  await win.webContents.executeJavaScript(`location.hash = '#workspaces'`);
+  await waitFor(win, `document.querySelector('[data-workspaces-react]')`);
+  await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Add project')?.click()`);
+  await waitFor(win, `document.querySelector('.modal-title')?.textContent === 'Create project'`);
+  await win.webContents.executeJavaScript(`(() => {
+    const alias = document.querySelector('.modal-panel input[name="alias"]');
+    const paths = document.querySelector('.modal-panel textarea[name="paths"]');
+    const setInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    const setTextarea = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    setInput?.call(alias, 'acceptance-created');
+    alias?.dispatchEvent(new Event('input', { bubbles: true }));
+    setTextarea?.call(paths, ${JSON.stringify(sourcePath)});
+    paths?.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.modal-panel button')).find(button => button.textContent.trim() === 'Create project')?.click()`);
+  await waitFor(win, `document.querySelector('[data-workspace-card="acceptance-created"]') && !document.querySelector('#__relai-modal-backdrop')`);
+  const created = await win.webContents.executeJavaScript(`Boolean(document.querySelector('[data-workspace-card="acceptance-created"]'))`);
+
+  await win.webContents.executeJavaScript(`(() => {
+    const card = document.querySelector('[data-workspace-card="acceptance-created"]');
+    Array.from(card?.querySelectorAll('button') || []).find(button => button.textContent.trim() === 'Edit project')?.click();
+  })()`);
+  await waitFor(win, `document.querySelector('.modal-title')?.textContent === 'Edit project'`);
+  await win.webContents.executeJavaScript(`(() => {
+    const alias = document.querySelector('.modal-panel input[name="alias"]');
+    const setInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setInput?.call(alias, 'acceptance-created-edited');
+    alias?.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.modal-panel button')).find(button => button.textContent.trim() === 'Save')?.click()`);
+  await waitFor(win, `document.querySelector('[data-workspace-card="acceptance-created-edited"]') && !document.querySelector('#__relai-modal-backdrop')`);
+  return await win.webContents.executeJavaScript(`(() => ({
+    created: ${JSON.stringify(created)},
+    edited: Boolean(document.querySelector('[data-workspace-card="acceptance-created-edited"]')),
+    oldAliasRemoved: !document.querySelector('[data-workspace-card="acceptance-created"]'),
+    finalAlias: document.querySelector('[data-workspace-card="acceptance-created-edited"]')?.getAttribute('data-workspace-card') || ''
+  }))()`);
+}
+
 async function exerciseModalInteractions(win) {
   await win.webContents.setZoomFactor(1);
   win.setSize(1180, 760);
   await win.webContents.executeJavaScript(`location.hash = '#workspaces'`);
-  await waitFor(win, `document.querySelector('.workspace-grid [data-edit-workspace]')`);
+  await waitFor(win, `Array.from(document.querySelectorAll('.workspace-grid button')).some(button => button.textContent.trim() === 'Edit project')`);
 
-  await win.webContents.executeJavaScript(`document.querySelector('.workspace-grid [data-edit-workspace]')?.click()`);
+  await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.workspace-grid button')).find(button => button.textContent.trim() === 'Edit project')?.click()`);
   await waitFor(win, `document.querySelector('.modal-title')?.textContent === 'Edit project'`);
   const editDetailsConsolidated = await win.webContents.executeJavaScript(`Boolean(document.querySelector('.modal-panel .ws-project-details-section .workspace-operational'))`);
   const sharedCloseVisible = await win.webContents.executeJavaScript(`Boolean(document.querySelector('.modal-panel .modal-close'))`);
   const editedAlias = await win.webContents.executeJavaScript(`(() => {
     const input = document.querySelector('.modal-panel input[name="alias"]');
     if (!input) return '';
-    input.value = input.value + '-unsaved';
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setValue?.call(input, input.value + '-unsaved');
     input.dispatchEvent(new Event('input', { bubbles: true }));
     return input.value;
   })()`);
-  await win.webContents.executeJavaScript(`document.querySelector('.modal-panel [data-delete-project]')?.click()`);
+  await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.modal-panel button')).find(button => button.textContent.trim() === 'Delete project from Rel.AI')?.click()`);
   await waitFor(win, `document.querySelector('.modal-inline-confirm-layer')`);
   const editDeleteOpen = await win.webContents.executeJavaScript(`(() => ({
     title: document.querySelector('.modal-title')?.textContent || '',
@@ -468,24 +517,16 @@ async function exerciseModalInteractions(win) {
     alias: document.querySelector('.modal-panel input[name="alias"]')?.value || ''
   }))()`);
 
-  await win.webContents.executeJavaScript(`document.querySelector('.modal-close')?.click()`);
+  await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.modal-panel a')).find(link => link.textContent.trim() === 'View tasks')?.click()`);
+  await waitFor(win, `document.querySelector('.modal-inline-confirm-title')?.textContent === 'Discard changes?'`);
+  await win.webContents.executeJavaScript(`document.querySelector('.modal-inline-confirm-card .modal-actions .secondary')?.click()`);
+  await waitFor(win, `!document.querySelector('.modal-inline-confirm-layer')`);
+  const routeChangeCancelPreserved = await win.webContents.executeJavaScript(`location.hash === '#workspaces' && document.querySelector('.modal-title')?.textContent === 'Edit project'`);
+  await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.modal-panel a')).find(link => link.textContent.trim() === 'View tasks')?.click()`);
   await waitFor(win, `document.querySelector('.modal-inline-confirm-card button.danger')`);
   await win.webContents.executeJavaScript(`document.querySelector('.modal-inline-confirm-card button.danger')?.click()`);
-  await waitFor(win, `!document.querySelector('#__relai-modal-backdrop')`);
-
-  await win.webContents.executeJavaScript(`(() => {
-    document.getElementById('routeRoot').dataset.unsavedChanges = 'true';
-    location.hash = '#tasks';
-  })()`);
-  await waitFor(win, `document.querySelector('.modal-title')?.textContent === 'Discard changes?'`);
-  await win.webContents.executeJavaScript(`document.querySelector('.confirm-dialog .modal-actions .secondary')?.click()`);
-  await waitFor(win, `!document.querySelector('#__relai-modal-backdrop')`);
-  const routeChangeCancelPreserved = await win.webContents.executeJavaScript(`location.hash === '#workspaces'`);
-  await win.webContents.executeJavaScript(`location.hash = '#tasks'`);
-  await waitFor(win, `document.querySelector('.modal-title')?.textContent === 'Discard changes?'`);
-  await win.webContents.executeJavaScript(`document.querySelector('.confirm-dialog .modal-actions button.danger')?.click()`);
-  await waitFor(win, `location.hash === '#tasks' && document.querySelectorAll('.task-row').length >= 9`);
-  const routeChangeConfirmNavigated = await win.webContents.executeJavaScript(`location.hash === '#tasks'`);
+  await waitFor(win, `location.hash.startsWith('#tasks') && document.querySelectorAll('.task-row').length >= 9`);
+  const routeChangeConfirmNavigated = await win.webContents.executeJavaScript(`location.hash.startsWith('#tasks')`);
 
   return {
     editDeleteCancelPreserved: editDeleteOpen.inlineConfirm
@@ -570,11 +611,19 @@ async function measurePassiveRouteStability(win, mcpSession, navigationCounts, r
 
 async function exerciseNavigationControls(win, failures) {
   const scenarios = [
-    { selector: '.nav a[data-nav-id="workspaces"]', hash: '#workspaces', ready: `document.querySelector('.workspace-grid')` },
+    { selector: '.nav a[data-nav-id="home"]', hash: '#home', ready: `document.querySelector('[data-home-react]')` },
+    { selector: '.nav a[data-nav-id="tasks"]', hash: '#tasks', ready: `document.querySelector('[data-sessions-react]')` },
+    { selector: '.nav a[data-nav-id="code"]', hash: '#code', ready: `document.querySelector('[data-code-react]')` },
+    { selector: '.nav a[data-nav-id="workspaces"]', hash: '#workspaces', ready: `document.querySelector('[data-workspaces-react]')` },
+    { selector: '.nav a[data-nav-id="activity"]', hash: '#activity', ready: `document.querySelector('.activity-master-detail')` },
+    { opener: '[data-nav-accordion="system"] > summary', selector: '[data-nav-accordion="system"] .sidebar-subnav a[data-nav-id="processes"]', hash: '#processes', ready: `document.querySelector('[data-processes-react="true"]')` },
+    { opener: '[data-nav-accordion="system"] > summary', selector: '[data-nav-accordion="system"] .sidebar-subnav a[data-nav-id="diagnostics"]', hash: '#diagnostics', ready: `document.querySelector('.diagnostic-page')` },
+    { opener: '[data-nav-accordion="system"] > summary', selector: '[data-nav-accordion="system"] .sidebar-subnav a[data-nav-id="tools"]', hash: '#tools', ready: `document.querySelector('[data-tools-react="true"]')` },
+    { opener: '[data-nav-accordion="system"] > summary', selector: '[data-nav-accordion="system"] .sidebar-subnav a[data-nav-id="usage"]', hash: '#usage', ready: `document.querySelector('[data-usage-react="true"]')` },
     { opener: '[data-nav-accordion="settings"] > summary', selector: '[data-nav-accordion="settings"] .sidebar-subnav a[data-nav-id="connection"]', hash: '#settings/connection', ready: `document.querySelector('#__settings-content .connection-page')` },
     { opener: '[data-nav-accordion="settings"] > summary', selector: '[data-nav-accordion="settings"] .sidebar-subnav a[data-nav-id="preferences"]', hash: '#settings', ready: `document.querySelector('#__settings-content .theme-switch') && !document.querySelector('.settings-loading')` },
-    { selector: '[data-nav-accordion="settings"] .sidebar-subnav a[data-nav-id="application"]', hash: '#settings/application', ready: `document.querySelector('#__settings-content .application-update-panel') && !document.querySelector('.settings-loading')` },
-    { selector: '[data-nav-accordion="settings"] .sidebar-subnav a[data-nav-id="about"]', hash: '#settings/about', ready: `document.querySelector('#__settings-content .about-product') && !document.querySelector('.settings-loading')` }
+    { opener: '[data-nav-accordion="settings"] > summary', selector: '[data-nav-accordion="settings"] .sidebar-subnav a[data-nav-id="application"]', hash: '#settings/application', ready: `document.querySelector('#__settings-content .application-update-panel') && !document.querySelector('.settings-loading')` },
+    { opener: '[data-nav-accordion="settings"] > summary', selector: '[data-nav-accordion="settings"] .sidebar-subnav a[data-nav-id="about"]', hash: '#settings/about', ready: `document.querySelector('#__settings-content .about-product') && !document.querySelector('.settings-loading')` }
   ];
   const results = [];
   for (const scenario of scenarios) {

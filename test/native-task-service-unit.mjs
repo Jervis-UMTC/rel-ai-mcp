@@ -27,7 +27,7 @@ import {
   updateNativeTaskRecovery
 } from '../src/mcp/nativeTaskService.js';
 import { createNativeToolTask } from '../src/mcp/nativeToolTasks.js';
-import { openStateDatabase, stateDatabasePath, withStateDatabase } from '../src/stateDatabase.js';
+import { openStateDatabase, stateDatabasePath, withStateDatabase } from '../src/stateDatabase.ts';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-native-task-service-'));
 const config = { stateDir: root };

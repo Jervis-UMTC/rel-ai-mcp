@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { clearTaskHistory, getTaskHistoryDir, readCrossWorkspaceTaskEpisodes, readRecentWorkflowEvidence, readRelevantTaskEpisodes, readTaskHistory, readTaskHistorySessionRecord, recordTaskHistoryEvent, recordWorkflowEvidenceBatch } from "../src/taskHistoryStore.js";
-import { writeSession } from '../src/taskHistoryStorage.js';
+import { clearTaskHistory, getTaskHistoryDir, readCrossWorkspaceTaskEpisodes, readRecentWorkflowEvidence, readRelevantTaskEpisodes, readTaskHistory, readTaskHistorySessionRecord, recordTaskHistoryEvent, recordWorkflowEvidenceBatch } from "../src/taskHistoryStore.ts";
+import { writeSession } from '../src/taskHistoryStorage.ts';
 import { principalFingerprint } from '../src/mcp/principal.js';
 import { assertKnownTask } from '../src/tools/task.js';
 

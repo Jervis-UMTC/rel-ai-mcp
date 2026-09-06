@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { MAX_CLIPBOARD_TEXT_BYTES, registerIpcHandlers } from '../electron/ipc-handlers.js';
-import { createWindowGuards } from '../electron/ipc-security.js';
+import { createContractIpcRegistrar, createWindowGuards } from '../electron/ipc-security.js';
 
 const handles = new Map();
 const listeners = new Map();
@@ -59,6 +59,17 @@ assert.ok(Number.isSafeInteger(MAX_CLIPBOARD_TEXT_BYTES) && MAX_CLIPBOARD_TEXT_B
 const guards = createWindowGuards(deps.BrowserWindow);
 assert.equal(guards.windowOnly(eventFor(dashboard), () => dashboard, 'Dashboard', () => 'allowed'), 'allowed');
 assert.throws(() => guards.windowOnly(eventFor(other), () => dashboard, 'Dashboard', () => 'denied'), /not available/);
+const registrar = createContractIpcRegistrar({
+  ipcMain: { handle() {}, on() {} },
+  BrowserWindow: deps.BrowserWindow,
+  contract: {
+    'test:handle': { mode: 'handle', windows: ['dashboard'], failure: 'reject' },
+    'test:on': { mode: 'on', windows: ['dashboard'], failure: 'ignore' }
+  },
+  windowGetters: { dashboard: () => dashboard }
+});
+assert.throws(() => registrar.on('test:handle', 'Test', () => {}), /must register with ipcMain\.handle/);
+assert.throws(() => registrar.handle('missing:channel', 'Test', () => {}), /missing from the input contract/);
 assert.equal([...handles.keys()].some(channel => channel.startsWith('desktop:cloud:')), false);
 assert.equal([...handles.keys()].some(channel => /ngrok|gateway|approval/i.test(channel)), false);
 assert.throws(() => handles.get('desktop:settings:get')(eventFor(other)), /not available/);

@@ -3,9 +3,14 @@ import * as path from 'node:path';
 import { resolveWorkspace } from '../config.js';
 import { fallbackExecutionStatus } from '../mcp/fallbackExecutions.js';
 import { addSpanEvent, runSpan, setSpanAttributes } from '../telemetry.js';
-import { claimTaskChangedFiles } from '../taskIntegrity.js';
+import { claimTaskChangedFiles } from '../taskIntegrity.ts';
 import { runWithToolActivity, updateCurrentToolActivity } from '../toolActivity.js';
 import { runWorkspaceOperation } from '../workspaceOperationQueue.js';
+import {
+  measurePerformancePhase,
+  performanceTimingAttributes,
+  recordPerformancePhase
+} from '../performanceObservability.js';
 import { maybeStartSession } from './session.js';
 import { OPERATION_IDS as OP } from './operationIds.js';
 
@@ -13,11 +18,11 @@ const UNSAFE_READ_ONLY_GIT_OPTIONS = new Set([
   '--ext-diff', '--textconv', '--filters', '--open-files-in-pager'
 ]);
 
-async function executeToolCall({ config, name, executionName = name, effectiveArgs, context, requestTaskContext = null, finishActivity, definition, started }) {
+async function executeToolCall({ config, name, executionName = name, effectiveArgs, context, requestTaskContext = null, finishActivity, definition }) {
   let sessionStart = { started: false, alias: '' };
   const value = await runWithToolActivity(finishActivity, () => runSpan(config,
     executionName === OP.WORK_BEGIN ? 'relai.logical_task.start' : 'relai.tool.call',
-    spanAttributes(name, effectiveArgs, context, finishActivity),
+    spanAttributes(name, effectiveArgs, context),
     async () => {
       const taskId = String(finishActivity?.taskId || effectiveArgs?.work_id || '').trim();
       const backgroundReference = String(effectiveArgs?.operationId || taskId || '').trim();
@@ -32,7 +37,7 @@ async function executeToolCall({ config, name, executionName = name, effectiveAr
 
       const invokeHandler = async (args) => {
         if (typeof definition?.handler !== 'function') throw new Error(`Tool '${name}' has no executable handler.`);
-        const handled = await definition.handler(config, args || {}, {
+        const handled = await measurePerformancePhase('tool.execution', () => definition.handler(config, args || {}, {
           connector: Boolean(context?.publicHttpOnly),
           taskId,
           requestHeaders: context?.requestHeaders || {},
@@ -47,7 +52,7 @@ async function executeToolCall({ config, name, executionName = name, effectiveAr
           requestTaskContext,
           backgroundStatusMode,
           mutationTrackingRequired: executionName !== OP.EXEC || !readOnlyExec
-        });
+        }));
         if (workspace
           && taskId
           && effectiveArgs?.dryRun !== true
@@ -65,12 +70,15 @@ async function executeToolCall({ config, name, executionName = name, effectiveAr
       const result = await runWorkspaceOperation(
         executionName === OP.WORK_CANCEL || backgroundStatusMode ? '' : effectiveArgs?.workspace,
         async () => {
-          sessionStart = await maybeStartSession(config, executionName, effectiveArgs || {}, { taskId });
+          sessionStart = await measurePerformancePhase(
+            'tool.session',
+            () => maybeStartSession(config, executionName, effectiveArgs || {}, { taskId })
+          );
           const handled = await invokeHandler(effectiveArgs);
           setSpanAttributes({
             'relai.tool.ok': handled?.ok !== false,
-            'relai.tool.duration_ms': Date.now() - started,
-            'relai.tool.long_running': definition?.behavior?.longRunning === true
+            'relai.tool.long_running': definition?.behavior?.longRunning === true,
+            ...performanceTimingAttributes()
           });
           return handled;
         },
@@ -172,10 +180,10 @@ function queueOptions(mode, scope, taskId, signal) {
         'relai.workspace': details.workspace,
         'relai.queue.mode': details.mode,
         'relai.queue.scope': details.scope,
-        ...(details.taskId ? { 'relai.queue.work_id': details.taskId } : {}),
         'relai.queue.wait_ms': waitMs,
         'relai.queue.pending': details.queued
       });
+      recordPerformancePhase('tool.queue', waitMs);
       if (waitMs > 0) {
         updateCurrentToolActivity({
           currentStage: 'Workspace queue admitted',
@@ -187,11 +195,10 @@ function queueOptions(mode, scope, taskId, signal) {
   };
 }
 
-function spanAttributes(name, args, context, activity) {
+function spanAttributes(name, args, context) {
   return {
     'relai.tool.name': name,
     'relai.workspace': String(args?.workspace || ''),
-    'relai.task.id': String(activity?.taskId || args?.work_id || args?.taskId || ''),
     'relai.transport': String(context?.transportType || ''),
     'relai.client.name': String(context?.clientName || ''),
     'relai.client.version': String(context?.clientVersion || '')

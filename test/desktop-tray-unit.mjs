@@ -9,12 +9,14 @@ let currentMenu = null;
 let clipboardText = '';
 let trayConstructionCount = 0;
 let trayEvents = [];
+let trayListeners = new Map();
 
 class FakeTray {
-  constructor(image) { this.image = image; this.menu = null; trayConstructionCount += 1; }
+  constructor(image) { this.image = image; this.menu = null; this.destroyed = false; trayConstructionCount += 1; }
   setToolTip() {}
-  on(name) { trayEvents.push(name); }
+  on(name, listener) { trayEvents.push(name); trayListeners.set(name, listener); }
   setContextMenu(menu) { this.menu = menu; currentMenu = menu; }
+  destroy() { this.destroyed = true; }
 }
 
 const dependencies = {
@@ -36,6 +38,7 @@ const dependencies = {
       };
     }
   },
+  platform: 'win32',
   clipboard: { writeText(value) { clipboardText = value; } },
   iconPath: 'icon.png',
   getStatus: () => status,
@@ -89,9 +92,20 @@ assert.match(trayIconError?.message || '', /Tray icon could not be loaded/);
 assert.equal(missingIconTray.isAvailable(), false);
 
 trayEvents = [];
-const linuxTray = createDesktopTray(dependencies);
+trayListeners = new Map();
+let linuxFocusCount = 0;
+const linuxTray = createDesktopTray({
+  ...dependencies,
+  platform: 'linux',
+  focusPrimaryWindow() { linuxFocusCount += 1; }
+});
 linuxTray.setup();
-assert.ok(trayEvents.includes('double-click'), 'Linux tray activation must preserve the v0.25.1 double-click behavior');
-assert.equal(trayEvents.includes('click'), false, 'Linux tray activation must not substitute a platform-specific click handler');
+assert.ok(trayEvents.includes('click'), 'Linux tray activation must use Electron\'s supported click event');
+assert.equal(trayEvents.includes('double-click'), false, 'Linux must not wait for the Windows/macOS double-click event');
+trayListeners.get('click')?.();
+assert.equal(linuxFocusCount, 1, 'Linux tray activation must reach the primary-window focus path that acknowledges unread work');
+assert.equal(linuxTray.destroy(), true, 'desktop shutdown must be able to release the native tray explicitly');
+assert.equal(linuxTray.isAvailable(), false);
+assert.equal(linuxTray.destroy(), false, 'tray teardown must be idempotent');
 
 console.log('Desktop tray preserves v0.25.1 activation/menu behavior with current icon safety.');

@@ -19,12 +19,11 @@ import { runComputerAction } from '../computerManager.js';
 import { relaiSemanticSearch } from '../bridge/semanticSearch.js';
 import { repositoryIntelligence } from '../repository/intelligence/service.js';
 import { relaiDiagnosticsRun } from '../bridge/diagnosticsRunner.js';
-import { releaseTaskChangedFiles, taskCommitOwnership, taskOwnedChangedFiles } from '../taskIntegrity.js';
-import { readRecentWorkflowEvidence, readRelevantTaskEpisodes } from '../taskHistoryStore.js';
+import { releaseTaskChangedFiles, taskCommitOwnership, taskOwnedChangedFiles } from '../taskIntegrity.ts';
+import { readRecentWorkflowEvidence, readRelevantTaskEpisodes } from '../taskHistoryStore.ts';
 import { selectRelevantSkills } from '../skillDiscovery.js';
 import { buildTaskContinuity, rankBootstrapGroups } from '../context/taskContinuity.js';
 import { knowledgeSettings } from '../knowledgeStore.js';
-import { manageSkill } from '../skillManager.js';
 import { discoverRepositoryTopology, packageForPath } from '../workflow/topology.js';
 import { createReviewCheckpoint, replayReviewCheckpoint } from '../reviewCheckpoints.js';
 import { compactSessionSummary } from '../context/session-compactor.js';
@@ -151,7 +150,6 @@ const HANDLERS = Object.freeze({
   gitPush: inWorkspace((workspace, config, args) => relaiGitPush(workspace, config, args)),
   gitDraftPr: inWorkspace((workspace, config, args) => relaiGitDraftPr(workspace, config, args)),
   edit: inWorkspace((workspace, config, args, context) => planEdit(workspace, config, args, context)),
-  skillManage: inWorkspace((workspace, config, args, context) => manageSkill(workspace, config, args, context)),
   cancelTask,
   completeTask
 });

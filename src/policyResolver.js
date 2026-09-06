@@ -9,7 +9,7 @@ import {
   stateDatabasePath,
   stateMetaValue,
   withStateDatabase,
-} from './stateDatabase.js';
+} from './stateDatabase.ts';
 import { DEFAULT_TASK_STALE_MS } from './taskTiming.js';
 
 const SESSION_IDLE_TTL_MS = DEFAULT_TASK_STALE_MS;

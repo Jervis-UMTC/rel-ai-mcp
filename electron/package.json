@@ -1,7 +1,7 @@
 {
   "name": "rel-ai-mcp-launcher",
   "desktopName": "com.relai.mcp.desktop",
-  "version": "0.28.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Desktop runtime and dashboard for the Rel.AI ChatGPT Web harness.",
@@ -13,6 +13,7 @@
   },
   "license": "Apache-2.0",
   "main": "main.js",
+  "exports": {},
   "engines": {
     "node": ">=24.15.0 <25",
     "npm": ">=12.0.0 <13"
@@ -46,9 +47,11 @@
     },
     "files": [
       "main.js",
+      "desktop-host.js",
       "preload.cjs",
       "launcher-utils.js",
       "secure-tunnel-runtime.js",
+      "tunnel-log-parser.js",
       "tunnel-recovery-supervisor.js",
       "tunnel-credentials.js",
       "ipc-handlers.js",
@@ -58,6 +61,7 @@
       "launcher-config.js",
       "resource-path.js",
       "window-size.js",
+      "desktop-power.js",
       "tool-sleep-blocker.js",
       "taskbar-completion-badge.js",
       "dashboard-window.js",
@@ -105,7 +109,8 @@
         "from": "../src",
         "to": "src",
         "filter": [
-          "**/*.js"
+          "**/*.js",
+          "**/*.ts"
         ]
       },
       {
@@ -242,6 +247,7 @@
           "sax/**",
           "screenshot-desktop/**",
           "semver/**",
+          "yallist/**",
           "sharp/**",
           "shebang-command/**",
           "shebang-regex/**",
@@ -296,6 +302,11 @@
           "!zod/src/**",
           "!**/test/**",
           "!**/tests/**",
+          "!@computer-use/nut-js/**",
+          "!@computer-use/shared/**",
+          "!@jimp/**",
+          "!file-type/**",
+          "!jimp/**",
           "!**/*.ts",
           "!**/*.cts",
           "!**/*.mts"

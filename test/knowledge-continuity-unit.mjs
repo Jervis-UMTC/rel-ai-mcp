@@ -7,12 +7,10 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { buildTaskContinuity } from '../src/context/taskContinuity.js';
 import { ensureLearningState, knowledgeDatabasePath, learnedValidationChecks, recordTaskValidationAffinity } from '../src/knowledgeStore.js';
-import { listManagedSkills, managedSkillRoots } from '../src/skillManager.js';
-import { flushTaskHistoryPersistence, readTaskHistorySessionRecord } from '../src/taskHistoryStore.js';
+import { flushTaskHistoryPersistence, readTaskHistorySessionRecord } from '../src/taskHistoryStore.ts';
 import { resetToolActivity } from '../src/toolActivity.js';
 import { callTool as rawCallTool } from '../src/tools.js';
 import { repositoryIntelligence } from '../src/repository/intelligence/service.js';
-import { discoverSkills } from '../src/skillDiscovery.js';
 import { stateExport, stateImport } from '../src/productUx.js';
 
 const callTool = (name, args, context = {}) => rawCallTool(name, args, { principal: 'local:trusted', ...context });
@@ -39,7 +37,7 @@ const config = {
   version: 2,
   stateDir,
   auditLogPath: path.join(stateDir, 'audit.jsonl'),
-  knowledge: { proceduralLearning: true, maxBootstrapBytes: 1024 },
+  knowledge: { maxBootstrapBytes: 1024 },
   workspaces: {
     app: { path: workspace, commands: { check: 'node --check src/index.js' }, testCommands: {} }
   }
@@ -116,39 +114,12 @@ try {
     oldText: 'export const value = 1;', newText: 'export const value = 2;'
   }, context);
 
-  const skillContent = `---\nname: alpha-syntax-workflow\ndescription: "Reuse the validated alpha syntax update workflow for this repository when the same maintenance pattern applies."\n---\n\n# Alpha syntax workflow\n\n1. Inspect the current export before editing.\n2. Make the smallest intended source change.\n3. Run \`node --check src/index.js\` before completion.\n`;
-  const created = await callTool('relai_skill', {
-    action: 'create', workspace: 'app', work_id: task.work_id, name: 'alpha-syntax-workflow', scope: 'workspace', content: skillContent
-  }, context);
-  assert.equal(created.ok, true, 'agent-managed skill creation must not require repository validation as permission');
-  assert.equal(created.scope, 'workspace');
-  assert.equal(listManagedSkills(config, { workspace: 'app' }).length, 1);
-
   const validation = await callTool('relai_validate', {
     action: 'checks', workspace: 'app', work_id: task.work_id, check: 'node --check src/index.js'
   }, context);
   assert.equal(validation.validationStatus, 'passed');
 
-  const learnedRoot = managedSkillRoots(config, 'app').find(item => item.source === 'learned')?.root;
-  assert(learnedRoot, 'workspace learned-skill root must be discoverable');
-  const learnedDirectory = path.join(learnedRoot, 'alpha-syntax-workflow');
-  const backupDirectory = path.join(learnedRoot, '.alpha-syntax-workflow.backup');
-  const pendingDirectory = path.join(learnedRoot, '.alpha-syntax-workflow.pending');
-  fs.renameSync(learnedDirectory, backupDirectory);
-  fs.mkdirSync(pendingDirectory, { recursive: true });
-  fs.writeFileSync(path.join(pendingDirectory, 'partial.tmp'), 'interrupted write');
-  assert.equal(listManagedSkills(config, { workspace: 'app' }).length, 1,
-    'managed skill discovery must recover the last complete skill after an interrupted directory swap');
-  assert.equal(fs.existsSync(learnedDirectory), true);
-  assert.equal(fs.existsSync(backupDirectory), false);
-  assert.equal(fs.existsSync(pendingDirectory), false);
-
-  const discovered = discoverSkills({ alias: 'app', path: workspace }, { config });
-  assert(discovered.some(item => item.name === 'alpha-syntax-workflow' && item.source === 'learned'), 'agent-managed skills must participate in normal skill discovery');
-  const readSkill = await callTool('relai_read', { workspace: 'app', work_id: task.work_id, skill: 'alpha-syntax-workflow' }, context);
-  assert.match(readSkill.items?.[0]?.content || '', /Run `node --check src\/index\.js` before completion/);
-
-  await callTool('relai_work', { action: 'finish', workspace: 'app', work_id: task.work_id, summary: 'Updated alpha syntax flow and saved the proven workflow.' }, context);
+  await callTool('relai_work', { action: 'finish', workspace: 'app', work_id: task.work_id, summary: 'Updated alpha syntax flow and validated the change.' }, context);
   await flushTaskHistoryPersistence();
   const learnedChecks = learnedValidationChecks(config, 'app', ['src/index.js']);
   assert(learnedChecks.some(item => item.command === 'node --check src/index.js'), 'successful completion must retain repository-scoped validation affinity without inventing a procedure candidate');
@@ -177,26 +148,13 @@ try {
   assert.equal(compactWithRepositorySummary.bootstrap?.repositoryIntelligence?.summaryOnly, true, 'compact task bootstrap must reuse the cheap cached Repository Intelligence summary when available');
   await callTool('relai_work', { action: 'cancel', workspace: 'app', work_id: compactWithRepositorySummary.work_id, reason: 'compact bootstrap regression complete' }, context);
 
-  const reuse = await callTool('relai_work', {
-    action: 'begin', workspace: 'app', title: 'Reuse alpha syntax workflow', objective: 'Reuse alpha syntax workflow', bootstrap: 'compact'
-  }, context);
-  assert(reuse.bootstrap.suggestedSkills?.some(item => item.name === 'alpha-syntax-workflow'), 'agent-authored learned skills must be suggested through the ordinary skill bootstrap path');
-  await callTool('relai_work', { action: 'cancel', workspace: 'app', work_id: reuse.work_id, reason: 'learned skill regression complete' }, context);
-
   const continuity = buildTaskContinuity(config, { workspace: 'app', query: 'alpha syntax' });
   assert.equal(Object.hasOwn(continuity, 'relevantKnowledge'), false,
     'the removed generic Saved Memory store must not remain in task continuity');
   assert.equal(Object.hasOwn(continuity, 'suggestedProcedures'), false,
     'the removed candidate/procedure inference model must not remain in task continuity');
 
-  const deleted = await callTool('relai_skill', {
-    action: 'delete', workspace: 'app', name: 'alpha-syntax-workflow', scope: 'workspace'
-  }, context);
-  assert.equal(deleted.ok, true, 'forgetting a Rel.AI-managed skill must not require an unrelated active task');
-  assert.equal(deleted.deleted, true);
-  assert.equal(listManagedSkills(config, { workspace: 'app' }).length, 0);
-
-  console.log('Task continuity and agent-managed learning regression checks passed.');
+  console.log('Task continuity and validation-affinity regression checks passed.');
 } finally {
   await flushTaskHistoryPersistence();
   await repositoryIntelligence.shutdown();

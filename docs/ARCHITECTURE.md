@@ -20,12 +20,50 @@ The Rel.AI harness has three executable composition roots plus one external tran
 
 | Host | Composition root | Responsibility |
 | --- | --- | --- |
-| Electron desktop | `electron/main.js` | Owns windows, tray, updater, the local HTTP service, Secure MCP Tunnel child lifecycle, encrypted tunnel credentials, notifications, and shutdown order. |
-| HTTP MCP service | `bin/rel-ai-mcp-http.js` -> `src/httpServer.js` | Owns the authenticated local HTTP server, dashboard/API routes, modern and compatible stateless MCP routing, process cleanup, and telemetry lifecycle. |
+| Electron desktop | `electron/main.js` -> `electron/desktop-host.js` | `main.js` is the composition root. The desktop host owns windows, tray, updater, Secure MCP Tunnel supervision, encrypted tunnel credentials, notifications, OS integration, utility-process lifecycle, and shutdown order; Rel.AI business operations execute behind the service utility-process boundary. |
+| HTTP MCP service | `bin/rel-ai-mcp-http.js` -> `src/httpServer.ts` | Owns the authenticated local HTTP server, dashboard/API routes, modern and compatible stateless MCP routing, process cleanup, and telemetry lifecycle. |
 | Stdio MCP service | `bin/rel-ai-mcp.js` -> `src/server.js` | Owns modern stdio MCP, connection-scoped principal state, native Task routing, process cleanup, and telemetry lifecycle. |
 | OpenAI Secure MCP Tunnel | external service + bundled `tunnel-client` | Provides the private transport between ChatGPT and the selected desktop. It does not own repository state or Rel.AI task lifecycle. |
 
 Composition roots construct resource owners. Pure validation, mapping, formatting, catalog, and projection functions are imported directly.
+
+## Dashboard frontend ownership
+
+The routine dashboard is a React application backed by server-owned projections. The current path is:
+
+```text
+src/http/dashboard.js
+  -> minimal HTML shell + initial dashboard JSON
+  -> public/dashboard.js coordinator
+  -> src/ui/store.js canonical client state
+  -> src/ui/react/main.js React shell + route components
+  -> src/ui/features/* feature-local React UI
+```
+
+`src/http/dashboard.js` owns authenticated dashboard/API/SSE delivery and the initial read model. It does not generate application navigation or feature markup. Backend projection and lifecycle authority stay in backend modules such as `src/http/dashboardData.js`; React presents those contracts but does not become a second task, connection, process, or workspace authority.
+
+`public/dashboard.js` is the browser coordinator. It initializes the canonical store, mounts the React foundation, connects Electron status when available, owns refresh/recovery coordination, and initializes hash navigation. It must not grow feature-specific rendering logic.
+
+`src/ui/store.js` is the canonical dashboard client state boundary. Aggregate refreshes replace the authoritative read model, while typed SSE deltas update only their owned domain. Live metadata carries a stream ID and per-domain revisions; stale or duplicate revisions are rejected before subscribers are notified. React components consume the store through `useSyncExternalStore`, using feature-specific slice selection where a route does not need the full dashboard state.
+
+`src/ui/events.js` owns the single dashboard `EventSource` lifecycle, reconnect backoff, visibility recovery, typed event parsing, and transport state. Feature components do not open their own SSE connections. `src/ui/router.js` owns canonical hash navigation state, route-parameter helpers, unsaved-change navigation protection, and `relai:route-change` dispatch. `src/ui/navigation-catalog.js` remains the route/navigation metadata source.
+
+`src/ui/react/main.js` owns the persistent application shell, navigation, title bar integration, command palette, route selection and route-body rendering, route-heading focus, route-mounted announcements, recovery/dashboard state presentation, and shared overlay/toast chrome. Current dashboard sections are registered there and render feature-owned React components from `src/ui/features/`. Feature-only models, forms, presentation helpers, and styles stay beside the feature. Shared components belong in `src/ui/components/` only after real reuse exists.
+
+Unsaved form/input state should remain local to the owning React feature when it is not server state. Canonical project/task/process/connection data stays in the dashboard store. Electron-only authority remains behind the constrained `window.relaiDesktop` API exposed by `electron/preload.cjs`; React must not bypass IPC or move privileged desktop behavior into the renderer.
+
+The first-run/recovery renderer is intentionally independent of the dashboard React tree. `electron/renderer/wizard.*`, `electron/renderer/status.*`, and `electron/recovery-window.js` must remain able to recover or configure the application when the dashboard is unavailable.
+
+Dashboard JavaScript and CSS have source/generated boundaries:
+
+- Vite bundles `src/ui/react/main.js` to `public/dashboard-react.js` and preserves lazy route code splitting under `public/dashboard-chunks/`;
+- Tailwind runs through the Vite integration from `src/ui/styles/app.css` to `public/dashboard.css`;
+- `public/dashboard-react.js`, `public/dashboard.css`, and dashboard chunks are generated artifacts and are not hand-edited; and
+- `npm run verify:generated` rebuilds the Vite output into a temporary directory and fails when tracked generated bytes are stale.
+
+Accessibility is part of the frontend contract: current-route semantics, route-heading focus, live-region announcements, focus trapping/restoration, keyboard navigation, reduced motion, forced colors, responsive navigation, and usable touch targets must survive feature changes.
+
+Frontend behavior is protected at several levels: focused model/store/router/SSE unit tests, dashboard integration/smoke tests, representative browser acceptance, custom Electron chrome tests, Monaco/Changes browser coverage, and recovery-window tests. Add the narrowest regression at the ownership boundary that failed instead of copying the same assertion across unrelated suites.
 
 ## Secure tunnel ownership
 
@@ -68,8 +106,8 @@ Connector result serialization remains operation-aware. It compacts safe fields,
 Modern MCP behavior targets protocol `2026-07-28`.
 
 - `src/server.js` serves modern stdio and rejects initialize-based legacy lifecycle requests.
-- `src/http/mcpTransport.js` serves stateless HTTP MCP with strict protocol, method, name, capability, Host/Origin, and `_meta` validation.
-- `src/http/mcpAuth.js` accepts the private Rel.AI bearer token used by tunnel-client and explicit local clients.
+- `src/http/mcpTransport.ts` serves stateless HTTP MCP with strict protocol, method, name, capability, Host/Origin, and `_meta` validation.
+- `src/http/mcpAuth.ts` accepts the private Rel.AI bearer token used by tunnel-client and explicit local clients.
 - HTTP retains the SDK-supported stateless `2025-11-25` initialization flow required by supported ChatGPT clients.
 - Native Task interception is owned by `src/mcp/transportTasks.js` before ordinary modern SDK dispatch.
 
@@ -82,8 +120,8 @@ The task systems answer different lifecycle questions and remain separate:
 | Concern | Authority |
 | --- | --- |
 | Live logical-task activity | `src/toolActivity.js` |
-| Repository mutation generations, ownership/conflicts, and validation-evidence freshness | `src/taskIntegrity.js` |
-| Durable logical-task history | `src/taskHistoryStore.js` and `src/taskHistoryStorage.js` |
+| Repository mutation generations, ownership/conflicts, and validation-evidence freshness | `src/taskIntegrity.ts` |
+| Durable logical-task history | `src/taskHistoryStore.ts` and `src/taskHistoryStorage.ts` |
 | Native MCP Task lifecycle | `src/mcp/nativeTaskService.js` |
 | Canonical status mappings | `src/taskState.js` |
 | Safe progress/event normalization | `src/taskObservability.js` and `src/taskEvents.js` |
@@ -120,7 +158,7 @@ Connection status is projected through the existing server-status path and updat
 
 ## Durable persistence
 
-`src/durableState.js` owns atomic local text/JSON promotion, restrictive file modes, optional backups, backup restoration, validation, and typed failures.
+`src/durableState.ts` owns atomic local text/JSON promotion, restrictive file modes, optional backups, backup restoration, validation, and typed failures.
 
 Local durable stores include configuration, connection profile, connection generations, task history/integrity, managed-process metadata, lifecycle state, and other repository-work state. The tunnel runtime API key is deliberately outside ordinary JSON configuration and is stored through Electron `safeStorage`.
 

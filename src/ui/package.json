@@ -1,4 +1,17 @@
 {
+  "name": "@rel-ai/ui",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": {
+    "./api": "./api.js",
+    "./events": "./events.js",
+    "./react": "./react/main.js",
+    "./store": "./store.js"
+  },
+  "dependencies": {
+    "@radix-ui/react-alert-dialog": "^1.1.23",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "lucide-react": "^1.41.0",
+    "react-router-dom": "^7.18.3"
+  }
 }

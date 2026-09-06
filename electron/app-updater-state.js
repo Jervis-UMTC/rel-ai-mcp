@@ -3,9 +3,9 @@
 import fs from 'node:fs';
 import * as path from "node:path";
 import { importResourceModule } from './resource-path.js';
-import { assessUpdateSynchronization, cleanText, normalizeStatus, progressPayload, updateCompatibilityMetadata } from './app-updater-status.js';
+import { cleanText } from './app-updater-status.js';
 
-const { readJsonFileAsync, writeJsonAtomicAsync } = await importResourceModule('src/durableState.js');
+const { readJsonFileAsync, writeJsonAtomicAsync } = await importResourceModule('src/durableState.ts');
 
 const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const AUTO_CHECK_DELAY_MS = 15 * 1000;
@@ -66,10 +66,6 @@ function readLinuxPackageType(resourcesPath) {
   }
 }
 
-function isoNow(now) {
-  return new Date(now()).toISOString();
-}
-
 function safeUserDataPath(app) {
   try {
     return app.getPath('userData');
@@ -91,4 +87,4 @@ function createLogger(onLog) {
   };
 }
 
-export { AUTO_CHECK_DELAY_MS, AUTO_CHECK_INTERVAL_MS, assessUpdateSynchronization, cleanText, createLogger, createUpdateStateStore, detectUpdateSupport, isoNow, normalizeStatus, progressPayload, updateCompatibilityMetadata };
+export { AUTO_CHECK_DELAY_MS, AUTO_CHECK_INTERVAL_MS, createLogger, createUpdateStateStore, detectUpdateSupport };

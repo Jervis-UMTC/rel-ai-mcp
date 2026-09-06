@@ -3,7 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dashboardCssArgs, resolveTailwindCli } from './dashboard-css.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electronRoot = path.join(root, 'electron');
@@ -21,9 +20,9 @@ function shouldRestartForPath(rootName, fileName) {
   if (!relative || relative.endsWith('/')) return false;
   if (relative.startsWith('electron/node_modules/')) return false;
   if (relative.startsWith('electron/dist/') || relative.startsWith('dist/')) return false;
-  if (relative === 'public/dashboard.css') return false;
+  if (relative.startsWith('src/ui/')) return false;
   const extension = path.posix.extname(relative).toLowerCase();
-  return ['.js', '.mjs', '.cjs', '.html', '.css', '.json'].includes(extension);
+  return ['.js', '.mjs', '.cjs', '.html', '.css', '.json', '.ts', '.tsx'].includes(extension);
 }
 
 function electronPackageRoot() {
@@ -94,7 +93,7 @@ async function main(argv = process.argv.slice(2)) {
       'Usage: npm run electron:dev:watch',
       '',
       'Runs Rel.AI Electron directly from source, watches desktop/runtime files,',
-      'rebuilds CSS continuously, and restarts Electron after relevant changes.',
+      'rebuilds the dashboard with Vite continuously, and restarts Electron after relevant changes.',
       '',
       'Default: reuses the normal Rel.AI profile. Fully close the installed app first.',
       'Use --isolated for a separate persistent Electron/ChatGPT dev profile.'
@@ -105,12 +104,12 @@ async function main(argv = process.argv.slice(2)) {
   const isolated = argv.includes('--isolated');
   assertElectronRuntimeReady();
   const binary = electronExecutable();
-
   const generateColorTokens = path.join(root, 'scripts', 'generate-color-tokens.mjs');
-  const tailwindCli = resolveTailwindCli(root);
+  const viteCli = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');
   runNode(generateColorTokens);
+  runNode(viteCli, ['build']);
 
-  const cssWatcher = spawn(process.execPath, [tailwindCli, ...dashboardCssArgs({ baseRoot: root, watch: true })], {
+  const frontendWatcher = spawn(process.execPath, [viteCli, 'build', '--watch'], {
     cwd: root,
     stdio: 'inherit',
     windowsHide: true
@@ -173,15 +172,15 @@ async function main(argv = process.argv.slice(2)) {
     if (restartTimer) clearTimeout(restartTimer);
     for (const watcher of watchers) watcher.close();
     terminateProcess(electronChild);
-    terminateProcess(cssWatcher);
+    terminateProcess(frontendWatcher);
     await restartChain.catch(() => {});
   }
 
   process.once('SIGINT', () => { void shutdown().finally(() => process.exit(0)); });
   process.once('SIGTERM', () => { void shutdown().finally(() => process.exit(0)); });
-  cssWatcher.once('exit', (code, signal) => {
+  frontendWatcher.once('exit', (code, signal) => {
     if (shuttingDown) return;
-    console.error(`[electron-dev] CSS watcher exited unexpectedly (${signal || code || 'unknown'}).`);
+    console.error(`[electron-dev] Vite watcher exited unexpectedly (${signal || code || 'unknown'}).`);
     void shutdown().finally(() => process.exit(1));
   });
 

@@ -55,7 +55,7 @@ Native MCP Tasks are negotiated independently through `io.modelcontextprotocol/t
 
 A tunnel reconnect restores the connection only. It does not choose a workspace, pick a work session, repeat an uncertain edit, or mark repository work complete.
 
-When the public tool schema changes, ChatGPT must review the updated action snapshot before it can reliably use the new Rel.AI surface. For **Enterprise/Edu**, open **Workspace settings → Apps**, find **Rel.AI MCP**, open its menu, choose **Action control**, then click **Refresh** and review the changed actions before publishing or applying the update. For **Business**, published custom apps currently cannot update tools or metadata in place; recreate and republish the app when the Rel.AI tool surface changes. Application updates, tunnel connectivity, and host-side action refresh are separate states.
+When the public tool schema changes, ChatGPT must review the updated action snapshot before it can reliably use the new Rel.AI surface. For **Go/Plus/Pro**, open **Plugins → +**, select **Rel.AI MCP**, and follow ChatGPT’s connector update prompt. For **Enterprise/Edu**, open **Workspace settings → Apps**, find **Rel.AI MCP**, open its menu, choose **Action control**, then click **Refresh** and review the changed actions before publishing or applying the update. For **Business**, published custom apps currently cannot update tools or metadata in place; recreate and republish the app when the Rel.AI tool surface changes. Application updates, tunnel connectivity, and host-side action refresh are separate states.
 
 ## Troubleshooting
 

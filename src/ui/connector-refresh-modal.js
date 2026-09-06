@@ -1,6 +1,8 @@
+import React from 'react';
 import { openModal } from './components/modal.js';
 import { CHATGPT_REFRESH_BUSINESS_NOTE, CHATGPT_REFRESH_STEPS } from './features/settings/connection-guidance.js';
 
+const h = React.createElement;
 const STORAGE_PREFIX = 'relai_connector_refresh';
 
 function prepareConnectorRefreshNotice(lifecycle = {}, storage) {
@@ -52,49 +54,26 @@ function initConnectorRefreshModal(options = {}) {
     const view = prepareConnectorRefreshNotice(lifecycle, storage);
     if (!view) return;
 
-    const content = document.createElement('div');
-    content.className = 'confirm-dialog';
+    let modal = null;
+    const content = h('div', { className: 'confirm-dialog' },
+      h('p', null, view.description),
+      h('div', { className: 'confirm-dialog-copy' },
+        h('strong', null, 'In ChatGPT:'),
+        h('ol', { className: 'modal-step-list' }, view.steps.map(step => h('li', { key: step }, step)))
+      ),
+      h('p', { className: 'muted' }, view.businessNote),
+      h('p', { className: 'muted' }, 'You can dismiss this notice now. It will not appear again for this Rel.AI action revision.'),
+      h('div', { className: 'modal-actions' },
+        h('button', { type: 'button', className: 'primary', onClick: () => modal?.close() }, 'Done')
+      )
+    );
 
-    const description = document.createElement('p');
-    description.textContent = view.description;
-
-    const steps = document.createElement('div');
-    steps.className = 'confirm-dialog-copy';
-    const heading = document.createElement('strong');
-    heading.textContent = 'In ChatGPT:';
-    const list = document.createElement('ol');
-    list.className = 'modal-step-list';
-    view.steps.forEach(step => {
-      const item = document.createElement('li');
-      item.textContent = step;
-      list.appendChild(item);
-    });
-    steps.append(heading, list);
-
-    const businessNote = document.createElement('p');
-    businessNote.className = 'muted';
-    businessNote.textContent = view.businessNote;
-
-    const note = document.createElement('p');
-    note.className = 'muted';
-    note.textContent = 'You can dismiss this notice now. It will not appear again for this Rel.AI action revision.';
-
-    const actions = document.createElement('div');
-    actions.className = 'modal-actions';
-    const dismiss = document.createElement('button');
-    dismiss.type = 'button';
-    dismiss.className = 'primary';
-    dismiss.textContent = 'Done';
-    actions.appendChild(dismiss);
-    content.append(description, steps, businessNote, note, actions);
-
-    const modal = openModal({
+    modal = openModal({
       title: view.title,
       content,
       size: 'compact',
       onClose: () => acknowledgeConnectorRefreshNotice(view, storage)
     });
-    dismiss.addEventListener('click', () => modal.close());
   }).catch(() => {});
 
   return () => {

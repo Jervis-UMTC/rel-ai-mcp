@@ -75,11 +75,14 @@
 .home-analytics-head > div { @apply min-w-0; }
 .home-analytics-head .compact-button { min-height: 44px; }
 .home-analytics-title-row { @apply flex min-w-0 items-center gap-2; }
+.home-analytics-title-icon { @apply shrink-0; color: var(--ui-action-primary); }
 .home-analytics-title-row > span { @apply shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold; color: var(--ui-action-primary); background: var(--ui-surface-raised); }
+.home-analytics-link { @apply inline-flex items-center gap-1; }
 .home-analytics-body { @apply grid; }
 .home-analytics-metrics { @apply grid; grid-template-columns: repeat(4,minmax(0,1fr)); border-top: 1px solid var(--ui-border-subtle); border-bottom: 1px solid var(--ui-border-subtle); background: var(--ui-surface-secondary); }
 .home-analytics-metric { @apply grid min-w-0 gap-1 border-r px-4 py-4 last:border-r-0; border-color: var(--ui-border-subtle); }
-.home-analytics-metric > span { @apply text-[11px] font-semibold uppercase tracking-[.05em]; color: var(--ui-text-tertiary); }
+.home-analytics-metric-label { @apply flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.05em]; color: var(--ui-text-tertiary); }
+.home-analytics-metric-label > .ui-icon { @apply shrink-0; }
 .home-analytics-metric > strong { @apply text-[22px] font-extrabold tracking-[-.02em]; overflow-wrap: anywhere; color: var(--ui-text-primary); }
 .home-analytics-metric.good > strong { color: var(--ui-status-success-foreground); }
 .home-analytics-metric > small { @apply text-[11px]; overflow-wrap: anywhere; color: var(--ui-text-secondary); }

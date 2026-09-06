@@ -3,6 +3,7 @@
 function createDesktopTray(deps) {
   const {
     Tray, Menu, nativeImage, clipboard, iconPath, getStatus,
+    platform = process.platform,
     openDashboard, focusPrimaryWindow, openDiagnostics, openSettings,
     startServer, stopServer, getUpdateStatus = () => null,
     checkForUpdates, downloadUpdate, installUpdate,
@@ -25,7 +26,7 @@ function createDesktopTray(deps) {
     try {
       tray = new Tray(image);
       tray.setToolTip('Rel.AI MCP');
-      tray.on('double-click', focusPrimaryWindow);
+      tray.on(platform === 'linux' ? 'click' : 'double-click', focusPrimaryWindow);
       update();
       return tray;
     } catch (error) {
@@ -89,7 +90,20 @@ function createDesktopTray(deps) {
     }).catch(onError);
   }
 
-  return { setup, update, isAvailable: () => Boolean(tray) };
+  function destroy() {
+    if (!tray) return false;
+    const current = tray;
+    tray = null;
+    try {
+      current.destroy?.();
+      return true;
+    } catch (error) {
+      onError(error);
+      return false;
+    }
+  }
+
+  return { setup, update, destroy, isAvailable: () => Boolean(tray) };
 }
 
 export { createDesktopTray };

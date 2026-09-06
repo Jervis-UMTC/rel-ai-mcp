@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { resolveBudget } from "../src/budgetResolver.js";
+import { resolveBudget } from "../src/budgetResolver.ts";
 import { normalizeConfig } from "../src/config.js";
 
 assert.equal(resolveBudget(100, null, { trustedBudgetMultiplier: 5 }), 100);

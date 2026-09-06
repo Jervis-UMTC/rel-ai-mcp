@@ -4,15 +4,14 @@ import { readConfig, resolveWorkspace, resolveWorkspaceInput } from '../config.j
 import { principalFingerprint, principalForContext } from '../mcp/principal.js';
 import { assertAuthorizedToolCall } from '../mcp/authorizationPolicy.js';
 import { clearSessionPolicy } from '../policyResolver.js';
-import { readTaskIntegrity } from '../taskIntegrity.js';
-import { bindTaskHistoryActivityPersistence, recordWorkflowEvidence } from '../taskHistoryStore.js';
+import { readTaskIntegrity } from '../taskIntegrity.ts';
+import { bindTaskHistoryActivityPersistence, recordWorkflowEvidence } from '../taskHistoryStore.ts';
 import { buildToolActivityDetails } from '../taskObservability.js';
 import { beginConnectorToolCall, normalizeTaskId, onToolActivity, taskError } from '../toolActivity.js';
 import { serializeConnectorResult } from './connector.js';
 import { enhanceToolError } from './errors.js';
 import { executeToolCall } from './execution.js';
 import { repositoryIntelligence } from '../repository/intelligence/service.js';
-import { codeIntelligence } from '../codeIntelligence/service.js';
 import { describeToolOperation } from './operation.js';
 import { resolveExecutableToolCall, validateExecutableOperationInput } from './runtimeRegistry.js';
 import { getToolNames, isToolCallable } from './schema.js';
@@ -24,10 +23,19 @@ import { buildWorkflowEvidenceReceipt } from '../workflow/evidence.js';
 import { invalidateRepositoryTopology } from '../workflow/topology.js';
 import { OPERATION_IDS as OP } from './operationIds.js';
 import { observeRepeatCall } from './repeatCallGuard.js';
+import {
+  measurePerformancePhaseSync,
+  performanceBreakdownSnapshot,
+  withPerformanceBreakdownIfAbsent
+} from '../performanceObservability.js';
 
 bindTaskHistoryActivityPersistence(onToolActivity, readConfig);
 
 async function callTool(name, args = {}, context = {}) {
+  return withPerformanceBreakdownIfAbsent(() => callToolObserved(name, args, context));
+}
+
+async function callToolObserved(name, args = {}, context = {}) {
   const config = readConfig();
   const started = Date.now();
   const connector = Boolean(context?.publicHttpOnly);
@@ -214,14 +222,14 @@ async function callTool(name, args = {}, context = {}) {
       );
     }
     const responseValue = connector && resolved.compact
-      ? serializeConnectorResult({
+      ? measurePerformancePhaseSync('serialization', () => serializeConnectorResult({
         publicName: name,
         action: resolved.action,
         operationName,
         value,
         args: effectiveArgs || {},
         workId
-      })
+      }))
       : withTaskIdentity(value, workId);
     const responseWithRepeatWarning = repeatCall && responseValue && typeof responseValue === 'object'
       ? { ...responseValue, warning: repeatCall.warning }
@@ -285,6 +293,7 @@ async function callTool(name, args = {}, context = {}) {
       workspace: workspaceResolution?.alias || knownTask?.workspace || '',
       ok: activityResult.ok === true,
       durationMs: Date.now() - started,
+      timings: performanceBreakdownSnapshot(),
       errorCode: analyticsFailureCode,
       errorMessage: activityResult.error || ''
     });
@@ -373,7 +382,6 @@ function signalRepositoryIntelligenceMutation(config, operationName, args, value
     const workspace = resolveWorkspace(config, alias);
     const mutationPaths = broadMutation ? [] : (changedFiles.length ? changedFiles : restoreMutation);
     repositoryIntelligence.noteMutation(workspace, config, mutationPaths);
-    codeIntelligence.noteMutation(workspace, mutationPaths);
     invalidateRepositoryTopology(workspace.path, mutationPaths);
   } catch {}
 }

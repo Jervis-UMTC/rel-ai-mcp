@@ -35,11 +35,11 @@ contextBridge.exposeInMainWorld('relaiDesktop', {
       commitSource: '',
       truncated: false
     }),
-    diff: async () => ({
+    diff: async (_taskId, requestedPath) => ({
       ok: true,
       work_id: 'probe-task',
       workspace: 'app',
-      path: 'src/example.js',
+      path: requestedPath,
       content,
       baseContent: 'const answer = 0;\n',
       sha256: 'a'.repeat(64),

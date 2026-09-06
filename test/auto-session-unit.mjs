@@ -11,7 +11,7 @@ function git(args, options = {}) {
 
 import { ensureSessionStarted, touchSessionPolicy, readSessionPolicy, resolvePolicy, writeSessionPolicy, SESSION_IDLE_TTL_MS } from "../src/policyResolver.js";
 import { relaiRead, workspaceTidyPlan } from "../src/localRepoBridge.js";
-import { withStateDatabase } from '../src/stateDatabase.js';
+import { withStateDatabase } from '../src/stateDatabase.ts';
 
 function makeRepo() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-auto-session-'));

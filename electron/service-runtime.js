@@ -1,5 +1,6 @@
 import { normalizePort, normalizeTunnelId, readGuiConfig } from './launcher-utils.js';
 import { desktopStatusFailure, initialDesktopStatus } from './desktop-status.js';
+import { createPerformanceBreakdown } from '../src/performanceObservability.js';
 
 const LOCAL_READY_TIMEOUT_MS = 5_000;
 const LOCAL_READY_POLL_MS = 100;
@@ -65,7 +66,8 @@ function createDesktopServiceRuntime(deps) {
   }
 
   async function start(runToken, markLocalReady) {
-    const prepared = prepareConnectionConfig({ createToken: true });
+    const timing = createPerformanceBreakdown();
+    const prepared = timing.measureSync('desktop.configuration', () => prepareConnectionConfig({ createToken: true }));
     if (!prepared.ok) {
       setStatus(desktopStatusFailure(errorCodes.CONFIGURATION_INVALID, prepared.error, {
         serverRunning: false,
@@ -80,13 +82,13 @@ function createDesktopServiceRuntime(deps) {
     let actualPort;
     try {
       serviceProcessClient.updateContext({ runtimeLogs: runtimeLogs.snapshot() });
-      const localService = await serviceProcessClient.start({
+      const localService = await timing.measure('desktop.local_service', () => serviceProcessClient.start({
         host: '127.0.0.1',
         port: guiConfig.port,
         token: guiConfig.token
-      });
+      }));
       actualPort = Number(localService.port || guiConfig.port);
-      await waitForLocalApplicationReady(fetchImpl, actualPort, guiConfig.token);
+      await timing.measure('desktop.readiness', () => waitForLocalApplicationReady(fetchImpl, actualPort, guiConfig.token));
       activePort = actualPort;
       activeToken = guiConfig.token;
     } catch (error) {
@@ -96,6 +98,7 @@ function createDesktopServiceRuntime(deps) {
       const portInUse = error?.code === 'EADDRINUSE';
       const code = portInUse ? errorCodes.LOCAL_PORT_IN_USE : errorCodes.LOCAL_SERVICE_START_FAILED;
       const failure = portInUse ? `Port ${guiConfig.port} is already in use.` : error;
+      recordDesktopTiming(runtimeLogs, 'connection_start', timing.snapshot(), false);
       setStatus(desktopStatusFailure(code, failure, {
         serverRunning: false,
         tunnelStatus: 'failed',
@@ -120,7 +123,7 @@ function createDesktopServiceRuntime(deps) {
     });
     markLocalReady(getCurrentStatus());
 
-    return startTunnel({ runToken, guiConfig, apiKey, actualPort });
+    return startTunnel({ runToken, guiConfig, apiKey, actualPort, timing });
   }
 
   function restartConnection() {
@@ -179,7 +182,7 @@ function createDesktopServiceRuntime(deps) {
     return startTunnel({ runToken, guiConfig, apiKey, actualPort: activePort });
   }
 
-  async function startTunnel({ runToken, guiConfig, apiKey, actualPort }) {
+  async function startTunnel({ runToken, guiConfig, apiKey, actualPort, timing = null }) {
     const localUrl = `http://127.0.0.1:${actualPort}`;
     let result;
     try {
@@ -190,17 +193,21 @@ function createDesktopServiceRuntime(deps) {
         tunnelProvider: 'openai-secure-mcp',
         configPath: configModule.getConfigPath()
       });
-      result = await secureTunnelRuntime.start({
+      const startTunnelOperation = () => secureTunnelRuntime.start({
         tunnelId: guiConfig.tunnelId,
         port: actualPort,
         localToken: guiConfig.token,
         apiKey
       });
+      result = timing
+        ? await timing.measure('desktop.tunnel', startTunnelOperation)
+        : await startTunnelOperation();
     } catch (error) {
       if (runToken !== lifecycleToken) return getCurrentStatus();
       const code = tunnelErrorCode(error, errorCodes);
       const terminal = isTerminalTunnelCode(code, errorCodes);
       const current = getCurrentStatus();
+      recordDesktopTiming(runtimeLogs, 'connection_start', timing?.snapshot(), false);
       setStatus(desktopStatusFailure(
         terminal ? code : (errorCodes.TUNNEL_CONNECTION_INTERRUPTED || 'tunnel_connection_interrupted'),
         terminal ? error : 'Secure MCP Tunnel is unavailable. Rel.AI is retrying automatically.',
@@ -220,6 +227,7 @@ function createDesktopServiceRuntime(deps) {
     }
     if (runToken !== lifecycleToken || result.cancelled) return getCurrentStatus();
 
+    recordDesktopTiming(runtimeLogs, 'connection_start', timing?.snapshot(), true);
     setStatus({
       serverRunning: true,
       tunnelStatus: 'running',
@@ -391,6 +399,20 @@ function deferred() {
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function recordDesktopTiming(runtimeLogs, operation, snapshot, ok) {
+  if (!snapshot || !runtimeLogs?.append) return;
+  runtimeLogs.append('Desktop lifecycle timing.', {
+    level: 'debug',
+    source: 'desktop-performance',
+    operation,
+    details: {
+      ok: ok === true,
+      totalMs: Number(snapshot.totalMs || 0),
+      phaseMs: snapshot.phaseMs || {}
+    }
+  });
 }
 
 function formatError(error) {

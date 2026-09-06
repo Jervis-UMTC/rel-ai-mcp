@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { createDashboardTaskEventBatcher } from '../src/http/dashboardEventBatcher.js';
+import { createDashboardTaskEventBatcher } from '../src/core/dashboard-event-batcher.ts';
 
 const scheduled = [];
 const cleared = [];

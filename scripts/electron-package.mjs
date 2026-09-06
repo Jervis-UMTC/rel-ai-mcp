@@ -34,7 +34,7 @@ const generateColorTokens = path.join(root, 'scripts', 'generate-color-tokens.mj
 const fetchTunnelClient = path.join(root, 'scripts', 'fetch-tunnel-client.mjs');
 const verifyTunnelClient = path.join(root, 'scripts', 'verify-tunnel-client.mjs');
 const verifyZoekt = path.join(root, 'scripts', 'verify-zoekt-seed.mjs');
-const tailwindCli = packageBin(path.join(root, 'node_modules', '@tailwindcss', 'cli'), 'tailwindcss');
+const viteCli = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');
 const electronBuilderCli = packageBin(path.join(electronRoot, 'node_modules', 'electron-builder'), 'electron-builder');
 const platformEnvironment = { ...process.env, REL_AI_TARGET_PLATFORM: platform, REL_AI_TARGET_ARCH: targetArch };
 
@@ -42,11 +42,7 @@ if (mode === 'unpacked') {
   runNode('unpacked output cleanup', path.join(root, 'scripts', 'clean.mjs'), ['--electron']);
 }
 runNode('color-token verification', generateColorTokens, ['--check']);
-runNode('dashboard CSS build', tailwindCli, [
-  '-i', path.join(root, 'src', 'ui', 'styles', 'app.css'),
-  '-o', path.join(root, 'public', 'dashboard.css'),
-  '--minify'
-]);
+runNode('dashboard Vite build', viteCli, ['build']);
 ensureTunnelClient(platform, targetArch);
 runNode('OpenAI tunnel-client verification', verifyTunnelClient, [], { env: { ...platformEnvironment, TUNNEL_CLIENT_PLATFORMS: platform, REL_AI_TARGET_ARCH: targetArch } });
 ensureZoekt(platform, targetArch);

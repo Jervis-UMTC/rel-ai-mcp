@@ -1,0 +1,671 @@
+import * as crypto from 'node:crypto';
+import * as path from 'node:path';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { resolveGitExecutable } from './gitExecutable.js';
+import { makeProcessEnvironment } from './processEnvironment.js';
+import { getStateDir } from './statePaths.js';
+import { traceContextEnvironment } from './telemetry.js';
+import { createOutputSpillWriter } from './outputSpill.js';
+import { acquireHostResource } from './hostResourceScheduler.js';
+
+const TASKKILL_EXE = String.raw`C:\Windows\System32\taskkill.exe`;
+const DEFAULT_TERMINATION_GRACE_MS = 1000;
+const DEFAULT_FORCE_WAIT_MS = 2000;
+const DEFAULT_MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
+const DISABLED_GIT_HOOKS_PATH = `.disabled-git-hooks-${process.pid}-${crypto.randomBytes(12).toString('hex')}`;
+
+interface ProcessTargetLike {
+  readonly pid?: number | null | undefined;
+  readonly exitCode?: number | null | undefined;
+  readonly signalCode?: NodeJS.Signals | string | null | undefined;
+  kill?(signal?: NodeJS.Signals | number): boolean;
+}
+
+type ProcessTarget = number | ProcessTargetLike | null | undefined;
+
+interface ProcessTreeTerminationOptions {
+  readonly graceMs?: unknown;
+  readonly forceWaitMs?: unknown;
+  readonly signal?: NodeJS.Signals | string;
+  readonly force?: boolean;
+}
+
+interface ProcessTreeTerminationResult {
+  readonly exited: boolean;
+  readonly forced: boolean;
+  readonly gracefulSignalSent?: boolean;
+  readonly forceSignalSent?: boolean;
+  readonly error?: string;
+}
+
+interface ProcessEnvironmentConfig {
+  readonly allow?: unknown;
+}
+
+interface ProcessRuntimeConfig extends Record<string, unknown> {
+  readonly processEnvironment?: ProcessEnvironmentConfig;
+  readonly processTerminationGraceMs?: unknown;
+  readonly processForceWaitMs?: unknown;
+}
+
+interface RunProcessOptions {
+  readonly resourceClass?: unknown;
+  readonly resourceOwner?: unknown;
+  readonly cwd?: string;
+  readonly signal?: AbortSignal;
+  readonly queueTimeoutMs?: unknown;
+  readonly maxOutputBytes?: unknown;
+  readonly outputSpillTaskId?: unknown;
+  readonly timeout?: unknown;
+  readonly terminationGraceMs?: unknown;
+  readonly forceWaitMs?: unknown;
+  readonly shell?: boolean;
+  readonly commandString?: string;
+  readonly env?: Record<string, unknown>;
+  readonly inheritCredentials?: boolean;
+  readonly input?: unknown;
+  readonly preserveOutputWhitespace?: boolean;
+}
+
+interface RunProcessResult {
+  readonly exitCode: number;
+  readonly signal?: string;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly error?: string;
+  readonly cancelled?: boolean;
+  readonly timedOut: boolean;
+  readonly queueTimedOut?: boolean;
+  readonly spawnError?: boolean;
+  readonly terminationConfirmed?: boolean;
+  readonly forcedTermination?: boolean;
+  readonly queueWaitMs: number;
+  readonly durationMs: number;
+  readonly stdoutBytes: number;
+  readonly stderrBytes: number;
+  readonly stdoutTruncated: boolean;
+  readonly stderrTruncated: boolean;
+  readonly stdoutOutputRef?: string;
+  readonly stderrOutputRef?: string;
+  readonly stdoutSpillTruncated?: boolean;
+  readonly stderrSpillTruncated?: boolean;
+}
+
+interface TerminationRequest {
+  readonly marker: string;
+  readonly error: string;
+  readonly cancelled: boolean;
+  readonly timedOut: boolean;
+}
+
+interface ResourceLease {
+  readonly waitMs?: number;
+  release(): void;
+}
+
+interface OutputSpillResult {
+  readonly outputRef: string;
+  readonly spillTruncated?: boolean;
+}
+
+interface OutputSpillWriter {
+  start(buffer: Buffer): void;
+  append(buffer: Buffer): void;
+  finish(): OutputSpillResult | null;
+}
+
+function processPid(target: ProcessTarget): number {
+  const value = typeof target === 'number' ? target : target?.pid;
+  const pid = Number(value);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
+}
+
+function isProcessAlive(target: ProcessTarget): boolean {
+  const pid = processPid(target);
+  if (!pid) return false;
+  if (typeof target === 'object' && target) {
+    if (typeof target.exitCode === 'number' || target.signalCode) return false;
+  }
+  return isPidAlive(pid);
+}
+
+function isPidAlive(pidValue: unknown): boolean {
+  const pid = Number(pidValue);
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return errorCode(error) === 'EPERM';
+  }
+}
+
+function isProcessGroupAlive(pidValue: unknown): boolean {
+  const pid = Number(pidValue);
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return errorCode(error) === 'EPERM';
+  }
+}
+
+function isProcessTreeAlive(target: ProcessTarget): boolean {
+  const rootPid = processPid(target);
+  if (!rootPid) return false;
+  if (process.platform === 'win32') return isProcessAlive(target);
+  return isProcessGroupAlive(rootPid);
+}
+
+function signalProcessTree(target: ProcessTarget, options: ProcessTreeTerminationOptions = {}): boolean {
+  const pid = processPid(target);
+  if (!pid) return false;
+  const force = options.force === true;
+  const signal = force ? 'SIGKILL' : String(options.signal || 'SIGTERM');
+
+  if (process.platform === 'win32') {
+    if (!isProcessAlive(target)) return false;
+    try {
+      const args = [...(force ? ['/f'] : []), '/t', '/pid', String(pid)];
+      const killer = spawn(TASKKILL_EXE, args, { stdio: 'ignore', windowsHide: true });
+      killer.once('error', error => debugKill('[rel-ai-mcp] taskkill:', error));
+      killer.unref?.();
+      return true;
+    } catch (error) {
+      debugKill('[rel-ai-mcp] taskkill:', error);
+    }
+  } else {
+    try {
+      process.kill(-pid, signal as NodeJS.Signals);
+      return true;
+    } catch (error) {
+      debugKill('[rel-ai-mcp] kill process group:', error);
+    }
+  }
+
+  try {
+    if (typeof target === 'object' && target && typeof target.kill === 'function') target.kill(signal as NodeJS.Signals);
+    else process.kill(pid, signal as NodeJS.Signals);
+    return true;
+  } catch (error) {
+    debugKill(`[rel-ai-mcp] kill ${signal}:`, error);
+    return !isProcessAlive(target);
+  }
+}
+
+function killProcessTree(target: ProcessTarget): boolean {
+  return signalProcessTree(target, { force: true, signal: 'SIGKILL' });
+}
+
+async function terminateProcessTree(target: ProcessTarget, options: ProcessTreeTerminationOptions = {}): Promise<ProcessTreeTerminationResult> {
+  const graceMs = clampMilliseconds(options.graceMs, 0, 30000, DEFAULT_TERMINATION_GRACE_MS);
+  const forceWaitMs = clampMilliseconds(options.forceWaitMs, 0, 30000, DEFAULT_FORCE_WAIT_MS);
+  const rootPid = processPid(target);
+  const trackedTargets = process.platform === 'win32' ? [target] : [];
+  const treeAlive = process.platform === 'win32'
+    ? isProcessAlive(target)
+    : isProcessGroupAlive(rootPid);
+  if (!treeAlive) {
+    return { exited: true, forced: false, gracefulSignalSent: false, forceSignalSent: false };
+  }
+
+  const gracefulSignalSent = process.platform === 'win32'
+    ? await signalWindowsProcessTree(target)
+    : signalProcessTree(target, { signal: options.signal || 'SIGTERM' });
+  const gracefulExit = process.platform === 'win32'
+    ? await waitForWindowsTargetsExit(trackedTargets, graceMs)
+    : await waitForProcessGroupExit(rootPid, graceMs);
+  if (gracefulExit) {
+    return { exited: true, forced: false, gracefulSignalSent, forceSignalSent: false };
+  }
+
+  const forceSignalSent = process.platform === 'win32'
+    ? await forceWindowsProcessTree(trackedTargets)
+    : signalProcessTree(target, { force: true, signal: 'SIGKILL' });
+  const exited = process.platform === 'win32'
+    ? await waitForWindowsTargetsExit(trackedTargets, forceWaitMs)
+    : await waitForProcessGroupExit(rootPid, forceWaitMs);
+  return { exited, forced: true, gracefulSignalSent, forceSignalSent };
+}
+
+async function signalWindowsProcessTree(target: ProcessTarget, force = false): Promise<boolean> {
+  const pid = processPid(target);
+  if (!pid || !isProcessAlive(target)) return false;
+  return new Promise<boolean>(resolve => {
+    let settled = false;
+    const finish = (value: boolean): void => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    try {
+      const killer = spawn(TASKKILL_EXE, [...(force ? ['/f'] : []), '/t', '/pid', String(pid)], {
+        stdio: 'ignore',
+        windowsHide: true
+      });
+      killer.once('error', error => {
+        debugKill(`[rel-ai-mcp] ${force ? 'force ' : ''}Windows process tree:`, error);
+        finish(!isProcessAlive(target));
+      });
+      killer.once('close', code => finish(code === 0 || !isProcessAlive(target)));
+    } catch (error) {
+      debugKill(`[rel-ai-mcp] ${force ? 'force ' : ''}Windows process tree:`, error);
+      finish(!isProcessAlive(target));
+    }
+  });
+}
+
+async function forceWindowsProcessTree(targets: readonly ProcessTarget[]): Promise<boolean> {
+  let signalSent = false;
+  const uniqueTargets = [...new Map(targets.map(target => [processPid(target), target])).values()];
+  for (const target of uniqueTargets.reverse()) {
+    if (!isProcessAlive(target)) continue;
+    signalSent = await signalWindowsProcessTree(target, true) || signalSent;
+  }
+  return signalSent;
+}
+
+function waitForWindowsTargetsExit(targets: readonly ProcessTarget[], timeoutMs: number): Promise<boolean> {
+  const uniqueTargets = [...new Map(targets.map(target => [processPid(target), target])).values()];
+  const exited = (): boolean => uniqueTargets.every(target => !isProcessAlive(target));
+  if (exited()) return Promise.resolve(true);
+  if (timeoutMs <= 0) return Promise.resolve(exited());
+  return new Promise<boolean>(resolve => {
+    const interval = setInterval(() => {
+      if (exited()) finish(true);
+    }, 25);
+    const timer = setTimeout(() => finish(exited()), timeoutMs);
+    function finish(value: boolean): void {
+      clearInterval(interval);
+      clearTimeout(timer);
+      resolve(value);
+    }
+  });
+}
+
+function waitForProcessGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
+  if (!isProcessGroupAlive(pid)) return Promise.resolve(true);
+  if (timeoutMs <= 0) return Promise.resolve(!isProcessGroupAlive(pid));
+  return new Promise<boolean>(resolve => {
+    let settled = false;
+    const interval = setInterval(() => {
+      if (!isProcessGroupAlive(pid)) finish(true);
+    }, 25);
+    const timer = setTimeout(() => finish(!isProcessGroupAlive(pid)), timeoutMs);
+    function finish(exited: boolean): void {
+      if (settled) return;
+      settled = true;
+      clearInterval(interval);
+      clearTimeout(timer);
+      resolve(exited);
+    }
+  });
+}
+
+async function runProcess(command: string, args: readonly string[] = [], options: RunProcessOptions = {}, config: ProcessRuntimeConfig = {}): Promise<RunProcessResult> {
+  const resourceClass = String(options.resourceClass || '').trim();
+  const queueStartedAt = Date.now();
+  let resourceLease: ResourceLease | null = null;
+  if (resourceClass) {
+    try {
+      resourceLease = await acquireHostResource(
+        resourceClass,
+        String(options.resourceOwner || options.cwd || 'global'),
+        { signal: options.signal, timeoutMs: options.queueTimeoutMs }
+      ) as ResourceLease;
+    } catch (error) {
+      const queueWaitMs = Date.now() - queueStartedAt;
+      if (errorCode(error) === 'HOST_RESOURCE_ABORTED') {
+        return terminalQueueResult({
+          error: 'Operation cancelled while waiting for host resources.',
+          cancelled: true,
+          queueWaitMs
+        });
+      }
+      if (errorCode(error) === 'HOST_RESOURCE_QUEUE_TIMEOUT') {
+        return terminalQueueResult({
+          error: errorMessage(error),
+          queueTimedOut: true,
+          queueWaitMs
+        });
+      }
+      throw error;
+    }
+  }
+  try {
+    return await new Promise<RunProcessResult>((resolve) => {
+      const startedAt = Date.now();
+      const queueWaitMs = resourceLease?.waitMs || 0;
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
+      let stdoutTruncated = false;
+      let stderrTruncated = false;
+      let settled = false;
+      let timer: NodeJS.Timeout | null = null;
+      let terminationRequest: TerminationRequest | null = null;
+      const configuredMaxOutputBytes = Number(options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES);
+      const maxOutputBytes = Number.isFinite(configuredMaxOutputBytes) && configuredMaxOutputBytes > 0
+        ? configuredMaxOutputBytes
+        : DEFAULT_MAX_OUTPUT_BYTES;
+      const stdoutSpill = createOutputSpillWriter(config, options.outputSpillTaskId) as OutputSpillWriter;
+      const stderrSpill = createOutputSpillWriter(config, options.outputSpillTaskId) as OutputSpillWriter;
+      const stdoutBuffer = new BoundedOutputBuffer(maxOutputBytes, stdoutSpill);
+      const stderrBuffer = new BoundedOutputBuffer(maxOutputBytes, stderrSpill);
+      const timeoutMs = Number.isFinite(Number(options.timeout)) && Number(options.timeout) > 0
+        ? Number(options.timeout)
+        : 0;
+      const terminationGraceMs = clampMilliseconds(
+        options.terminationGraceMs ?? config.processTerminationGraceMs,
+        0,
+        30000,
+        DEFAULT_TERMINATION_GRACE_MS
+      );
+      const forceWaitMs = clampMilliseconds(
+        options.forceWaitMs ?? config.processForceWaitMs,
+        0,
+        30000,
+        DEFAULT_FORCE_WAIT_MS
+      );
+      const isGit = command === 'git';
+      if (isGit && options.shell) throw new Error('Rel.AI-owned Git commands must run without shell parsing.');
+      const executable = isGit ? (resolveGitExecutable() || command) : command;
+      const childEnvironment = makeProcessEnvironment(options.env, {
+        allow: config.processEnvironment?.allow,
+        inheritCredentials: options.inheritCredentials === true
+      });
+      Object.assign(childEnvironment, traceContextEnvironment());
+      const processArgs = isGit ? hardenedGitArgs(config, args) : [...args];
+      const spawnOptions = {
+        cwd: options.cwd,
+        env: childEnvironment,
+        detached: process.platform !== 'win32',
+        windowsHide: true
+      };
+      const child: ChildProcess = options.shell
+        ? spawn(options.commandString || executable, { ...spawnOptions, shell: true })
+        : spawn(executable, processArgs, { ...spawnOptions, shell: false });
+      const abortSignal = options.signal;
+      let resolveChildClosed: (() => void) | null = null;
+      const childClosed = new Promise<void>(resolveClosed => { resolveChildClosed = resolveClosed; });
+
+      function finish(payload: Omit<RunProcessResult, 'durationMs' | 'queueWaitMs' | 'stdoutBytes' | 'stderrBytes' | 'stdoutTruncated' | 'stderrTruncated'>): void {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        abortSignal?.removeEventListener?.('abort', onAbort);
+        const stdoutSpillResult = stdoutSpill.finish();
+        const stderrSpillResult = stderrSpill.finish();
+        resolve({
+          ...payload,
+          durationMs: Date.now() - startedAt,
+          queueWaitMs,
+          stdoutBytes,
+          stderrBytes,
+          stdoutTruncated,
+          stderrTruncated,
+          ...(stdoutSpillResult ? { stdoutOutputRef: stdoutSpillResult.outputRef, stdoutSpillTruncated: stdoutSpillResult.spillTruncated } : {}),
+          ...(stderrSpillResult ? { stderrOutputRef: stderrSpillResult.outputRef, stderrSpillTruncated: stderrSpillResult.spillTruncated } : {})
+        });
+      }
+
+      function finishTermination(code: number | null | undefined, signal: NodeJS.Signals | string | null | undefined, outcome: ProcessTreeTerminationResult = { exited: false, forced: false }): void {
+        const request = terminationRequest;
+        if (!request || settled) return;
+        finish({
+          exitCode: typeof code === 'number' ? code : -1,
+          signal: signal || (outcome.forced ? 'SIGKILL' : 'SIGTERM'),
+          stdout: processOutputText(stdoutBuffer, options.preserveOutputWhitespace),
+          stderr: processOutputText(stderrBuffer, options.preserveOutputWhitespace),
+          error: request.error,
+          cancelled: request.cancelled === true,
+          timedOut: request.timedOut === true,
+          terminationConfirmed: outcome.exited !== false,
+          forcedTermination: outcome.forced === true
+        });
+      }
+
+      function requestTermination(request: TerminationRequest): void {
+        if (settled || terminationRequest) return;
+        terminationRequest = request;
+        stderrBuffer.append(request.marker);
+        stderrTruncated = stderrBuffer.truncated;
+        void terminateProcessTree(child, { graceMs: terminationGraceMs, forceWaitMs })
+          .then(async outcome => {
+            if (outcome.exited) await childClosed;
+            finishTermination(child.exitCode, child.signalCode, outcome);
+          })
+          .catch(async error => {
+            const exited = !isProcessTreeAlive(child);
+            if (exited) await childClosed;
+            finishTermination(-1, undefined, {
+              exited,
+              forced: true,
+              error: errorMessage(error)
+            });
+          });
+      }
+
+      function onAbort(): void {
+        requestTermination({
+          marker: '\n[rel-ai-mcp operation cancelled]\n',
+          error: 'Operation cancelled.',
+          cancelled: true,
+          timedOut: false
+        });
+      }
+
+      if (child.stdin) {
+        if (options.input != null) child.stdin.end(String(options.input));
+        else child.stdin.end();
+      }
+
+      child.stdout?.on('data', (chunk: Buffer | string) => {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        stdoutBytes += buffer.length;
+        stdoutBuffer.append(buffer);
+        stdoutTruncated = stdoutBuffer.truncated;
+      });
+      child.stderr?.on('data', (chunk: Buffer | string) => {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        stderrBytes += buffer.length;
+        stderrBuffer.append(buffer);
+        stderrTruncated = stderrBuffer.truncated;
+      });
+      child.on('error', (error: Error) => {
+        resolveChildClosed?.();
+        if (settled) return;
+        if (terminationRequest) return;
+        finish({
+          exitCode: -1,
+          stdout: processOutputText(stdoutBuffer, options.preserveOutputWhitespace),
+          stderr: processOutputText(stderrBuffer, options.preserveOutputWhitespace),
+          error: error.message,
+          spawnError: true,
+          timedOut: false
+        });
+      });
+      child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+        resolveChildClosed?.();
+        if (settled) return;
+        if (terminationRequest) return;
+        finish({
+          exitCode: typeof code === 'number' ? code : -1,
+          ...(signal ? { signal } : {}),
+          stdout: processOutputText(stdoutBuffer, options.preserveOutputWhitespace),
+          stderr: processOutputText(stderrBuffer, options.preserveOutputWhitespace),
+          timedOut: false
+        });
+      });
+
+      if (abortSignal?.aborted) onAbort();
+      else abortSignal?.addEventListener?.('abort', onAbort, { once: true });
+
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          requestTermination({
+            marker: `\n[rel-ai-mcp timed out after ${timeoutMs}ms]\n`,
+            error: `Timed out after ${timeoutMs}ms`,
+            cancelled: false,
+            timedOut: true
+          });
+        }, timeoutMs);
+        timer.unref?.();
+      }
+    });
+  } finally {
+    resourceLease?.release();
+  }
+}
+
+function terminalQueueResult(options: { readonly error: string; readonly cancelled?: boolean; readonly queueTimedOut?: boolean; readonly queueWaitMs: number }): RunProcessResult {
+  return {
+    exitCode: -1,
+    stdout: '',
+    stderr: '',
+    error: options.error,
+    cancelled: options.cancelled === true,
+    timedOut: false,
+    queueTimedOut: options.queueTimedOut === true,
+    queueWaitMs: options.queueWaitMs,
+    durationMs: 0,
+    stdoutBytes: 0,
+    stderrBytes: 0,
+    stdoutTruncated: false,
+    stderrTruncated: false
+  };
+}
+
+function hardenedGitArgs(config: ProcessRuntimeConfig, args: readonly string[]): string[] {
+  const hooksPath = path.join(getStateDir(config), DISABLED_GIT_HOOKS_PATH);
+  return [
+    '-c', `core.hooksPath=${hooksPath}`,
+    '-c', 'core.fsmonitor=false',
+    '-c', 'commit.gpgSign=false',
+    '-c', 'tag.gpgSign=false',
+    '-c', 'push.gpgSign=false',
+    ...args
+  ];
+}
+
+function processOutputText(buffer: BoundedOutputBuffer, preserveWhitespace = false): string {
+  const text = buffer.text();
+  return preserveWhitespace ? text : text.trim();
+}
+
+const TRUNCATED_OUTPUT_MARKER = '\n[rel-ai-mcp truncated output]\n';
+const TRUNCATED_OUTPUT_MARKER_BYTES = Buffer.byteLength(TRUNCATED_OUTPUT_MARKER, 'utf8');
+
+class BoundedOutputBuffer {
+  readonly maxBytes: number;
+  readonly chunks: Buffer[] = [];
+  retainedBytes = 0;
+  truncated = false;
+  readonly spill: OutputSpillWriter | null;
+
+  constructor(maxBytes: number, spill: OutputSpillWriter | null = null) {
+    this.maxBytes = Math.max(0, Number(maxBytes) || 0);
+    this.spill = spill;
+  }
+
+  append(value: Buffer | string): void {
+    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(String(value || ''), 'utf8');
+    if (!chunk.length) return;
+    const wasTruncated = this.truncated;
+    this.chunks.push(chunk);
+    this.retainedBytes += chunk.length;
+    if (!wasTruncated && this.retainedBytes <= this.maxBytes) return;
+    if (!wasTruncated) {
+      this.truncated = true;
+      this.spill?.start(Buffer.concat(this.chunks, this.retainedBytes));
+    } else {
+      this.spill?.append(chunk);
+    }
+    this.trimTo(Math.max(0, this.maxBytes - TRUNCATED_OUTPUT_MARKER_BYTES));
+  }
+
+  trimTo(limit: number): void {
+    while (this.retainedBytes > limit && this.chunks.length) {
+      const excess = this.retainedBytes - limit;
+      const first = this.chunks[0];
+      if (!first) break;
+      if (first.length <= excess) {
+        this.chunks.shift();
+        this.retainedBytes -= first.length;
+        continue;
+      }
+      this.chunks[0] = first.subarray(excess);
+      this.retainedBytes -= excess;
+    }
+  }
+
+  text(): string {
+    const tail = Buffer.concat(this.chunks, this.retainedBytes).toString('utf8');
+    if (!this.truncated) return tail;
+    return TRUNCATED_OUTPUT_MARKER + tail.replace(/^\uFFFD+/u, '');
+  }
+}
+
+function appendLimited(current: string, next: string, maxBytes: number): string {
+  const combined = current + next;
+  if (Buffer.byteLength(combined, 'utf8') <= maxBytes) return combined;
+  const marker = '\n[rel-ai-mcp truncated output]\n';
+  const allowed = Math.max(0, maxBytes - Buffer.byteLength(marker, 'utf8'));
+  const buffer = Buffer.from(combined, 'utf8');
+  const tail = buffer.subarray(Math.max(0, buffer.length - allowed)).toString('utf8').replace(/^\uFFFD+/u, '');
+  return marker + tail;
+}
+
+function summarizeCommand(result: Partial<RunProcessResult> & Pick<RunProcessResult, 'exitCode'>): Record<string, unknown> {
+  return {
+    ok: result.exitCode === 0,
+    exitCode: result.exitCode,
+    ...(result.signal ? { signal: result.signal } : {}),
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.durationMs != null ? { durationMs: result.durationMs } : {}),
+    ...(result.queueWaitMs != null ? { queueWaitMs: result.queueWaitMs } : {}),
+    ...(result.stdoutBytes != null ? { stdoutBytes: result.stdoutBytes } : {}),
+    ...(result.stderrBytes != null ? { stderrBytes: result.stderrBytes } : {}),
+    ...(result.stdoutTruncated ? { stdoutTruncated: true } : {}),
+    ...(result.stderrTruncated ? { stderrTruncated: true } : {}),
+    ...(result.timedOut ? { timedOut: true } : {}),
+    ...(result.queueTimedOut ? { queueTimedOut: true } : {}),
+    ...(result.cancelled ? { cancelled: true } : {}),
+    ...(result.terminationConfirmed != null ? { terminationConfirmed: result.terminationConfirmed } : {}),
+    ...(result.forcedTermination ? { forcedTermination: true } : {}),
+    ...(result.stdout ? { stdout: result.stdout } : {}),
+    ...(result.stderr ? { stderr: result.stderr } : {})
+  };
+}
+
+function clampMilliseconds(value: unknown, min: number, max: number, fallback: number): number {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(number)));
+}
+
+function errorCode(error: unknown): string {
+  return error && typeof error === 'object' && 'code' in error ? String(error.code || '') : '';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function debugKill(label: string, error: unknown): void {
+  if (process.env.REL_AI_MCP_DEBUG) console.error(label, error);
+}
+
+export {
+  appendLimited,
+  isProcessTreeAlive,
+  killProcessTree,
+  runProcess,
+  summarizeCommand,
+  terminateProcessTree
+};
+export type {
+  ProcessTreeTerminationResult,
+  RunProcessOptions,
+  RunProcessResult
+};

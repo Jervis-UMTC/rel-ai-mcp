@@ -25,7 +25,7 @@ export async function restartConnection() {
   }
   try {
     const status = await window.relaiDesktop.restartConnection();
-    requestDashboardRefresh({ structural: true });
+    requestDashboardRefresh();
     return connectionRestartResult(status);
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error || 'Connection retry failed.') };

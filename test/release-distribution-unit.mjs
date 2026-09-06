@@ -132,10 +132,10 @@ function verifyArtifactResolution() {
   assert.equal(names.linuxDeb, 'Debian-9.8.7.deb');
   assert.equal(names.macDmgArm64, 'Mac-9.8.7-arm64.dmg');
   assert.deepEqual(platformReleaseArtifactNames('9.8.7', 'win32', 'x64', { electronPackage: customPackage }), [
-    names.installer, names.portable, names.blockmap, names.metadata, names.sbom, names.sizeReport
+    names.installer, names.portable, names.blockmap, names.metadata, names.sbom
   ]);
   assert.deepEqual(platformReleaseArtifactNames('9.8.7', 'linux', 'x64', { electronPackage: customPackage }), [
-    names.linuxAppImage, names.linuxDeb, names.linuxMetadata, names.linuxSizeReport
+    names.linuxAppImage, names.linuxDeb, names.linuxMetadata
   ]);
 }
 

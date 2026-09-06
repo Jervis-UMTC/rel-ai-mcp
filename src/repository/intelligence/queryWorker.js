@@ -1,44 +1,17 @@
-import { parentPort } from 'node:worker_threads';
-
 import { cachedRepositoryContext, cachedRepositorySummary, cachedSearchGraphContext } from './contextPlanner.js';
 import { currentGeneration, openIndexDatabase, repositoryIndexPath } from './database.js';
 import { executeCodeInspectQuery, executeSemanticSearchQuery } from './queryService.js';
 
-let activeJob = null;
-let cachedDatabase = null;
-let cachedDatabaseIdentity = '';
+let sourceCacheIdentity = '';
 const SOURCE_CACHE_MAX_FILES = 128;
 const SOURCE_CACHE_MAX_BYTES = 8 * 1024 * 1024;
 
 let sourceCache = createBoundedSourceCache();
 
-parentPort?.on('message', message => {
-  if (message?.type === 'abort') {
-    if (activeJob?.jobId === message.jobId && !activeJob.controller.signal.aborted) {
-      activeJob.controller.abort(new Error(String(message.reason || 'Repository Intelligence query cancelled.')));
-    }
-    return;
-  }
-  if (message?.type !== 'run') return;
-  if (activeJob) {
-    parentPort?.postMessage({
-      type: 'result',
-      jobId: message.jobId,
-      ok: false,
-      error: { name: 'Error', code: 'QUERY_WORKER_BUSY', message: 'Repository Intelligence query worker already has an active job.', stack: '' }
-    });
-    return;
-  }
-  void runJob(message.jobId, message.job || {});
-});
-
-async function runJob(jobId, job) {
-  const controller = new AbortController();
-  activeJob = { jobId, controller };
+export default async function runJob(job = {}) {
   try {
     const options = {
       ...(job.options || {}),
-      signal: controller.signal,
       repositoryStatuses: job.repositoryStatuses || {}
     };
     let result;
@@ -57,11 +30,9 @@ async function runJob(jobId, job) {
     } else {
       throw Object.assign(new Error(`Unknown Repository Intelligence query job: ${String(job.kind || '')}`), { code: 'QUERY_JOB_UNKNOWN' });
     }
-    parentPort?.postMessage({ type: 'result', jobId, ok: true, result });
+    return { ok: true, result };
   } catch (error) {
-    parentPort?.postMessage({
-      type: 'result',
-      jobId,
+    return {
       ok: false,
       error: {
         name: String(error?.name || 'Error'),
@@ -69,9 +40,7 @@ async function runJob(jobId, job) {
         message: String(error?.message || error || 'Repository Intelligence query worker failed.'),
         stack: typeof error?.stack === 'string' ? error.stack : ''
       }
-    });
-  } finally {
-    if (activeJob?.jobId === jobId) activeJob = null;
+    };
   }
 }
 
@@ -98,19 +67,23 @@ async function executeIndexedQuery(job, options, execute) {
       try { db.exec('ROLLBACK'); } catch {}
     }
     throw error;
+  } finally {
+    try { db.close(); } catch {}
   }
 }
 
 function queryOptions(job, options) {
   const databaseFile = repositoryIndexPath(job.config, job.workspace);
   const identity = `${databaseFile}:${String(job.index?.fingerprint || '')}`;
-  if (!cachedDatabase || cachedDatabaseIdentity !== identity) {
-    try { cachedDatabase?.close(); } catch {}
-    cachedDatabase = openIndexDatabase(databaseFile, { readonly: true });
-    cachedDatabaseIdentity = identity;
+  if (sourceCacheIdentity !== identity) {
+    sourceCacheIdentity = identity;
     sourceCache = createBoundedSourceCache();
   }
-  return { ...options, database: cachedDatabase, sourceCache };
+  return {
+    ...options,
+    database: openIndexDatabase(databaseFile, { readonly: true }),
+    sourceCache
+  };
 }
 
 function createBoundedSourceCache() {

@@ -85,7 +85,7 @@ assert.equal(isToolSurfaceSourcePath('src/tools/status.js'), true, 'tool status 
 assert.equal(isToolSurfaceSourcePath('src/tools/task.js'), true, 'tool task handlers are tool-surface changes');
 assert.equal(isToolSurfaceSourcePath('src/tools/cancellation.js'), true, 'tool cancellation behavior is a tool-surface change');
 assert.equal(isToolSurfaceSourcePath('src/tools/new-contract-module.js'), true, 'new tool-system files must inherit tool-surface risk without allowlist maintenance');
-assert.equal(isToolSurfaceSourcePath('src/http/mcpTransport.js'), false, 'non-tool-system paths keep their own risk classification');
+assert.equal(isToolSurfaceSourcePath('src/http/mcpTransport.ts'), false, 'non-tool-system paths keep their own risk classification');
 
 const publicSchemaByName = new Map(gatewayManifest.tools.map(tool => [tool.name, tool.inputSchema]));
 const resolvedKeys = [];
@@ -202,10 +202,6 @@ function sampleArgs(entry) {
     case 'relai_inspect:trace': args.symbol = 'target'; break;
     case 'relai_inspect:related': args.query = 'target'; break;
     case 'relai_inspect:impact': args.paths = ['src/index.js']; break;
-    case 'relai_skill:create':
-    case 'relai_skill:edit': Object.assign(args, { name: 'contract-skill', content: 'skill content' }); break;
-    case 'relai_skill:patch': Object.assign(args, { name: 'contract-skill', oldText: 'old', newText: 'new' }); break;
-    case 'relai_skill:delete': args.name = 'contract-skill'; break;
     case 'relai_exec:default': args.command = 'node --version'; break;
     case 'relai_process:start': Object.assign(args, { command: 'node server.js', kind: 'service', purpose: 'Contract parity.' }); break;
     case 'relai_process:read':

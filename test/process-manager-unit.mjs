@@ -27,7 +27,7 @@ const workspace = { alias: 'app', path: workspaceRoot };
 const otherWorkspace = { alias: 'other', path: path.join(root, 'other-workspace') };
 const principalA = { clientId: 'client-a', authMode: 'oauth' };
 const principalB = { clientId: 'client-b', authMode: 'oauth' };
-const ownerStart = { taskId: 'work-session-a', principal: principalA, workspace: 'app' };
+const ownerStart = { taskId: 'work-session-a', nativeTaskId: 'native-start-a', principal: principalA, workspace: 'app' };
 const ownerLater = { taskId: 'work-session-a', principal: principalA, workspace: 'app' };
 const otherSession = { taskId: 'work-session-b', principal: principalA, workspace: 'app' };
 const otherPrincipal = { taskId: 'work-session-c', principal: principalB, workspace: 'app' };
@@ -44,13 +44,21 @@ fs.writeFileSync(persistentScript, `
 process.stdout.write(Buffer.from([0xff, 0xfe, 0xfd]));
 process.stdout.write('READY\\n');
 process.stdin.setEncoding('utf8');
+let pendingInput = '';
 process.stdin.on('data', value => {
-  if (value.startsWith('NOISE:')) {
-    const count = Number(value.slice(6)) || 0;
-    process.stdout.write('x'.repeat(count) + '\\n');
-    return;
+  pendingInput += value;
+  for (;;) {
+    const newlineIndex = pendingInput.indexOf('\\n');
+    if (newlineIndex < 0) break;
+    const line = pendingInput.slice(0, newlineIndex + 1);
+    pendingInput = pendingInput.slice(newlineIndex + 1);
+    if (line.startsWith('NOISE:')) {
+      const count = Number(line.slice(6).trim()) || 0;
+      process.stdout.write('x'.repeat(count) + '\\n');
+      continue;
+    }
+    process.stdout.write('ECHO:' + line);
   }
-  process.stdout.write('ECHO:' + value);
 });
 setInterval(() => {}, 1000);
 `);
@@ -76,7 +84,7 @@ try {
   assert.equal(started.kind, 'service');
   assert.match(started.purpose, /persistent process lifecycle/);
   assert.match(started.metadataRevision, /^[A-Za-z0-9_-]{16}$/);
-  assert.equal(started.originatingTaskId, null);
+  assert.equal(started.originatingTaskId, ownerStart.nativeTaskId);
   assert.equal(started.workSessionId, ownerStart.taskId);
   assert.equal(started.readiness.verified, true);
   assert.equal(started.status, 'running');

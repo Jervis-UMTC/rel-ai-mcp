@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { createDesktopPowerIntegration } from '../electron/desktop-power.js';
 import { createTaskActivityRuntime, taskActivityBlockReason } from '../electron/tool-sleep-blocker.js';
 
 let snapshotReads = 0;
@@ -95,4 +96,33 @@ assert.equal(blockerState.size, 0, 'disabling persistent keep-awake releases the
 assert.ok(statusChanges.length >= 3, 'initial, running, and terminal status changes must be published');
 
 runtime.stop();
-console.log('Electron task activity runtime stays incremental on live tool events.');
+
+let resumeListener = null;
+let resumeChecks = 0;
+let powerUnsubscribed = false;
+const powerRuntime = createDesktopPowerIntegration({
+  powerMonitor: {
+    on(name, listener) { assert.equal(name, 'resume'); resumeListener = listener; },
+    off(name, listener) { assert.equal(name, 'resume'); assert.equal(listener, resumeListener); resumeListener = null; }
+  },
+  powerSaveBlocker: {
+    start() { return 1; },
+    stop() { return true; },
+    isStarted() { return false; }
+  },
+  toolActivity: {
+    getToolActivity() { return { state: 'idle', activeCalls: 0, activeTaskCount: 0, tasks: [] }; },
+    onToolActivity() { return () => { powerUnsubscribed = true; }; }
+  },
+  onResume: () => { resumeChecks += 1; }
+});
+assert.equal(powerRuntime.start(), true);
+assert.equal(powerRuntime.start(), false, 'power resume binding must be idempotent');
+resumeListener?.();
+assert.equal(resumeChecks, 1, 'resume events must reach the owned power callback');
+assert.equal(powerRuntime.stop(), true);
+assert.equal(resumeListener, null, 'power shutdown must detach the resume listener');
+assert.equal(powerUnsubscribed, true, 'power shutdown must stop the task activity subscription');
+assert.equal(powerRuntime.stop(), false, 'power shutdown must be idempotent');
+
+console.log('Electron task activity and power integration stay incremental and lifecycle-owned.');

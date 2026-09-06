@@ -6,12 +6,13 @@ import { fileURLToPath } from 'node:url';
 import { SERVER_INFO_META_KEY } from '@modelcontextprotocol/server';
 import { TASKS_EXTENSION_REVISION } from '../src/mcp/protocol.js';
 import { repositoryIndexPath } from '../src/repository/intelligence/database.js';
-import { readTaskHistorySessionRecord } from '../src/taskHistoryStore.js';
+import { readTaskHistorySessionRecord } from '../src/taskHistoryStore.ts';
 import { createHttpMcpSession, MCP_VERSION } from './helpers/http-mcp.mjs';
 import { activeMcpToolCount, activeToolCount, activeToolNames, activeToolSurface } from './helpers/tool-surface.mjs';
 import { localHttpFetch as fetch, startHttpTestServer, stopHttpTestServer } from './helpers/http-test-server.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const expectedVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const token = 'http-smoke-token';
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-http-smoke-'));
 const profile = path.join(stateDir, 'connection.json');
@@ -80,7 +81,7 @@ try {
     { revision: TASKS_EXTENSION_REVISION }
   );
   assert.equal(discovery.body.result?._meta?.[SERVER_INFO_META_KEY]?.name, 'rel-ai-mcp');
-  assert.match(discovery.body.result?._meta?.[SERVER_INFO_META_KEY]?.version || '', /^0\./);
+  assert.equal(discovery.body.result?._meta?.[SERVER_INFO_META_KEY]?.version, expectedVersion, 'HTTP discovery must report the canonical package version');
   const serverInstructions = discovery.body.result?.instructions || '';
   assert.match(serverInstructions, /work_id is optional durable attribution/i);
   assert.match(serverInstructions, /approval/i);

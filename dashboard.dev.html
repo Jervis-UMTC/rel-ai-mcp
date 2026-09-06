@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rel.AI Dashboard Dev</title>
+</head>
+<body>
+  <div id="dashboardRoot"></div>
+  <script type="module">
+    const auth = await fetch('/__relai_auth', { credentials: 'same-origin' });
+    if (!auth.ok) {
+      document.getElementById('dashboardRoot').textContent = 'Dashboard development authentication failed. Check REL_AI_MCP_TOKEN and the local HTTP server.';
+      throw new Error(`Dashboard development authentication failed with HTTP ${auth.status}.`);
+    }
+    await import('/public/dashboard.js');
+  </script>
+</body>
+</html>

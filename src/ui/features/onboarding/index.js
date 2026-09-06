@@ -1,15 +1,11 @@
 import { postJson } from '../../api.js';
-import { copyText } from '../../clipboard.js';
-import { toast } from '../../components/toast.js';
 import { routeMetadata } from '../../navigation-catalog.js';
-import { esc } from '../../utils.js';
-import { chatGptFirstPrompt, createChatGptSetupGuide } from '../settings/connection-guidance.js';
 
 const DISMISSED_KEY = 'relai_desktop_setup_dismissed';
 let completionPersisted = false;
 let pendingPersisted = false;
 
-function desktopSetupSteps({
+export function desktopSetupSteps({
   hasWorkspace = false,
   endpointReady = false,
   chatgptReady = false,
@@ -56,91 +52,19 @@ function desktopSetupSteps({
   ];
 }
 
-export function desktopSetupItems(options = {}) {
-  return desktopSetupSteps(options).filter(item => !item.complete);
+export function isDesktopSetupDismissed() {
+  try { return localStorage.getItem(DISMISSED_KEY) === '1'; } catch { return false; }
 }
 
-export function createDesktopSetupChecklist(options = {}) {
-  const steps = desktopSetupSteps(options);
-  const remaining = steps.filter(item => !item.complete);
-  if (!remaining.length || isDesktopSetupDismissed()) return null;
-
-  const current = steps.find(item => !item.complete && !item.locked) || remaining[0];
-  const completedCount = steps.length - remaining.length;
-  const checklist = document.createElement('section');
-  checklist.className = 'card desktop-setup-checklist';
-  checklist.dataset.desktopSetupChecklist = '';
-  checklist.innerHTML = `
-    <div class="card-head desktop-setup-head">
-      <div>
-        <span class="desktop-setup-eyebrow">Getting started</span>
-        <h3>Get Rel.AI working with ChatGPT</h3>
-        <p>${completedCount} of ${steps.length} steps complete. Follow the highlighted step.</p>
-      </div>
-      <button class="secondary compact-button" type="button" data-dismiss-setup>Dismiss guide</button>
-    </div>`;
-
-  const body = document.createElement('div');
-  body.className = 'card-body desktop-setup-items';
-  steps.forEach((item, index) => body.appendChild(renderSetupStep(item, index, current?.id, options)));
-  checklist.appendChild(body);
-
-  checklist.querySelector('[data-dismiss-setup]').addEventListener('click', async () => {
-    setDesktopSetupDismissed(true);
-    checklist.remove();
-    await persistDesktopSetup({ skipped: true, handoffPending: false, source: 'overview-checklist' });
-    toast('Getting started guide dismissed.', { variant: 'info' });
-  });
-  checklist.querySelector('[data-copy-first-request]')?.addEventListener('click', async event => {
-    const button = event.currentTarget;
-    try {
-      await copyText(chatGptFirstPrompt(options.workspaceAlias));
-      button.textContent = 'Copied';
-      setTimeout(() => { if (button.isConnected) button.textContent = 'Copy first request'; }, 1400);
-    } catch {
-      toast('Clipboard access failed.', { variant: 'error' });
-    }
-  });
-  return checklist;
-}
-
-function renderSetupStep(item, index, currentId, options = {}) {
-  const row = document.createElement('div');
-  const current = item.id === currentId;
-  row.className = `desktop-setup-item${item.complete ? ' done' : ''}${current ? ' current' : ''}${item.locked ? ' locked' : ''}`;
-  const state = item.complete ? 'Done' : item.locked ? 'Not ready' : current ? 'Next' : 'Ready';
-  const action = renderSetupAction(item, current);
-  row.innerHTML = `
-    <span class="desktop-setup-index" aria-hidden="true">${item.complete ? '✓' : index + 1}</span>
-    <div class="desktop-setup-copy">
-      <div class="desktop-setup-title-row"><strong>${esc(item.title)}</strong><span class="desktop-setup-state">${state}</span></div>
-      <p>${esc(item.description)}</p>
-      ${item.id === 'first-request' && current ? `<div class="desktop-first-request"><span>Paste this into ChatGPT</span><code>${esc(chatGptFirstPrompt(options.workspaceAlias))}</code></div>` : ''}
-    </div>
-    ${action}`;
-  if (item.id === 'chatgpt' && current) {
-    const guide = createChatGptSetupGuide({
-      compact: true,
-      mode: 'create',
-      tunnelId: options.tunnelId,
-      includeFirstPrompt: false
-    });
-    guide.classList.add('desktop-chatgpt-guide');
-    row.querySelector('.desktop-setup-copy')?.appendChild(guide);
-  }
-  return row;
-}
-
-function renderSetupAction(item, current) {
-  if (item.complete || item.locked || item.actionType === 'guide') return '';
-  if (item.actionType === 'copy') {
-    return `<button class="${current ? 'primary' : 'secondary'} compact-button" type="button" data-copy-first-request>${esc(item.action)}</button>`;
-  }
-  return `<a class="buttonlike ${current ? 'primary' : 'secondary'} compact-button" href="${esc(item.href)}">${esc(item.action)}</a>`;
+export async function dismissDesktopSetup() {
+  setDesktopSetupDismissed(true);
+  announceDesktopSetupState(false);
+  return persistDesktopSetup({ skipped: true, handoffPending: false, source: 'overview-checklist' });
 }
 
 export async function completeDesktopSetup() {
   setDesktopSetupDismissed(true);
+  announceDesktopSetupState(false);
   if (completionPersisted) return null;
   completionPersisted = true;
   return persistDesktopSetup({ completed: true, handoffPending: false, source: 'overview-checklist' });
@@ -149,12 +73,9 @@ export async function completeDesktopSetup() {
 export function syncDesktopSetupState(status = {}) {
   const pending = status.needsOnboarding === true || status.handoffPending === true;
   setDesktopSetupDismissed(!pending);
+  announceDesktopSetupState(pending);
   if (pending) persistPendingSetup();
   return pending;
-}
-
-function isDesktopSetupDismissed() {
-  try { return localStorage.getItem(DISMISSED_KEY) === '1'; } catch { return false; }
 }
 
 function setDesktopSetupDismissed(value) {
@@ -162,6 +83,11 @@ function setDesktopSetupDismissed(value) {
     if (value) localStorage.setItem(DISMISSED_KEY, '1');
     else localStorage.removeItem(DISMISSED_KEY);
   } catch {}
+}
+
+function announceDesktopSetupState(pending) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('relai:onboarding-state', { detail: { pending } }));
 }
 
 function persistPendingSetup() {

@@ -7,6 +7,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const productionRoots = ['bin', 'electron', 'scripts', 'src'];
 const ignoredDirectories = new Set(['node_modules', 'dist', 'vendor']);
 const allowedCjs = new Set(['electron/preload.cjs']);
+const allowedInteropSyntax = new Map([
+  ['scripts/verify-node-pty-runtime.mjs', new Set(['require() declaration', 'createRequire import', 'createRequire call'])],
+  ['scripts/verify-packaged-computer-runtime.mjs', new Set(['require() declaration'])]
+]);
 const forbiddenSyntax = [
   { label: 'require() declaration', pattern: /^\s*(?:const|let|var)\s+[^=\n]+?=\s*require\s*\(/m },
   { label: 'require() statement', pattern: /^\s*require\s*\(/m },
@@ -51,6 +55,7 @@ for (const file of productionFiles.filter(file => /\.(?:js|mjs|cjs)$/.test(file)
     continue;
   }
   for (const check of forbiddenSyntax) {
+    if (allowedInteropSyntax.get(relative)?.has(check.label)) continue;
     assert.doesNotMatch(source, check.pattern, `${relative} contains forbidden first-party CommonJS syntax: ${check.label}`);
   }
 }

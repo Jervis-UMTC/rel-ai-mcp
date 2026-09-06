@@ -14,7 +14,8 @@ import {
   sanitizeDisplayText,
   sanitizeTaskRecord
 } from './taskObservability.js';
-import { isTerminalTaskStatus, normalizeLiveTaskStatus } from './taskState.js';
+import { isTerminalTaskStatus, transitionTaskStatus } from './taskState.js';
+import { TASK_RUNTIME_TERMINAL_PHASES } from './taskEvents.js';
 import { DEFAULT_TASK_ACTIVITY_IDLE_MS, MAX_TASK_ACTIVITY_IDLE_MS, MIN_TASK_ACTIVITY_IDLE_MS } from './taskTiming.js';
 import { canonicalTaskSnapshot, lifecycleChangedFields } from './taskLifecycle.js';
 import { classifyTaskIntent } from './workflow/intent.js';
@@ -37,6 +38,7 @@ function createToolActivityTracker(options = {}) {
 
   function beginConnectorToolCall(details = {}) {
     if (details.trackTask === false) return beginObservedToolCall(details);
+    if (isCompletedTaskRetry(details)) return beginCompletedTaskRetry(details);
     let finished = false;
     const startedAt = now();
     const scopeId = resolveScopeId(details);
@@ -109,7 +111,7 @@ function createToolActivityTracker(options = {}) {
     task.updatedAt = startedAt;
     const controlCall = operation.internalOperation === OP.WORK_CANCEL;
     if (!controlCall) {
-      task.status = initialActivity.category === 'validation' ? 'validating' : 'running';
+      transitionTaskStatus(task, initialActivity.category === 'validation' ? 'validating' : 'running');
       task.currentStage = initialActivity.currentStage || operation.label;
       task.currentActivity = initialActivity.currentActivity || operation.detail;
       task.progress = normalizeTaskProgress(initialActivity.progress, task.status);
@@ -181,9 +183,8 @@ function createToolActivityTracker(options = {}) {
       task.updatedAt = task.lastActivityAt;
       task.currentStage = sanitizeDisplayText(patch.currentStage || current.activity?.title || task.currentStage || 'Running tool', 500);
       task.currentActivity = sanitizeDisplayText(patch.currentActivity || current.activity?.summary || current.detail || task.currentActivity || '', 500);
-      if (patch.status) {
-        const nextStatus = normalizeLiveTaskStatus(patch.status, task, { blockedMeansApproval: true });
-        if (!isTerminalTaskStatus(task.status)) task.status = nextStatus;
+      if (patch.status && !isTerminalTaskStatus(task.status)) {
+        transitionTaskStatus(task, patch.status, { blockedMeansApproval: true });
       }
       if (patch.progress) task.progress = normalizeTaskProgress(patch.progress, task.status);
       finish.operation = task.lastOperation;
@@ -245,7 +246,7 @@ function createToolActivityTracker(options = {}) {
       if (!terminalBeforeFinish && task.activeCalls === 0 && !task.completionRequest) {
         const rejectedTaskStart = current.internalOperation === OP.WORK_BEGIN && result.ok === false && !blockedResult;
         if (rejectedTaskStart) {
-          task.status = 'failed';
+          transitionTaskStatus(task, 'failed');
           task.endReason = 'task_start_rejected';
           task.terminalReason = task.errorSummary || 'The work session could not be started.';
           task.endedAt = finishedAt;
@@ -253,15 +254,15 @@ function createToolActivityTracker(options = {}) {
           task.currentActivity = task.errorSummary || task.currentActivity;
           task.progress = { mode: 'indeterminate', label: 'Task could not be started' };
         } else if (recoverableValidationFailure) {
-          task.status = 'validation_failed';
+          transitionTaskStatus(task, 'validation_failed');
           task.currentStage = 'Validation failed';
           task.progress = incompleteProgress(task.progress, task.status, 'Fix issues and revalidate');
         } else if (current.activity.status === 'blocked') {
-          task.status = 'blocked';
+          transitionTaskStatus(task, 'blocked');
           task.currentStage = 'Blocked';
           task.progress = { mode: 'indeterminate', label: 'Blocked' };
         } else {
-          task.status = 'planning';
+          transitionTaskStatus(task, 'planning');
           const preserveWorkflowProgress = task.progress?.mode === 'determinate';
           if (!preserveWorkflowProgress) {
             task.currentStage = 'Planning next step';
@@ -301,6 +302,18 @@ function createToolActivityTracker(options = {}) {
     finish.update = update;
     finish.requestCompletion = requestCompletion;
     finish.signal = task.abortController.signal;
+    return finish;
+  }
+
+  function beginCompletedTaskRetry(details = {}) {
+    const finish = beginObservedToolCall(details);
+    const taskId = normalizeTaskId(details.taskId);
+    finish.taskId = taskId;
+    finish.requestCompletion = () => ({
+      taskId,
+      scopeId: finish.scopeId,
+      duplicate: true
+    });
     return finish;
   }
 
@@ -443,9 +456,9 @@ function createToolActivityTracker(options = {}) {
       intent: resumed?.intent || classifyTaskIntent(objective),
       correlation: mergeCorrelation(resumed?.correlation || {}, details.correlation, details.workspace || resumed?.workspace),
       principalFingerprint: String(details.principalFingerprint || resumed?.principalFingerprint || ''),
-      status: resumed?.status === 'inactive' ? String(resumed.resumeStatus || 'planning') : String(resumed?.status || 'planning'),
-      progress: normalizeTaskProgress(resumed?.progress || { mode: 'indeterminate', label: 'Planning task' }, resumed?.status || 'planning'),
-      currentStage: String(resumed?.currentStage || 'Planning'),
+      status: resumed?.status === 'inactive' ? String(resumed.resumeStatus || 'planning') : String(resumed?.status || 'queued'),
+      progress: normalizeTaskProgress(resumed?.progress || { mode: 'indeterminate', label: resumed ? 'Planning task' : 'Queued' }, resumed?.status === 'inactive' ? resumed.resumeStatus || 'planning' : resumed?.status || 'queued'),
+      currentStage: String(resumed?.currentStage || (resumed ? 'Planning' : 'Queued')),
       currentActivity: String(details.operation || resumed?.currentActivity || ''),
       activeCalls: 0,
       calls,
@@ -479,6 +492,12 @@ function createToolActivityTracker(options = {}) {
     tasksById.delete(task.id);
   }
 
+  function isCompletedTaskRetry(details = {}) {
+    return String(details.internalOperation || details.tool || '') === OP.WORK_FINISH
+      && Boolean(normalizeTaskId(details.taskId))
+      && details.resumeTask?.status === 'completed';
+  }
+
   function cancelTask(taskId, details = {}) {
     const id = normalizeTaskId(taskId);
     const task = tasksById.get(id);
@@ -494,7 +513,7 @@ function createToolActivityTracker(options = {}) {
     cancelCompletion(task);
     const endedAt = now();
     const reason = sanitizeDisplayText(details.reason || 'Task cancelled by request.', 500) || 'Task cancelled by request.';
-    task.status = 'cancelled';
+    transitionTaskStatus(task, 'cancelled');
     task.endReason = 'explicit_cancellation';
     task.terminalReason = reason;
     task.endedAt = endedAt;
@@ -574,10 +593,10 @@ function createToolActivityTracker(options = {}) {
     const task = tasksById.get(taskId);
     if (!task || task.activeCalls > 0) return;
     cancelCompletion(task);
-    removeTask(task);
     const inactiveAt = now();
     const resumeStatus = task.status;
-    const status = 'inactive';
+    const status = transitionTaskStatus(task, 'inactive');
+    removeTask(task);
     lastTask = sanitizeTaskRecord({
       taskId: task.id,
       sessionId: task.id,
@@ -625,10 +644,10 @@ function createToolActivityTracker(options = {}) {
     const task = tasksById.get(taskId);
     if (!task || task.activeCalls > 0 || !task.completionRequest) return;
     cancelCompletion(task);
-    removeTask(task);
     const completedAt = now();
     const completion = task.completionRequest;
-    const status = 'completed';
+    const status = transitionTaskStatus(task, 'completed');
+    removeTask(task);
     const changedFiles = mergeTaskChangedFiles(task.changedFiles, completion.changedFiles);
     lastTask = sanitizeTaskRecord({
       taskId: task.id,
@@ -807,7 +826,7 @@ function createToolActivityTracker(options = {}) {
     const previousTask = eventTaskId ? lastEmittedTaskSnapshots.get(eventTaskId) || null : null;
     const changedFields = eventTask ? lifecycleChangedFields(previousTask, eventTask) : [];
     if (eventTaskId && eventTask) lastEmittedTaskSnapshots.set(eventTaskId, eventTask);
-    if (eventTaskId && !eventTask && ['completed', 'cancelled', 'inactive'].includes(extras.phase)) lastEmittedTaskSnapshots.delete(eventTaskId);
+    if (eventTaskId && !eventTask && TASK_RUNTIME_TERMINAL_PHASES.includes(extras.phase)) lastEmittedTaskSnapshots.delete(eventTaskId);
     const snapshot = Object.freeze({
       revision,
       activeConnectorCalls,

@@ -15,7 +15,7 @@ import {
   getNativeTask,
   getNativeTaskRecord
 } from '../src/mcp/nativeTaskService.js';
-import { stateDatabasePath } from '../src/stateDatabase.js';
+import { stateDatabasePath } from '../src/stateDatabase.ts';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-native-tool-task-parity-'));
 const config = { stateDir: root };

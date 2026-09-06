@@ -11,9 +11,9 @@ process.env.REL_AI_MCP_STATE_DIR = stateDir;
 process.env.REL_AI_MCP_TOKEN = token;
 
 import { invalidateConfigCache } from "../src/config.js";
-import { createDashboardBootstrap } from "../src/http/dashboardSessions.js";
-import { startHttpServer } from "../src/httpServer.js";
-import { resetTaskHistoryCaches } from "../src/taskHistoryStorage.js";
+import { createDashboardBootstrap } from "../src/http/dashboardSessions.ts";
+import { startHttpServer } from "../src/httpServer.ts";
+import { resetTaskHistoryCaches } from "../src/taskHistoryStorage.ts";
 const server = startHttpServer({ host: '127.0.0.1', port: 0, token, exitOnError: false });
 await once(server, 'listening');
 const address = server.address();

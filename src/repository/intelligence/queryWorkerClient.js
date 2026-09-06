@@ -1,15 +1,21 @@
-import { Worker } from 'node:worker_threads';
+import { fileURLToPath } from 'node:url';
+import Piscina from 'piscina';
 
 import { repositoryIndexPath } from './database.js';
 import { repositoryIndexStatus } from './indexer.js';
+import { repositoryIndexSnapshot } from './state.js';
+import { measurePerformancePhase } from '../../performanceObservability.js';
+import { acquireHostResource, hostResourceStats } from '../../hostResourceScheduler.js';
 
 const QUERY_WORKER_IDLE_EVICT_MS = 60_000;
-const QUERY_WORKER_CANCEL_GRACE_MS = 250;
 const QUERY_WORKER_COUNT = 4;
 const QUERY_WORKER_GLOBAL_COUNT = 4;
 const QUERY_WORKER_TIMEOUT_MS = 30_000;
-const clients = new Map();
-const liveWorkers = new Set();
+const QUERY_WORKER_QUEUE_TIMEOUT_MS = 30_000;
+const QUERY_WORKER_FILE = fileURLToPath(new URL('./queryWorker.js', import.meta.url));
+const activeByRepository = new Map();
+const activeControllersByRepository = new Map();
+let pool = null;
 
 function runRepositoryQuery(kind, workspace, config = {}, payload = {}, options = {}) {
   const key = repositoryIndexPath(config, workspace);
@@ -22,7 +28,10 @@ function runRepositoryQuery(kind, workspace, config = {}, payload = {}, options 
     ...payload,
     options: serializableOptions(options)
   };
-  return queryWorkerClient(key).run(job, options.signal, options.queryTimeoutMs);
+  return measurePerformancePhase(
+    'repo.lookup',
+    () => runPiscinaQuery(key, job, options.signal, options.queryTimeoutMs, options.queryQueueTimeoutMs)
+  );
 }
 
 function needsPeerRepositoryState(kind, payload = {}) {
@@ -30,226 +39,99 @@ function needsPeerRepositoryState(kind, payload = {}) {
   return kind === 'codeInspect' && String(payload?.args?.action || '').toLowerCase() === 'architecture';
 }
 
-function queryWorkerClient(key) {
-  const existing = clients.get(key);
-  if (existing && !existing.closed) return existing;
+function repositoryQueryPool() {
+  if (pool) return pool;
+  pool = new Piscina({
+    filename: QUERY_WORKER_FILE,
+    minThreads: 0,
+    maxThreads: QUERY_WORKER_GLOBAL_COUNT,
+    idleTimeout: QUERY_WORKER_IDLE_EVICT_MS
+  });
+  return pool;
+}
 
-  const queue = [];
-  const slots = Array.from({ length: QUERY_WORKER_COUNT }, (_, index) => ({ index, worker: null, active: null }));
-  let nextJobId = 1;
-  let idleTimer = null;
+async function runPiscinaQuery(key, job, signal, timeoutMs = QUERY_WORKER_TIMEOUT_MS, queueTimeoutMs = QUERY_WORKER_QUEUE_TIMEOUT_MS) {
+  if (signal?.aborted) throw queryAbortError(signal.reason);
+  const effectiveTimeoutMs = positiveTimeout(timeoutMs, QUERY_WORKER_TIMEOUT_MS);
+  const effectiveQueueTimeoutMs = positiveTimeout(queueTimeoutMs, QUERY_WORKER_QUEUE_TIMEOUT_MS);
+  const detachController = new AbortController();
+  const queueSignal = signal
+    ? AbortSignal.any([signal, detachController.signal])
+    : detachController.signal;
+  activeByRepository.set(key, Number(activeByRepository.get(key) || 0) + 1);
+  if (!activeControllersByRepository.has(key)) activeControllersByRepository.set(key, new Set());
+  activeControllersByRepository.get(key).add(detachController);
 
-  const client = {
-    key,
-    slots,
-    closed: false,
-    run(job, signal, timeoutMs = QUERY_WORKER_TIMEOUT_MS) {
-      if (client.closed) return Promise.reject(new Error('Repository Intelligence query worker pool is closed.'));
-      if (signal?.aborted) return Promise.reject(queryAbortError(signal.reason));
-      return new Promise((resolve, reject) => {
-        const entry = {
-          jobId: `query-${nextJobId++}`,
-          job,
-          signal,
-          resolve,
-          reject,
-          slot: null,
-          cancelTimer: null,
-          onAbort: null
-        };
-        const effectiveTimeoutMs = positiveTimeout(timeoutMs, QUERY_WORKER_TIMEOUT_MS);
-        entry.timeoutTimer = setTimeout(() => {
-          cancelEntry(entry, Object.assign(new Error(`Repository Intelligence query exceeded ${effectiveTimeoutMs}ms.`), { code: 'QUERY_TIMEOUT' }));
-        }, effectiveTimeoutMs);
-        entry.timeoutTimer.unref?.();
-        entry.onAbort = () => cancelEntry(entry, signal?.reason);
-        signal?.addEventListener?.('abort', entry.onAbort, { once: true });
-        queue.push(entry);
-        pump();
+  let heavyLease = null;
+  let queryLease = null;
+  let timer = null;
+  const queueStartedAt = Date.now();
+  try {
+    try {
+      queryLease = await acquireHostResource('repositoryQuery', key, {
+        signal: queueSignal,
+        timeoutMs: effectiveQueueTimeoutMs
       });
-    },
-    pump,
-    queuedCount() { return queue.length; },
-    activeCount() { return slots.filter(slot => slot.active).length; },
-    workerCount() { return slots.filter(slot => slot.worker).length; },
-    discardIdleSlot(slot, reason = new Error('Repository Intelligence global query worker budget rebalanced.')) {
-      if (!slot || slot.active || !slot.worker) return false;
-      const worker = slot.worker;
-      slot.worker = null;
-      releaseWorker(worker, reason);
-      return true;
-    },
-    terminate(reason = new Error('Repository Intelligence query worker pool terminated.')) {
-      if (client.closed) return Promise.resolve();
-      client.closed = true;
-      clearIdleTimer();
-      if (clients.get(key) === client) clients.delete(key);
-      const pending = queue.splice(0);
-      const terminations = [];
-      for (const slot of slots) {
-        if (slot.active) pending.push(slot.active);
-        slot.active = null;
-        if (slot.worker) terminations.push(releaseWorker(slot.worker, reason));
-        slot.worker = null;
+      const remainingQueueMs = effectiveQueueTimeoutMs - (Date.now() - queueStartedAt);
+      if (remainingQueueMs <= 0) throw Object.assign(new Error('Repository Intelligence query queue budget was exhausted before host admission.'), { code: 'HOST_RESOURCE_QUEUE_TIMEOUT' });
+      heavyLease = await acquireHostResource('heavy', key, {
+        signal: queueSignal,
+        timeoutMs: remainingQueueMs
+      });
+    } catch (error) {
+      if (queueSignal.aborted) throw queryAbortError(queueSignal.reason);
+      if (error?.code === 'HOST_RESOURCE_QUEUE_TIMEOUT') {
+        const queueError = new Error(`Repository Intelligence query queue wait exceeded ${effectiveQueueTimeoutMs}ms.`);
+        queueError.code = 'QUERY_QUEUE_TIMEOUT';
+        throw queueError;
       }
-      for (const entry of pending) settle(entry, 'reject', reason);
-      pumpOtherClients(client);
-      return Promise.allSettled(terminations);
+      throw error;
     }
-  };
 
-  function createWorker(slot) {
-    if (liveWorkers.size >= QUERY_WORKER_GLOBAL_COUNT && !evictOneIdleWorker(client)) return null;
-    const worker = new Worker(new URL('./queryWorker.js', import.meta.url));
-    liveWorkers.add(worker);
-    worker.unref();
-    worker.on('message', message => {
-      if (slot.worker !== worker || message?.type !== 'result' || !slot.active || message.jobId !== slot.active.jobId) return;
-      const completed = slot.active;
-      slot.active = null;
-      completed.slot = null;
-      if (message.ok) settle(completed, 'resolve', message.result);
-      else settle(completed, 'reject', workerError(message.error));
-      worker.unref();
-      if (hasQueuedOtherClient(client)) pumpOtherClients(client);
-      pump();
-      pumpOtherClients(client);
-    });
-    worker.on('error', error => replaceWorker(slot, worker, error));
-    worker.on('exit', code => {
-      if (!client.closed && slot.worker === worker) {
-        replaceWorker(slot, worker, new Error(`Repository Intelligence query worker exited with code ${code}.`));
-      }
-    });
-    return worker;
-  }
-
-  function replaceWorker(slot, worker, reason) {
-    if (slot.worker !== worker) return;
-    const active = slot.active;
-    slot.active = null;
-    if (active) {
-      active.slot = null;
-      settle(active, 'reject', reason);
-    }
-    slot.worker = null;
-    releaseWorker(worker, reason);
-    pumpOtherClients(client);
-    pump();
-  }
-
-  function pump() {
-    if (client.closed) return;
-    clearIdleTimer();
-    while (queue.length) {
-      let slot = slots.find(item => !item.active && item.worker);
-      if (!slot) {
-        slot = slots.find(item => !item.active && !item.worker);
-        if (slot) slot.worker = createWorker(slot);
-      }
-      if (!slot?.worker) break;
-      const entry = queue.shift();
-      if (entry.signal?.aborted) {
-        settle(entry, 'reject', queryAbortError(entry.signal.reason));
-        continue;
-      }
-      slot.active = entry;
-      entry.slot = slot;
-      slot.worker.ref();
-      try {
-        slot.worker.postMessage({ type: 'run', jobId: entry.jobId, job: entry.job });
-      } catch (error) {
-        replaceWorker(slot, slot.worker, error);
-      }
-    }
-    if (!queue.length && slots.every(slot => !slot.active)) scheduleIdleTimer();
-  }
-
-  function cancelEntry(entry, reason) {
-    const error = queryAbortError(reason);
-    const slot = entry.slot;
-    if (slot?.active === entry) {
-      try { slot.worker?.postMessage({ type: 'abort', jobId: entry.jobId, reason: error.message }); } catch {}
-      entry.cancelTimer = setTimeout(() => {
-        if (slot.active === entry && slot.worker) replaceWorker(slot, slot.worker, error);
-      }, QUERY_WORKER_CANCEL_GRACE_MS);
-      entry.cancelTimer.unref?.();
-      return;
-    }
-    const index = queue.indexOf(entry);
-    if (index >= 0) queue.splice(index, 1);
-    settle(entry, 'reject', error);
-    pump();
-  }
-
-  function settle(entry, mode, value) {
-    if (!entry) return;
-    if (entry.cancelTimer) clearTimeout(entry.cancelTimer);
-    if (entry.timeoutTimer) clearTimeout(entry.timeoutTimer);
-    entry.signal?.removeEventListener?.('abort', entry.onAbort);
-    if (mode === 'resolve') entry.resolve(value);
-    else entry.reject(value);
-  }
-
-  function clearIdleTimer() {
-    if (!idleTimer) return;
-    clearTimeout(idleTimer);
-    idleTimer = null;
-  }
-
-  function scheduleIdleTimer() {
-    clearIdleTimer();
-    if (client.closed || queue.length || slots.some(slot => slot.active)) return;
-    for (const slot of slots) slot.worker?.unref();
-    idleTimer = setTimeout(
-      () => client.terminate(new Error('Repository Intelligence query worker pool idle timeout reached.')),
-      QUERY_WORKER_IDLE_EVICT_MS
+    const timeoutController = new AbortController();
+    const combinedSignal = signal
+      ? AbortSignal.any([signal, timeoutController.signal, detachController.signal])
+      : AbortSignal.any([timeoutController.signal, detachController.signal]);
+    const timeoutError = Object.assign(
+      new Error(`Repository Intelligence query execution exceeded ${effectiveTimeoutMs}ms.`),
+      { code: 'QUERY_TIMEOUT' }
     );
-    idleTimer.unref?.();
+    timer = setTimeout(() => timeoutController.abort(timeoutError), effectiveTimeoutMs);
+    timer.unref?.();
+
+    try {
+      const message = await repositoryQueryPool().run(job, { signal: combinedSignal });
+      if (message?.ok === false) throw workerError(message.error);
+      return message?.result;
+    } catch (error) {
+      if (combinedSignal.aborted) throw queryAbortError(combinedSignal.reason);
+      throw error;
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+    heavyLease?.release();
+    queryLease?.release();
+    const remaining = Number(activeByRepository.get(key) || 1) - 1;
+    if (remaining > 0) activeByRepository.set(key, remaining);
+    else activeByRepository.delete(key);
+    const controllers = activeControllersByRepository.get(key);
+    controllers?.delete(detachController);
+    if (!controllers?.size) activeControllersByRepository.delete(key);
   }
-
-  clients.set(key, client);
-  scheduleIdleTimer();
-  return client;
-}
-
-function evictOneIdleWorker(excludeClient = null) {
-  for (const candidate of clients.values()) {
-    if (candidate.closed || candidate === excludeClient) continue;
-    const slot = candidate.slots.find(item => item.worker && !item.active);
-    if (slot && candidate.discardIdleSlot(slot)) return true;
-  }
-  return false;
-}
-
-function hasQueuedOtherClient(client) {
-  for (const candidate of clients.values()) {
-    if (candidate !== client && !candidate.closed && candidate.queuedCount() > 0) return true;
-  }
-  return false;
-}
-
-function pumpOtherClients(client) {
-  for (const candidate of clients.values()) {
-    if (candidate !== client && !candidate.closed && candidate.queuedCount() > 0) candidate.pump();
-  }
-}
-
-function releaseWorker(worker, _reason) {
-  if (!worker || !liveWorkers.delete(worker)) return Promise.resolve();
-  worker.removeAllListeners();
-  return worker.terminate().catch(() => {});
 }
 
 function repositoryQueryWorkerStats() {
+  const current = pool;
   return {
     globalWorkerLimit: QUERY_WORKER_GLOBAL_COUNT,
-    liveWorkerCount: liveWorkers.size,
-    pools: [...clients.entries()].map(([key, client]) => ({
+    liveWorkerCount: current?.threads?.length || 0,
+    hostHeavyLane: hostResourceStats().heavy,
+    hostRepositoryQueryLane: hostResourceStats().repositoryQuery,
+    pools: [...activeByRepository.entries()].map(([key, active]) => ({
       key,
-      workers: client.workerCount(),
-      active: client.activeCount(),
-      queued: client.queuedCount()
+      workers: current?.threads?.length || 0,
+      active,
+      queued: current?.queueSize || 0
     }))
   };
 }
@@ -260,17 +142,7 @@ function repositoryStatusSnapshot(workspace, config) {
   for (const [alias, candidate] of entries) {
     if (!alias || !candidate?.path || result[alias]) continue;
     try {
-      const status = repositoryIndexStatus(candidate, config);
-      const metadata = status.metadata;
-      result[alias] = {
-        dirty: status.dirty === true,
-        metadata: metadata ? {
-          generation: Number(metadata.generation || 0),
-          freshness: String(metadata.freshness || ''),
-          truncated: metadata.truncated === true,
-          needsReconcile: metadata.needsReconcile === true
-        } : null
-      };
+      result[alias] = repositoryIndexSnapshot(repositoryIndexStatus(candidate, config));
     } catch {}
   }
   return result;
@@ -332,17 +204,26 @@ function positiveTimeout(value, fallback) {
 
 async function disposeRepositoryQueryWorker(workspace, config = {}) {
   const key = repositoryIndexPath(config, workspace);
-  const client = clients.get(key);
-  if (!client) return false;
-  await client.terminate(new Error('Repository Intelligence workspace detached.'));
+  const controllers = activeControllersByRepository.get(key);
+  if (!controllers?.size) return false;
+  const reason = new Error('Repository Intelligence workspace detached.');
+  for (const controller of [...controllers]) controller.abort(reason);
+  activeControllersByRepository.delete(key);
+  activeByRepository.delete(key);
   return true;
 }
 
-function shutdownRepositoryQueryWorkers() {
-  const terminations = [...clients.values()].map(client =>
-    client.terminate(new Error('Repository Intelligence is shutting down.')));
-  clients.clear();
-  return Promise.allSettled(terminations);
+async function shutdownRepositoryQueryWorkers() {
+  const reason = new Error('Repository Intelligence is shutting down.');
+  for (const controllers of activeControllersByRepository.values()) {
+    for (const controller of [...controllers]) controller.abort(reason);
+  }
+  activeControllersByRepository.clear();
+  activeByRepository.clear();
+  if (!pool) return [];
+  const current = pool;
+  pool = null;
+  return Promise.allSettled([current.destroy()]);
 }
 
 export {
@@ -350,6 +231,7 @@ export {
   QUERY_WORKER_GLOBAL_COUNT,
   QUERY_WORKER_IDLE_EVICT_MS,
   QUERY_WORKER_TIMEOUT_MS,
+  QUERY_WORKER_QUEUE_TIMEOUT_MS,
   disposeRepositoryQueryWorker,
   repositoryQueryWorkerStats,
   runRepositoryQuery,

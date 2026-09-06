@@ -1,53 +1,9 @@
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
 import { registerIpcHandlers } from '../electron/ipc-handlers.js';
+import { DESKTOP_IPC, DESKTOP_IPC_CHANNELS, DESKTOP_IPC_INPUT_CONTRACT } from '../src/contracts/desktop.ts';
 
-const inventory = {
-  'wizard:done': spec('handle', ['wizard'], 'reject'),
-  'wizard:cancel': spec('handle', ['wizard'], 'reject'),
-  'wizard:open-openai-setup': spec('handle', ['wizard'], 'reject'),
-  'recovery:get-config': spec('handle', ['wizard'], 'reject'),
-  'recovery:open-setup': spec('handle', ['fallback'], 'reject'),
-  'url:open-dashboard': spec('handle', ['fallback'], 'reject'),
-  'notifications:get-enabled': spec('handle', ['fallback'], 'reject'),
-  'notifications:set-enabled': spec('handle', ['fallback'], 'reject'),
-  'server:start': spec('handle', ['fallback'], 'reject'),
-  'server:stop': spec('handle', ['fallback'], 'reject'),
-  'recovery:restart-connection': spec('handle', ['fallback'], 'reject'),
-  'recovery:relaunch': spec('handle', ['fallback'], 'reject'),
-  'desktop:restart-connection': spec('handle', ['dashboard'], 'reject'),
-  'desktop:relaunch': spec('handle', ['dashboard'], 'reject'),
-  'desktop:quit': spec('handle', ['dashboard'], 'reject'),
-  'desktop:get-status': spec('handle', ['dashboard'], 'reject'),
-  'desktop:window:get-state': spec('handle', ['dashboard'], 'reject'),
-  'desktop:window:minimize': spec('handle', ['dashboard'], 'reject'),
-  'desktop:window:toggle-maximize': spec('handle', ['dashboard'], 'reject'),
-  'desktop:window:close': spec('handle', ['dashboard'], 'reject'),
-  'desktop:open-settings': spec('handle', ['dashboard'], 'reject'),
-  'desktop:reload-dashboard': spec('handle', ['dashboard'], 'reject'),
-  'desktop:analytics:local': spec('handle', ['dashboard'], 'reject'),
-  'desktop:settings:get': spec('handle', ['dashboard'], 'reject'),
-  'desktop:settings:save': spec('handle', ['dashboard'], 'reject'),
-  'desktop:lifecycle:get': spec('handle', ['dashboard'], 'reject'),
-  'desktop:startup:set': spec('handle', ['dashboard'], 'reject'),
-  'desktop:keep-awake:set': spec('handle', ['dashboard'], 'reject'),
-  'desktop:notifications:get': spec('handle', ['dashboard'], 'reject'),
-  'desktop:notifications:set': spec('handle', ['dashboard'], 'reject'),
-  'desktop:notification-preferences:get': spec('handle', ['dashboard'], 'reject'),
-  'desktop:notification-preferences:set': spec('handle', ['dashboard'], 'reject'),
-  'desktop:update:get': spec('handle', ['dashboard'], 'reject'),
-  'desktop:update:check': spec('handle', ['dashboard'], 'reject'),
-  'desktop:update:download': spec('handle', ['dashboard'], 'reject'),
-  'desktop:update:install': spec('handle', ['dashboard'], 'reject'),
-  'desktop:diagnostics:export': spec('handle', ['dashboard'], 'reject'),
-  'desktop:diagnostics:open-folder': spec('handle', ['dashboard'], 'reject'),
-  'desktop:code:get': spec('handle', ['dashboard'], 'reject'),
-  'desktop:code:diff': spec('handle', ['dashboard'], 'reject'),
-  'desktop:code:editors': spec('handle', ['dashboard'], 'reject'),
-  'desktop:code:open-ide': spec('handle', ['dashboard'], 'reject'),
-  'url:copy': spec('handle', ['wizard', 'fallback', 'dashboard'], 'reject'),
-  'desktop:stop-service': spec('on', ['dashboard'], 'ignore'),
-  'window:fit-content': spec('on', ['wizard', 'fallback'], 'ignore')
-};
+const inventory = DESKTOP_IPC_INPUT_CONTRACT;
 
 const windows = { wizard: { id: 'wizard' }, fallback: { id: 'fallback' }, dashboard: { id: 'dashboard' }, other: { id: 'other' } };
 const handles = new Map();
@@ -73,6 +29,7 @@ registerIpcHandlers({
   launchConfiguredDesktop: async value => { calls.push(['launch', value]); return { serverRunning: true, tunnelStatus: 'running' }; },
   restartConnection: async () => { calls.push(['restartConnection']); return { serverRunning: true, tunnelStatus: 'running' }; },
   relaunchApplication: async () => { calls.push(['relaunch']); return { ok: true }; },
+  logoutApplication: async value => { calls.push(['logout', value]); return { ok: true, ...value }; },
   quitApplication: async () => { calls.push(['quit']); return { ok: true }; },
   openRecoverySetup: () => ({ ok: true }),
   openDashboardWindow: () => ({ ok: true }),
@@ -92,6 +49,10 @@ registerIpcHandlers({
   getLifecycleStatus: () => ({ ok: true }),
   setLaunchAtLogin: value => value,
   setKeepAwake: value => value,
+  setAppPreferences: value => ({ ok: true, status: value }),
+  getLocalDataUsage: () => ({ ok: true, totalBytes: 0 }),
+  clearTemporaryLocalData: () => ({ ok: true }),
+  openLocalDataFolder: () => ({ ok: true }),
   getNotificationPreferences: () => ({ enabled: true }),
   updateNotificationPreferences: value => ({ ok: true, preferences: value }),
   getUpdateStatus: () => ({ state: 'idle' }),
@@ -122,6 +83,10 @@ for (const [channel, expected] of Object.entries(inventory)) {
 }
 
 assert.throws(() => handles.get('url:copy')(eventFor(windows.wizard), 'x'.repeat(64 * 1024 + 1)), /64 KiB/);
+assert.throws(() => handles.get('desktop:logout')(eventFor(windows.dashboard), { clearData: 'yes' }), /clearData as a boolean/);
+const logout = await handles.get('desktop:logout')(eventFor(windows.dashboard), { clearData: true });
+assert.equal(logout.clearData, true);
+assert.ok(calls.some(call => call[0] === 'logout' && call[1].clearData === true));
 const done = await handles.get('wizard:done')(eventFor(windows.wizard), { tunnelId: 'tunnel_12345678', tunnelApiKey: 'runtime-api-key-value', port: 3333, restart: false });
 assert.equal(done.ok, true);
 assert.ok(calls.some(call => call[0] === 'tunnelKey' && call[1] === 'runtime-api-key-value'));
@@ -130,9 +95,20 @@ assert.equal([...handles.keys()].some(channel => /gateway|approval|cloud|open-li
 assert.ok(calls.some(call => call[0] === 'fit' && call[1] === 'wizard'));
 assert.ok(calls.some(call => call[0] === 'fit' && call[1] === 'fallback'));
 
-console.log(`${Object.keys(inventory).length} tunnel-only IPC channel contracts passed.`);
+const preloadSource = fs.readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
+const preloadChannels = new Set([
+  ...[...preloadSource.matchAll(/ipcRenderer\.(?:invoke|send)\(\s*['"]([^'"]+)['"]/g)].map(match => match[1]),
+  ...[...preloadSource.matchAll(/subscribe\(\s*['"]([^'"]+)['"]/g)].map(match => match[1])
+]);
+for (const channel of preloadChannels) {
+  assert.ok(DESKTOP_IPC_CHANNELS.includes(channel), `preload channel must exist in canonical desktop contract: ${channel}`);
+}
+for (const channel of Object.keys(DESKTOP_IPC_INPUT_CONTRACT)) {
+  assert.ok(preloadChannels.has(channel), `canonical renderer-to-main IPC channel must be exposed by preload: ${channel}`);
+}
+assert.equal(DESKTOP_IPC.DESKTOP_GET_STATUS, 'desktop:get-status');
 
-function spec(mode, windows, failure) { return { mode, windows, failure }; }
+console.log(`${Object.keys(inventory).length} tunnel-only IPC channel contracts passed.`);
 function eventFor(window) { return { sender: { window } }; }
 function argsFor(channel) {
   switch (channel) {
@@ -142,6 +118,8 @@ function argsFor(channel) {
     case 'desktop:analytics:local': return ['2026-08'];
     case 'desktop:settings:save': return [{ port: 3333, tunnelId: 'tunnel_12345678' }];
     case 'desktop:reload-dashboard': return ['#tasks'];
+    case 'desktop:logout': return [{ clearData: false }];
+    case 'desktop:app-preferences:set': return [{ keepRunningOnClose: true }];
     case 'desktop:startup:set':
     case 'desktop:keep-awake:set':
     case 'desktop:notifications:set':

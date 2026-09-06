@@ -47,6 +47,11 @@ class FakeUtilityProcess extends EventEmitter {
     const responses = {
       start: { ok: true, port: 4567 },
       'dashboard-bootstrap': { ok: true, port: 4567, bootstrap: 'bootstrap-token' },
+      'desktop-local-usage': { source: 'local', month: message.payload.month },
+      'desktop-onboarding-handoff': { completed: false, handoffPending: true },
+      'desktop-task-code-workspace': { ok: true, work_id: message.payload.taskId, files: [] },
+      'desktop-task-code-diff': { ok: true, work_id: message.payload.taskId, path: message.payload.path },
+      'desktop-task-code-workspace-path': '/repo',
       stop: {
         ok: true,
         cleanup: {
@@ -163,6 +168,14 @@ assert.ok(logs.some(entry => entry.message === 'service warning' && entry.option
 
 const bootstrap = await client.dashboardBootstrap();
 assert.equal(bootstrap.bootstrap, 'bootstrap-token');
+assert.deepEqual(await client.getLocalUsage('2026-09'), { source: 'local', month: '2026-09' });
+assert.equal((await client.markOnboardingHandoff()).handoffPending, true);
+assert.deepEqual(await client.getTaskCodeWorkspace({ taskId: 'task-1' }), { ok: true, work_id: 'task-1', files: [] });
+assert.deepEqual(await client.readTaskCodeDiff({ taskId: 'task-1', path: 'src/index.js' }), { ok: true, work_id: 'task-1', path: 'src/index.js' });
+assert.equal(await client.getTaskCodeWorkspacePath({ taskId: 'task-1' }), '/repo');
+for (const method of ['desktop-local-usage','desktop-onboarding-handoff','desktop-task-code-workspace','desktop-task-code-diff','desktop-task-code-workspace-path']) {
+  assert.ok(child.sent.some(message => message.type === 'request' && message.method === method), `${method} must cross the utility-process boundary`);
+}
 const stopped = await client.stop();
 assert.equal(stopped.cleanup.clean, true);
 assert.equal(client.isListening(), false);

@@ -17,7 +17,7 @@ fs.writeFileSync(configPath, JSON.stringify({
 process.env.REL_AI_MCP_CONFIG = configPath;
 process.env.REL_AI_MCP_STATE_DIR = sandbox;
 
-const { startHttpServer } = await import('../src/httpServer.js');
+const { startHttpServer } = await import('../src/httpServer.ts');
 const server = startHttpServer({ host: '127.0.0.1', port: 0, token: 'shared-module-test', exitOnError: false, writeProfile: false });
 
 try {

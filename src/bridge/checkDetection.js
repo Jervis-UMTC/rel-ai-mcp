@@ -85,7 +85,7 @@ function checkPreference(unit, level) {
   const preferred = level === 'release'
     ? ['test:all', 'test', 'check', 'verify', 'lint', 'typecheck', 'build']
     : level === 'quick' || level === 'focused'
-      ? ['check', 'verify', 'lint', 'typecheck', 'format']
+      ? ['check:quick', 'check', 'verify', 'lint', 'typecheck', 'format']
       : ['test', 'check', 'verify', 'lint', 'typecheck', 'build'];
   const index = preferred.indexOf(name);
   return index === -1 ? preferred.length + name.split(':').length : index;

@@ -36,7 +36,10 @@ assert.doesNotMatch(source, /getNotificationPreferences|setNotificationPreferenc
 assert.match(source, /supportPolicyModalView/, 'required and support-policy update notices must remain available');
 assert.match(source, /shownUpdateKeys\.has\(updateView\.key\)/, 'routine update notices must deduplicate the offered version for the current launch');
 assert.match(source, /shownPolicyKeys[\s\S]*availableUpdateModalView/, 'support-policy notices must retain priority over routine optional update notices');
-assert.match(source, /actions\.appendChild\(later\)[\s\S]*actions\.appendChild\(primaryAction\)/, 'Later must remain before the primary update action');
+const actionsStart = source.indexOf("h('div', { className: 'modal-actions' }");
+const laterAction = source.indexOf("'Later'", actionsStart);
+const primaryAction = source.indexOf('\n      primary', actionsStart);
+assert.ok(actionsStart >= 0 && laterAction > actionsStart && primaryAction > laterAction, 'Later must remain before the primary update action');
 assert.match(source, /closeModal\(\);[\s\S]*bridge\[method\]\(\)/, 'update actions must close the modal before starting the action');
 
 console.log('Update available and support-policy modal interaction tests passed.');

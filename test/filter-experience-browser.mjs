@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getTaskHistoryDir, writeSession } from '../src/taskHistoryStorage.js';
+import { getTaskHistoryDir, writeSession } from '../src/taskHistoryStorage.ts';
 import { startHttpTestServer, stopHttpTestServer } from './helpers/http-test-server.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,7 +43,7 @@ try {
   if (code === 'timeout') child.kill('SIGKILL');
   assert.equal(code, 0, `Filter browser probe failed. stdout=${stdout} stderr=${stderr}`);
   const result = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
-  assert.equal(result.error, undefined, result.error);
+  assert.equal(result.error, undefined, result.error ? `${result.error}\n${(result.failures || []).join('\n')}` : undefined);
   assert.deepEqual(result.shared, {
     searchVisible: true,
     searchLabel: 'Search activity',
@@ -113,12 +113,11 @@ try {
     aliasValidationCleared: true,
     redundantProjectActionsRemoved: true,
     focusChipLabel: 'Clear selected project filter: app',
-    scopeName: 'Project filter: All projects',
-    menuSingleTabStop: true,
-    menuArrowNavigation: true,
-    menuHomeEndNavigation: true,
-    menuTypeahead: true,
-    menuEscapeRestoresFocus: true
+    scopeName: 'Project filter',
+    projectFilterPresent: true,
+    projectOptionsOrdered: true,
+    projectFilterKeyboardFocused: true,
+    projectFilterUpdatesRoute: true
   });
   assert.equal(result.connection.primaryCount, 1);
   assert.ok(result.connection.primaryLabel.length > 0);

@@ -9,7 +9,7 @@ const scannedFiles = [
   'src/tools.js',
   'src/tools/schema.js',
   'src/tools/actionCatalog.js',
-  'src/httpServer.js',
+  'src/httpServer.ts',
   'src/resources.js',
   'README.md',
   'docs/SECURITY.md',

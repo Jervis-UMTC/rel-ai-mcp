@@ -13,7 +13,8 @@ const {
   isTerminalTaskStatus,
   nativeStatusToInternalStatus,
   normalizeHistoricalTaskStatus,
-  normalizeLiveTaskStatus
+  normalizeLiveTaskStatus,
+  transitionTaskStatus
 } = await import('../src/taskState.js');
 
 assert.deepEqual(CANONICAL_TASK_STATUSES, [
@@ -52,8 +53,17 @@ assert.equal(canTransitionTaskStatus('completed', 'running'), false);
 assert.equal(canTransitionTaskStatus('failed', 'planning'), false);
 assert.equal(canTransitionTaskStatus('validation_failed', 'running'), true);
 assert.equal(canTransitionTaskStatus('validation_failed', 'validating'), true);
+assert.equal(canTransitionTaskStatus('validating', 'planning'), true);
 assert.equal(canTransitionTaskStatus('cancelled', 'validating'), false);
 assert.throws(() => assertTaskStatusTransition('completed', 'running'), error => error?.code === 'INVALID_TASK_STATE');
+
+const explicitRuntime = { status: 'queued' };
+assert.equal(transitionTaskStatus(explicitRuntime, 'running'), 'running');
+assert.equal(transitionTaskStatus(explicitRuntime, 'validating'), 'validating');
+assert.equal(transitionTaskStatus(explicitRuntime, 'completed'), 'completed');
+assert.equal(explicitRuntime.status, 'completed');
+assert.throws(() => transitionTaskStatus(explicitRuntime, 'running'), error => error?.code === 'INVALID_TASK_STATE');
+assert.equal(explicitRuntime.status, 'completed', 'invalid transitions must not mutate terminal task state');
 
 assert.equal(normalizeHistoricalTaskStatus('working'), 'running');
 assert.equal(normalizeHistoricalTaskStatus('waiting'), 'planning');

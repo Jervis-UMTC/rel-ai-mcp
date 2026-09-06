@@ -54,6 +54,31 @@ function createServiceProcessClient(options = {}) {
     return request('dashboard-bootstrap', {}, 5_000);
   }
 
+  async function getLocalUsage(month) {
+    await ensureChild();
+    return request('desktop-local-usage', { month }, 5_000);
+  }
+
+  async function markOnboardingHandoff() {
+    await ensureChild();
+    return request('desktop-onboarding-handoff', {}, 5_000);
+  }
+
+  async function getTaskCodeWorkspace(payload) {
+    await ensureChild();
+    return request('desktop-task-code-workspace', payload || {}, 30_000);
+  }
+
+  async function readTaskCodeDiff(payload) {
+    await ensureChild();
+    return request('desktop-task-code-diff', payload || {}, 30_000);
+  }
+
+  async function getTaskCodeWorkspacePath(payload) {
+    await ensureChild();
+    return request('desktop-task-code-workspace-path', payload || {}, 5_000);
+  }
+
   function updateContext(patch = {}) {
     context = { ...context, ...patch };
     if (patch.runtimeLogChange) {
@@ -253,6 +278,11 @@ function createServiceProcessClient(options = {}) {
     stop,
     dispose,
     dashboardBootstrap,
+    getLocalUsage,
+    markOnboardingHandoff,
+    getTaskCodeWorkspace,
+    readTaskCodeDiff,
+    getTaskCodeWorkspacePath,
     updateContext,
     isListening,
     port,

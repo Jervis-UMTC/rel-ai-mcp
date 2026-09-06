@@ -47,7 +47,7 @@ const zoektIndexRelativePath = resourcePath('bin', 'zoekt', platform, sourceZoek
 const requiredFiles = [
   spec.executableName,
   resourcePath('app.asar'),
-  resourcePath('src', 'httpServer.js'),
+  resourcePath('src', 'httpServer.ts'),
   resourcePath('src', 'computerManager.js'),
   resourcePath('src', 'computer', 'midsceneAdapter.js'),
   resourcePath('src', 'tools', 'actionCatalog.js'),
@@ -79,6 +79,7 @@ const requiredFiles = [
   resourcePath('vendor', 'tree-sitter', 'manifest.json'),
   resourcePath('bin', 'rel-ai-mcp-http.js'),
   resourcePath('public', 'dashboard.js'),
+  resourcePath('public', 'dashboard-react.js'),
   resourcePath('public', 'dashboard.css'),
   resourcePath('package.json'),
   resourcePath('CHANGELOG.md'),
@@ -170,15 +171,20 @@ const packagedTypeScript = collectFiles(path.join(resourcesRoot, 'node_modules')
 });
 assert.deepEqual(packagedTypeScript, [], 'Packaged runtime dependencies must exclude TypeScript sources and non-runtime declarations.');
 
-const forbiddenLegacyTransportPaths = [
+const forbiddenPackagedPaths = [
   resourcePath('bin', 'ngrok'),
   resourcePath('gateway'),
   resourcePath('node_modules', 'wrangler'),
   resourcePath('node_modules', '@cloudflare'),
-  resourcePath('node_modules', 'miniflare')
+  resourcePath('node_modules', 'miniflare'),
+  resourcePath('node_modules', '@computer-use', 'nut-js'),
+  resourcePath('node_modules', '@computer-use', 'shared'),
+  resourcePath('node_modules', '@jimp'),
+  resourcePath('node_modules', 'jimp'),
+  resourcePath('node_modules', 'file-type')
 ];
-for (const relativePath of forbiddenLegacyTransportPaths) {
-  assert.equal(fs.existsSync(path.join(packageDirectory, relativePath)), false, `Packaged desktop must exclude obsolete transport path: ${relativePath}`);
+for (const relativePath of forbiddenPackagedPaths) {
+  assert.equal(fs.existsSync(path.join(packageDirectory, relativePath)), false, `Packaged desktop must exclude obsolete or peer-only runtime path: ${relativePath}`);
 }
 const packagedFiles = collectFiles(packageDirectory);
 for (const sensitiveName of ['privateJwk', 'recoverySecret']) {

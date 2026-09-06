@@ -1,6 +1,7 @@
 import { importResourceModule } from './resource-path.js';
 
 const { deriveConnectionState } = await importResourceModule('src/desktopUxContracts.js');
+const { createEmptyTaskActivity } = await importResourceModule('src/contracts/tasks.ts');
 
 function initialDesktopStatus(version = '') {
   return normalizeDesktopStatus({
@@ -14,16 +15,7 @@ function initialDesktopStatus(version = '') {
     errorCode: '',
     localUrl: '',
     version,
-    taskActivity: {
-      state: 'idle',
-      activeCalls: 0,
-      activeTaskCount: 0,
-      tasks: [],
-      workspace: '',
-      tool: '',
-      startedAt: null,
-      lastTask: null
-    }
+    taskActivity: createEmptyTaskActivity()
   });
 }
 

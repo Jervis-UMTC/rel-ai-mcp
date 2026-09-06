@@ -1,8 +1,8 @@
 import * as path from 'node:path';
 import { importResourceModule } from './resource-path.js';
 
-const { readJsonFile, writeJsonAtomic } = await importResourceModule('src/durableState.js');
-const { errorGuidance } = await importResourceModule('src/desktopUxContracts.js');
+const { readJsonFile, writeJsonAtomic } = await importResourceModule('src/durableState.ts');
+const { errorGuidance } = await importResourceModule('src/contracts/errors.ts');
 
 const DEFAULT_NOTIFICATION_PREFERENCES = Object.freeze({
   enabled: true,

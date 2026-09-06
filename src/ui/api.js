@@ -10,13 +10,9 @@ const _cache = new Map();
 let _dashboardReloadPromise = null;
 
 
-export function requestDashboardRefresh(options = {}) {
+export function requestDashboardRefresh() {
   invalidateCache();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('relai:dashboard-refresh', {
-      detail: { structural: options.structural === true }
-    }));
-  }
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('relai:dashboard-refresh'));
 }
 
 function cacheKeyFor(url, fetchOpts) {

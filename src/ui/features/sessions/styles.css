@@ -86,7 +86,11 @@
 
 .task-file-list { @apply m-0 grid list-none gap-1 p-0; }
 .task-file-list li { @apply min-w-0 rounded-md px-2.5 py-2; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
+.task-file-list li.task-file-link-row { padding: 0; }
 .task-file-list code { @apply block break-all text-[11px] leading-5; color: var(--ui-text-primary); }
+.task-file-link { @apply block rounded-md px-2.5 py-2 no-underline; color: inherit; }
+.task-file-link:hover { background: var(--ui-surface-raised); }
+.task-file-link:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
 .task-event-list { @apply grid gap-1; }
 .task-event { @apply grid min-w-0 items-center gap-3 rounded-md px-2.5 py-2 text-left; grid-template-columns: 72px minmax(0,1fr) auto; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); color: var(--ui-text-primary); text-decoration: none; }
 .task-event > span { @apply whitespace-nowrap text-[11px]; color: var(--ui-text-tertiary); }

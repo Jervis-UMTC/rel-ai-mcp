@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines the current production desktop experience after the Secure MCP Tunnel hard cutover: navigation, setup behavior, Connection ownership, shared filters, responsive rules, and renderer boundaries.
+This document defines the current production desktop experience after the Secure MCP Tunnel and React dashboard hard cutovers: navigation, setup behavior, Connection ownership, shared filters, responsive rules, and renderer boundaries.
 
 Source development and packaging instructions live in [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -13,9 +13,9 @@ Rel.AI is an installed desktop application. The normal path is:
 1. Open Rel.AI MCP.
 2. Enter the OpenAI Secure MCP Tunnel ID and runtime API key when setup is required.
 3. Start the secure connection.
-4. Add a repository under **Workspaces**.
+4. Add a repository under **Projects**.
 5. Create or reconnect the Rel.AI MCP integration in ChatGPT through the Tunnel connection option.
-6. Work through Overview, Sessions, Workspaces, Activity, and System.
+6. Work through Overview, Tasks, Changes, Projects, Activity, System, and Settings.
 
 The dashboard is the routine application surface. The separate status window is recovery-only.
 
@@ -34,7 +34,7 @@ It does not expose source-development files, shell commands, diagnostic URLs, in
 
 Overview shows only unfinished product work:
 
-- choose a workspace;
+- choose a project;
 - configure the secure tunnel;
 - connect ChatGPT; and
 - send a safe first Rel.AI request.
@@ -48,16 +48,17 @@ The checklist has one current action, supports dismissal, persists completion st
 ### Work
 
 1. Overview — `#home`
-2. Sessions — `#tasks`
-3. Workspaces — `#workspaces`
-4. Activity — `#activity`
+2. Tasks — `#tasks`
+3. Changes — `#code`
+4. Projects — `#workspaces`
+5. Activity — `#activity`
 
 ### Application
 
-1. System — `#system`
-2. Settings — `#settings`
+1. System — opens at `#processes` and owns Running commands (`#processes`), Troubleshooting (`#diagnostics`), ChatGPT tools (`#tools`), and Analytics (`#usage`).
+2. Settings — opens at `#settings` and owns Connection (`#settings/connection`), Preferences (`#settings`), App (`#settings/application`), and About (`#settings/about`).
 
-System owns Connection, Processes, Diagnostics, Tools, and Usage through the desktop sidebar accordion. Settings uses the same desktop pattern; their in-page rails remain as a responsive fallback below the full desktop layout. Direct hashes remain canonical for contextual navigation.
+System and Settings use the primary sidebar accordions rather than duplicating those destinations in an in-page settings rail. Direct hashes remain canonical for contextual navigation.
 
 ### Mobile navigation
 
@@ -65,18 +66,35 @@ The compact navigation keeps the top-level destinations available in the desktop
 
 ## Route policy
 
-`src/ui/route-policy.js` owns canonical route normalization and allowed route parameters. Compatibility redirects may remain for removed dashboard hashes, but deleted connection modes must not return as visible destinations.
+`src/ui/route-policy.js` owns canonical route normalization and allowed route parameters. `src/ui/router.js` owns hash navigation state, route parameter helpers, unsaved-change navigation protection, and route-change dispatch. `src/ui/react/main.js` owns route presentation, route-body selection/rendering, route-heading focus, and route-mounted announcements. Compatibility redirects may remain for removed dashboard hashes, but deleted connection modes must not return as visible destinations.
+
+## Renderer ownership
+
+The HTTP server emits a minimal dashboard shell and initial JSON. React owns the persistent dashboard shell and the current dashboard route bodies.
+
+- `public/dashboard.js` coordinates startup, authoritative refresh/recovery, Electron status, hash-router initialization, and SSE-to-store delivery. It is not a feature renderer.
+- `src/ui/react/main.js` owns navigation, page identity, route-body selection/rendering, route focus/announcements, the command palette, shared overlay/toast chrome, recovery/dashboard state presentation, and registration of React dashboard routes.
+- `src/ui/store.js` owns canonical revision-aware dashboard client state.
+- `src/ui/events.js` owns the single dashboard SSE connection. Features consume store updates instead of opening independent event streams.
+- `src/ui/features/` owns feature-local React components, presentation models, forms, and styles.
+- `src/ui/components/` is for genuinely shared UI behavior and primitives, not speculative abstractions.
+
+Backend read models and lifecycle decisions remain backend-owned. React must not infer task completion, connection authority, process ownership, or project authorization from presentation state.
+
+Feature forms keep unsaved values in local React state where appropriate. Server/project/task/process state stays in the canonical dashboard store. Desktop-only operations use the approved `window.relaiDesktop` preload bridge; renderer code must not recreate privileged Electron authority.
+
+The first-run and recovery surfaces stay independent of the dashboard React tree. The wizard/status renderer and `electron/recovery-window.js` must still work when dashboard JavaScript, dashboard data, or the local service is unhealthy.
 
 ## Settings ownership
 
-Settings remains focused on application preferences rather than duplicating feature controls:
+Settings owns application configuration without duplicating feature controls:
 
-- **Preferences** — theme, density, notifications.
-- **Application** — launch-at-sign-in, lifecycle state, updates.
-- **Advanced** — expert safeguards and resource limits.
+- **Connection** — Secure MCP Tunnel configuration, status, and recovery guidance.
+- **Preferences** — theme, density, and desktop notification preferences.
+- **App** — launch-at-sign-in, lifecycle behavior, local data, updates, and other application-level controls exposed by the current implementation.
 - **About** — version, project, repository, and license information.
 
-The Secure MCP Tunnel configuration lives on **Connection**, not in generic Settings.
+Connection remains a dedicated settings route rather than being mixed into general Preferences.
 
 ## Shared ChatGPT guidance
 
@@ -134,7 +152,9 @@ Overview prioritizes:
 
 ## Styling ownership
 
-`src/ui/styles/app.css` is the shared generated-style entry. Feature styles live with their owning feature under `src/ui/features/` or `src/ui/components/`. `public/dashboard.css` is generated and must be rebuilt after source style changes.
+`src/ui/styles/app.css` is the shared style entry. Feature styles live with their owning feature under `src/ui/features/`; genuinely shared component styles live under `src/ui/components/`. Tailwind scans the dashboard JavaScript sources declared by that entry. `public/dashboard.css` is generated and must be rebuilt after source style changes.
+
+Vite bundles React source from `src/ui/react/main.js` to generated `public/dashboard-react.js`, with Tailwind CSS emitted as `public/dashboard.css`. Neither generated dashboard asset is a hand-edit surface.
 
 ## Responsive and accessibility behavior
 
@@ -149,4 +169,4 @@ Overview prioritizes:
 
 ## Test ownership
 
-Tests protect behavior rather than historical source wording. Required contracts include navigation, tunnel-only setup, Electron-first public product copy, Connection create/reconnect guidance, sender-constrained IPC, shared filters, generated CSS, and representative browser acceptance. Obsolete transport-specific tests should be replaced rather than kept as dead compatibility coverage.
+Tests protect behavior rather than historical implementation details. Required contracts include navigation, React/store/SSE live behavior, stable route identity, tunnel-only setup, Electron-first public product copy, Connection create/reconnect guidance, sender-constrained IPC, shared filters, generated JS/CSS, accessibility behavior, recovery renderer independence, and representative browser acceptance. Obsolete imperative-renderer or transport-specific tests should be removed or rewritten when their production path no longer exists.

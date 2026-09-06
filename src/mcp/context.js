@@ -11,7 +11,7 @@ import {
   TRACESTATE_META_KEY
 } from '@modelcontextprotocol/server';
 import { getStateDir } from '../statePaths.js';
-import { writeTextAtomic } from '../durableState.js';
+import { writeTextAtomic } from '../durableState.ts';
 import { MCP_PROTOCOL_VERSION } from './protocol.js';
 import { principalIdentity } from './principal.js';
 

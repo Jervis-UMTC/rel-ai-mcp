@@ -7,9 +7,9 @@ import path from 'node:path';
 import { flushAuditWrites } from '../src/audit.js';
 import { readConfig } from '../src/config.js';
 import { repositoryIntelligence } from '../src/repository/intelligence/service.js';
-import { flushTaskHistoryPersistence, readTaskHistory, readTaskHistorySessionRecord } from '../src/taskHistoryStore.js';
-import { taskCommitOwnership } from '../src/taskIntegrity.js';
-import { ensureCurrentHistory, getTaskHistoryDir, listSessions, pruneSessions, writeSession } from '../src/taskHistoryStorage.js';
+import { flushTaskHistoryPersistence, readTaskHistory, readTaskHistorySessionRecord } from '../src/taskHistoryStore.ts';
+import { taskCommitOwnership } from '../src/taskIntegrity.ts';
+import { ensureCurrentHistory, getTaskHistoryDir, listSessions, pruneSessions, writeSession } from '../src/taskHistoryStorage.ts';
 import { DEFAULT_TASK_IDLE_MS, getToolActivity, resetToolActivity } from '../src/toolActivity.js';
 import { callTool as rawCallTool } from '../src/tools.js';
 

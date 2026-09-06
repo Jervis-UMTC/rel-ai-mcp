@@ -6,7 +6,9 @@ const main = fs.readFileSync(new URL('../electron/main.js', import.meta.url), 'u
 const rootPackage = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const electronPackager = fs.readFileSync(new URL('../scripts/electron-package.mjs', import.meta.url), 'utf8');
 
+assert.ok(electronPackage.build.files.includes('desktop-host.js'));
 assert.ok(electronPackage.build.files.includes('secure-tunnel-runtime.js'));
+assert.ok(electronPackage.build.files.includes('tunnel-log-parser.js'));
 assert.ok(electronPackage.build.files.includes('tunnel-recovery-supervisor.js'));
 assert.ok(electronPackage.build.files.includes('tunnel-credentials.js'));
 assert.equal(electronPackage.build.files.some(file => /ngrok|gateway-client|public-connection-runtime/i.test(file)), false);

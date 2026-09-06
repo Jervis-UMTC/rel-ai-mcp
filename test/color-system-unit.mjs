@@ -11,7 +11,7 @@ import {
   renderColorReferenceSvg,
   contrastRatio
 } from '../src/ui/colorTokens.mjs';
-import { pillClass, pillHtml } from '../src/ui/components/pill.js';
+import { pillClass } from '../src/ui/components/pill.js';
 import { statusDotClass, statusTone } from '../src/ui/status-tone.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -113,7 +113,7 @@ for (const relativePath of [
   }
 }
 
-const authoredUiFiles = ['src/http/auth.js', 'electron/dashboard-window.js'];
+const authoredUiFiles = ['src/http/auth.ts', 'electron/dashboard-window.js'];
 function collectUiFiles(relativeDirectory) {
   const directory = path.join(root, relativeDirectory);
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -167,7 +167,7 @@ for (const relativePath of ['electron/renderer/status.html', 'electron/renderer/
   assert.ok(html.indexOf('color-tokens.css') < html.indexOf('app.css'), `${relativePath} must load generated tokens before component CSS`);
 }
 
-const auth = read('src/http/auth.js');
+const auth = read('src/http/auth.ts');
 assert.doesNotMatch(auth, /oauth|public\/oauth\.css/i, 'local dashboard authorization must not restore the removed OAuth UI');
 const dashboardWindow = read('electron/dashboard-window.js');
 const startupBackground = read('electron/startup-background.js');
@@ -176,7 +176,7 @@ assert.match(dashboardWindow, /backgroundColor:\s*STARTUP_BACKGROUND_COLOR/);
 assert.match(startupBackground, /STARTUP_BACKGROUND_COLOR\s*=\s*'#[0-9a-f]{6}'/i);
 assert.doesNotMatch(startupBackground, /colorTokens|getTheme|require\s*\(/);
 
-assert.match(read('src/ui/components/toast.js'), /toast-marker/);
+assert.match(read('src/ui/components/toast.js'), /upsertToastOverlay/, 'toast helpers must publish into the React overlay store instead of rendering DOM directly');
 
 const statusExpectations = Object.freeze({
   danger: [
@@ -205,7 +205,6 @@ for (const [tone, statuses] of Object.entries(statusExpectations)) {
     assert.equal(statusTone(status), tone, `${status} must use the ${tone} semantic tone`);
     assert.equal(pillClass(status), pillClasses[tone], `${status} must use the expected pill class`);
     assert.equal(statusDotClass(status), dotClasses[tone], `${status} must use the expected dot class`);
-    assert.match(pillHtml(status), new RegExp(`\\(${tone}\\)`), `${status} must expose its semantic tone to assistive technology`);
   }
 }
 

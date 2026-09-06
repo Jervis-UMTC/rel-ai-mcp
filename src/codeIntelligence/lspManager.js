@@ -61,20 +61,33 @@ class LspSession {
     this.lastError = '';
     this.idleTimer = null;
     this.startPromise = null;
+    this.stopPromise = null;
+    this.lifecycleController = null;
+    this.state = 'idle';
+    this.disposed = false;
   }
 
   async ensure(options = {}) {
+    if (this.disposed) throw disposedSessionError(this.spec);
     this.touch();
-    if (this.client && !this.client.closed) return this;
+    if (this.client?.state === 'running') return this;
+    if (this.stopPromise) await this.stopPromise;
+    if (this.disposed) throw disposedSessionError(this.spec);
     if (this.startPromise) return this.startPromise;
     this.startPromise = this.start(options).finally(() => { this.startPromise = null; });
     return this.startPromise;
   }
 
   async start(options = {}) {
+    if (this.disposed) throw disposedSessionError(this.spec);
     if (!runtimeAvailable(this.spec)) throw unavailableError(this.spec);
+    this.state = 'starting';
+    this.lastError = '';
     this.openDocuments.clear();
     this.publishedDiagnostics.clear();
+    const lifecycleController = new AbortController();
+    this.lifecycleController = lifecycleController;
+    const signal = combineAbortSignals(options.signal, lifecycleController.signal);
     const client = new LspClient({
       executable: this.spec.executable,
       argv: this.spec.argv,
@@ -108,30 +121,42 @@ class LspSession {
             publishDiagnostics: { relatedInformation: true, versionSupport: true, codeDescriptionSupport: true }
           }
         }
-      }, { signal: options.signal });
+      }, { signal });
+      if (this.disposed) throw disposedSessionError(this.spec);
+      if (lifecycleController.signal.aborted) throw lifecycleAbortError(this.spec);
       this.client = client;
       this.capabilities = initialized?.capabilities || {};
       this.lastError = '';
+      this.state = 'running';
       client.notify('initialized', {});
       return this;
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
+      this.state = signal?.aborted ? (this.disposed ? 'disposed' : 'stopped') : 'failed';
       await client.stop().catch(() => {});
       throw error;
+    } finally {
+      if (this.state !== 'running' && this.lifecycleController === lifecycleController) {
+        this.lifecycleController = null;
+      }
     }
   }
 
   async request(method, params, options = {}) {
     await this.ensure(options);
+    const client = this.client;
+    if (!client || client.state !== 'running') throw new Error(`${this.spec.id} is not running.`);
     const started = Date.now();
+    const signal = combineAbortSignals(options.signal, this.lifecycleController?.signal);
     try {
-      const result = await this.client.request(method, params, options);
+      const result = await client.request(method, params, { ...options, signal });
       this.lastResponseMs = Date.now() - started;
       this.lastError = '';
       this.touch();
       return result;
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
+      this.lastError = client.lastError || (error instanceof Error ? error.message : String(error));
+      if (client.state === 'failed') this.state = 'failed';
       throw error;
     }
   }
@@ -145,26 +170,33 @@ class LspSession {
   }
 
   async open(relativePath, options = {}) {
+    if (this.disposed) throw disposedSessionError(this.spec);
     const operation = this.documentQueue.then(() => this.openDocument(relativePath, options));
     this.documentQueue = operation.catch(() => {});
     return operation;
   }
 
   async openDocument(relativePath, options = {}) {
+    if (this.disposed) throw disposedSessionError(this.spec);
     const safe = resolveSafePath(this.workspace.path, relativePath, { operation: 'read' });
     const text = fs.readFileSync(safe.absolutePath, 'utf8');
     const stat = fs.statSync(safe.absolutePath);
     const current = this.openDocuments.get(safe.relativePath);
     const uri = pathToFileURL(safe.absolutePath).href;
-    if (current && current.mtimeMs === stat.mtimeMs && current.size === stat.size) return current;
+    if (current && current.mtimeMs === stat.mtimeMs && current.size === stat.size) {
+      this.touch();
+      return current;
+    }
     await this.ensure(options);
+    const client = this.client;
+    if (!client || client.state !== 'running') throw new Error(`${this.spec.id} is not running.`);
     if (current) {
       this.publishedDiagnostics.delete(diagnosticUriKey(current.uri));
-      this.client.notify('textDocument/didClose', { textDocument: { uri: current.uri } });
+      client.notify('textDocument/didClose', { textDocument: { uri: current.uri } });
     }
     const languageId = languageIdForPath(this.spec, safe.relativePath);
     const document = { uri, text, languageId, version: (current?.version || 0) + 1, mtimeMs: stat.mtimeMs, size: stat.size };
-    this.client.notify('textDocument/didOpen', {
+    client.notify('textDocument/didOpen', {
       textDocument: { uri, languageId, version: document.version, text }
     });
     this.openDocuments.set(safe.relativePath, document);
@@ -174,18 +206,18 @@ class LspSession {
 
   async diagnostics(relativePath, options = {}) {
     const document = await this.open(relativePath, options);
-    const published = await this.waitForDiagnostics(document.uri, relativePath, options);
-    return published;
+    return this.waitForDiagnostics(document.uri, relativePath, options);
   }
 
   waitForDiagnostics(uri, relativePath, options = {}) {
     const key = diagnosticUriKey(uri);
     if (this.publishedDiagnostics.has(key)) return Promise.resolve(this.publishedDiagnostics.get(key));
     const client = this.client;
+    if (!client || client.state !== 'running') return Promise.reject(new Error(`${this.spec.id} is not running.`));
     const timeoutMs = Math.max(1, Math.min(DIAGNOSTIC_WAIT_MS, Number(options.timeoutMs || DIAGNOSTIC_WAIT_MS)));
+    const signal = combineAbortSignals(options.signal, this.lifecycleController?.signal);
     return new Promise((resolve, reject) => {
       let timer;
-      const signal = options.signal;
       const cleanupNotification = client.onNotification('textDocument/publishDiagnostics', params => {
         if (diagnosticUriKey(params?.uri) === key) finish(resolve, params);
       });
@@ -215,13 +247,14 @@ class LspSession {
   }
 
   noteDiskChanges(paths = []) {
-    if (!this.client || this.client.closed) return;
+    const client = this.client;
+    if (!client || client.state !== 'running') return;
     const changes = [];
     for (const relativePath of paths) {
       const current = this.openDocuments.get(relativePath);
       if (current) {
         this.publishedDiagnostics.delete(diagnosticUriKey(current.uri));
-        this.client.notify('textDocument/didClose', { textDocument: { uri: current.uri } });
+        client.notify('textDocument/didClose', { textDocument: { uri: current.uri } });
         this.openDocuments.delete(relativePath);
       }
       try {
@@ -229,22 +262,27 @@ class LspSession {
         changes.push({ uri: pathToFileURL(safe.absolutePath).href, type: fs.existsSync(safe.absolutePath) ? 2 : 3 });
       } catch {}
     }
-    if (changes.length) this.client.notify('workspace/didChangeWatchedFiles', { changes });
+    if (changes.length) client.notify('workspace/didChangeWatchedFiles', { changes });
   }
 
   status() {
+    const clientState = this.client?.state;
+    const state = clientState === 'failed' ? 'failed' : this.state;
+    const error = this.lastError || this.client?.lastError || '';
     return {
       id: this.spec.id,
       available: runtimeAvailable(this.spec),
-      active: Boolean(this.client && !this.client.closed),
+      active: state === 'running' && clientState === 'running',
+      state,
       authority: 'language-server',
       capabilities: advertisedCapabilities(this.capabilities, this.publishedDiagnostics.size > 0),
       lastResponseMs: this.lastResponseMs,
-      ...(this.lastError ? { error: this.lastError } : {})
+      ...(error ? { error } : {})
     };
   }
 
   touch() {
+    if (this.disposed) return;
     this.lastUsedAt = Date.now();
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => void this.stop(), IDLE_EVICT_MS);
@@ -252,13 +290,32 @@ class LspSession {
   }
 
   async stop() {
+    if (this.stopPromise) return this.stopPromise;
+    this.stopPromise = this.stopOnce().finally(() => { this.stopPromise = null; });
+    return this.stopPromise;
+  }
+
+  async stopOnce() {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
+    if (!this.client && !this.startPromise && (this.state === 'stopped' || this.state === 'disposed')) return;
+    this.state = 'stopping';
+    this.lifecycleController?.abort();
+    if (this.startPromise) await this.startPromise.catch(() => {});
     const client = this.client;
     this.client = null;
     this.openDocuments.clear();
     this.publishedDiagnostics.clear();
     if (client) await client.stop().catch(() => {});
+    this.lifecycleController = null;
+    this.state = this.disposed ? 'disposed' : 'stopped';
+  }
+
+  async dispose() {
+    if (this.disposed) return this.stopPromise || undefined;
+    this.disposed = true;
+    this.lifecycleController?.abort();
+    await this.stop();
   }
 }
 
@@ -273,12 +330,18 @@ function languageIdForPath(spec, relativePath) {
 }
 
 function sessionKey(workspace, spec) {
-  return `${workspace.path}\0${spec.id}`;
+  const resolved = path.resolve(String(workspace.path || ''));
+  const workspaceId = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  return `${workspaceId}\0${spec.id}`;
 }
 
 function getSession(workspace, spec) {
   const key = sessionKey(workspace, spec);
   let session = sessions.get(key);
+  if (session?.disposed) {
+    sessions.delete(key);
+    session = null;
+  }
   if (!session) {
     session = new LspSession(workspace, spec);
     sessions.set(key, session);
@@ -544,6 +607,7 @@ function providerStatuses(workspace) {
           id: spec.id,
           available: runtimeAvailable(spec),
           active: false,
+          state: 'idle',
           authority: 'language-server',
           capabilities: []
         }),
@@ -598,6 +662,25 @@ function advertisedCapabilities(capabilities = {}, publishedDiagnostics = false)
   return result;
 }
 
+function combineAbortSignals(...signals) {
+  const active = signals.filter(signal => signal && typeof signal.addEventListener === 'function');
+  if (!active.length) return undefined;
+  if (active.length === 1) return active[0];
+  return AbortSignal.any(active);
+}
+
+function disposedSessionError(spec) {
+  const error = new Error(`Language server '${spec.id}' session is no longer owned by this workspace.`);
+  error.code = 'LSP_SESSION_DISPOSED';
+  return error;
+}
+
+function lifecycleAbortError(spec) {
+  const error = new Error(`Language server '${spec.id}' startup was cancelled.`);
+  error.name = 'AbortError';
+  return error;
+}
+
 function unavailableError(spec) {
   const error = new Error(`Language server '${spec.id}' is unavailable.`);
   error.code = 'LSP_UNAVAILABLE';
@@ -609,7 +692,20 @@ function sha256(text) {
 }
 
 function noteLspMutation(workspace, paths = []) {
-  for (const spec of PROVIDERS) sessions.get(sessionKey(workspace, spec))?.noteDiskChanges(paths);
+  const normalized = [...new Set((paths || [])
+    .map(value => String(value || '').trim().replaceAll('\\', '/').replace(/^\.\//, ''))
+    .filter(Boolean))];
+  for (const spec of PROVIDERS) {
+    const key = sessionKey(workspace, spec);
+    const session = sessions.get(key);
+    if (!session) continue;
+    if (!normalized.length) {
+      sessions.delete(key);
+      void session.dispose();
+      continue;
+    }
+    session.noteDiskChanges(normalized);
+  }
 }
 
 async function disposeLspWorkspace(workspace) {
@@ -624,13 +720,13 @@ async function disposeLspWorkspace(workspace) {
       active.push(session);
     }
   }
-  await Promise.allSettled(active.map(session => session.stop()));
+  await Promise.allSettled(active.map(session => session.dispose()));
 }
 
 async function shutdownLspSessions() {
   const active = [...sessions.values()];
   sessions.clear();
-  await Promise.allSettled(active.map(session => session.stop()));
+  await Promise.allSettled(active.map(session => session.dispose()));
 }
 
 export {

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startHttpServer } from '../src/httpServer.js';
+import { startHttpServer } from '../src/httpServer.ts';
 import { beginConnectorToolCall, requestCurrentTaskCancellation, resetToolActivity, runWithToolActivity } from '../src/toolActivity.js';
 import { runUiAction, stopAllUiSessions } from '../src/webAutomationManager.js';
 

@@ -51,6 +51,55 @@ export default [
   },
 
   {
+    files: ["src/**/*.{js,mjs,cjs}"],
+    ignores: ["src/ui/**", "src/contracts/**"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{
+          regex: "^(?:(?:\\.\\./)+electron(?:/|$)|(?:\\.\\.?/)+ui(?:/|$)|(?:@rel-ai/desktop|rel-ai-mcp-launcher)(?:/|$))",
+          message: "Core/runtime modules must not depend on Electron or UI internals."
+        }]
+      }]
+    }
+  },
+
+  {
+    files: ["src/contracts/**/*.{js,mjs,cjs}"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{
+          regex: "^(?:\\.\\./)+|^(?:@rel-ai/(?:core|ui|desktop|repository-intelligence)|rel-ai-mcp-launcher)(?:/|$)",
+          message: "Contracts are the lowest-level boundary and must not import higher-level packages."
+        }]
+      }]
+    }
+  },
+
+  {
+    files: ["src/ui/**/*.{js,mjs,cjs}"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{
+          regex: "^(?:(?:\\.\\./)+electron(?:/|$)|(?:@rel-ai/desktop|rel-ai-mcp-launcher)(?:/|$))",
+          message: "UI modules must use shared contracts/bridges, not Electron internals."
+        }]
+      }]
+    }
+  },
+
+  {
+    files: ["electron/**/*.{js,mjs,cjs}"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{
+          regex: "^(?:\\.\\./)+src/ui(?:/|$)|^@rel-ai/ui(?:/|$)",
+          message: "Desktop integration must not import dashboard UI internals."
+        }]
+      }]
+    }
+  },
+
+  {
     files: ["**/*.cjs"],
     languageOptions: {
       sourceType: "commonjs"

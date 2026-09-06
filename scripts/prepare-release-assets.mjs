@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function prepareReleaseAssets(directory = path.join(root, 'dist')) {
   const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
   const names = releaseArtifactNames(version);
-  const assets = [
+  const publicAssets = [
     names.installer,
     names.portable,
     names.blockmap,
@@ -20,18 +20,16 @@ function prepareReleaseAssets(directory = path.join(root, 'dist')) {
     names.linuxMetadata,
     names.macDmgX64,
     names.macDmgArm64,
-    names.sbom,
-    names.sizeReport,
-    names.linuxSizeReport
+    names.sbom
   ];
-  for (const name of assets) requireFile(path.join(directory, name), `Required release asset ${name}`);
+  for (const name of publicAssets) requireFile(path.join(directory, name), `Required release output ${name}`);
 
-  const checksums = assets.slice().sort().map(name => {
+  const checksums = publicAssets.slice().sort().map(name => {
     const digest = crypto.createHash('sha256').update(fs.readFileSync(path.join(directory, name))).digest('hex');
     return `${digest}  ${name}`;
   });
   fs.writeFileSync(path.join(directory, names.checksums), `${checksums.join('\n')}\n`, 'ascii');
-  const listed = [...assets, names.checksums];
+  const listed = [...publicAssets, names.checksums];
   const assetList = path.join(directory, 'release-assets.txt');
   fs.writeFileSync(assetList, `${listed.join('\n')}\n`, 'utf8');
 

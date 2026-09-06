@@ -5,7 +5,7 @@ This document owns source development, build, test, packaging, and local protoco
 ## Supported toolchain
 
 - Node.js 24
-- npm 11
+- npm 12
 - Electron and MCP versions pinned by the repository manifests
 - the pinned OpenAI tunnel-client artifact for the target platform
 
@@ -39,13 +39,26 @@ npm run start:http
 
 The default loopback service commonly uses `http://127.0.0.1:3333`. Health and dashboard routes are development diagnostics, not user setup steps.
 
-## Generated assets
+## Frontend build and generated assets
 
-Dashboard CSS is generated from `src/ui/styles/app.css` and its feature imports:
+The routine dashboard is built through one Vite pipeline:
+
+- `src/ui/react/main.js` is bundled to `public/dashboard-react.js` with lazy chunks under `public/dashboard-chunks/`;
+- Tailwind runs through `@tailwindcss/vite` from `src/ui/styles/app.css` and emits `public/dashboard.css`.
+
+Build the production assets with:
 
 ```powershell
-npm run build:css
+npm run build:frontend
 ```
+
+For browser development with React Fast Refresh and CSS HMR, run the HTTP backend with `REL_AI_MCP_TOKEN` set, then start Vite with the same token:
+
+```powershell
+npm run dev:frontend
+```
+
+Open `http://127.0.0.1:5173/dashboard.dev.html`. Vite performs a local auth bootstrap through the existing dashboard endpoint, keeps the token server-side, and proxies dashboard API/SSE/Monaco requests to `REL_AI_FRONTEND_BACKEND` (default `http://127.0.0.1:3333`). Use `npm run watch:frontend` when a filesystem build watcher is needed instead of the HMR server.
 
 Color tokens are generated for dashboard, Electron, and documentation surfaces:
 
@@ -54,7 +67,7 @@ npm run generate:color-tokens
 npm run verify:color-tokens
 ```
 
-Do not hand-edit generated output when a source generator owns it.
+`npm run verify:generated` rebuilds the Vite dashboard into a temporary output and compares it byte-for-byte with the tracked generated assets. Do not hand-edit `public/dashboard-react.js`, `public/dashboard.css`, `public/dashboard-chunks/`, or other Vite output.
 
 ## Validation
 
@@ -76,33 +89,49 @@ npm test
 
 Tests are risk controls. Prefer the smallest non-overlapping set that protects business behavior, security, validation, transactions or concurrency, data integrity, external protocol compatibility, or a meaningful release contract.
 
+For frontend work, choose tests by ownership: store/SSE/router/model tests for data semantics, dashboard smoke/integration tests for wiring, browser acceptance for real interaction/layout behavior, custom-chrome tests for Electron window integration, `code-editor-browser.mjs` for Monaco/Changes behavior, and recovery-window tests for the independent recovery boundary. Do not preserve tests whose only purpose was to lock obsolete imperative renderer structure.
+
 ## Dashboard architecture
 
-- `src/http/dashboard.js` renders the application shell.
-- `public/dashboard.js` owns dashboard startup and live data integration.
+The dashboard runtime is intentionally split by ownership:
+
+- `src/http/dashboard.js` emits a minimal HTML shell plus initial dashboard JSON and owns the authenticated dashboard/API/SSE server boundary.
+- `public/dashboard.js` is the browser coordinator for startup, authoritative refresh/recovery, Electron status, hash-router initialization, and SSE-to-store delivery. Do not add feature markup there.
+- `src/ui/store.js` is canonical revision-aware dashboard client state. Aggregate snapshots replace state; typed live events update their owned domain only.
+- `src/ui/events.js` owns the one dashboard `EventSource`, reconnection/backoff, visibility restart, and typed event delivery.
+- `src/ui/react/main.js` owns the React application shell, route registration and route-body rendering, page identity/focus/announcements, shared shell chrome, command palette, recovery/dashboard state presentation, overlays/toasts, and store provider.
 - `src/ui/navigation-catalog.js` owns route and navigation metadata.
-- `src/ui/router.js` owns canonical hash routing.
-- `src/ui/features/` owns page behavior.
-- `src/ui/components/` owns shared controls.
-- `src/ui/styles/app.css` is the generated CSS entry.
+- `src/ui/route-policy.js` owns route normalization/allowed parameters; `src/ui/router.js` owns hash navigation state, route parameter helpers, unsaved-change protection, and route-change dispatch.
+- `src/ui/features/` owns feature-local React components, models/helpers, forms, and styles.
+- `src/ui/components/` owns controls and behavior that are actually reused across features.
+- `src/ui/styles/app.css` is the CSS source entry; its imports are the current list of feature/shared style inputs.
 
-Feature styles are split into:
+Backend projection stays backend-owned. Do not move task completion, authorization, process lifecycle, connection authority, or workspace truth into React presentation state.
 
-- `src/ui/features/home/styles.css`
-- `src/ui/features/onboarding/styles.css`
-- `src/ui/features/settings/styles.css`
-- `src/ui/features/system/styles.css`
-- `src/ui/components/filter-controls.css`
+Use local React state for unsaved form values and other UI-only state. Put canonical dashboard data in `src/ui/store.js`, and consume only the slices a feature actually needs when possible. Do not open feature-specific SSE connections.
 
 Keep route metadata centralized. Compatibility redirects may remain in `route-policy.js`, but removed routes must not return as visible destinations.
 
+### Adding or changing a dashboard feature
+
+1. Put the route component and feature-only logic under the owning `src/ui/features/<feature>/` directory.
+2. Keep feature-specific CSS beside that feature and import it from `src/ui/styles/app.css`.
+3. Register a new top-level React route in `src/ui/react/main.js` only when the route is real and present in the navigation/route policy.
+4. Reuse `src/ui/components/` only when a stable behavior is shared by at least two features; do not create abstractions for anticipated reuse.
+5. Keep unsaved form state local unless another feature or the backend truly owns it.
+6. Use the constrained `window.relaiDesktop` bridge for desktop-only authority; never import Electron into dashboard renderer code.
+7. Add the smallest regression test at the failed ownership boundary, then run the relevant browser/Electron acceptance test when behavior crosses those boundaries.
+8. Rebuild generated frontend assets before committing source changes that affect them.
+
 ## Electron architecture
 
-- `electron/main.js` owns desktop lifecycle and window orchestration.
+- `electron/main.js` is the thin Electron composition root; it injects Electron capabilities into `electron/desktop-host.js` and starts the host.
+- `electron/desktop-host.js` owns desktop lifecycle, windows, tray, updater, safeStorage-backed credentials, notifications, OS integration, and utility-process supervision. Rel.AI analytics, onboarding state transitions, and task-code repository operations stay behind the service utility-process boundary.
 - `electron/renderer/wizard.html` and `wizard.js` own first-run and connection-recovery editing.
-- preload files expose narrow IPC contracts.
-- `electron/ipc-handlers.js` validates renderer requests and sender ownership.
-- the dashboard is the routine application surface; the status window is recovery-only.
+- `electron/recovery-window.js` and the status renderer remain independent of the React dashboard so recovery still works when the routine dashboard is unavailable.
+- `electron/preload.cjs` exposes narrow, surface-specific bridges. The dashboard uses `window.relaiDesktop`; application/recovery renderers use `window.electronAPI`.
+- `electron/ipc-handlers.js` and dashboard-specific IPC handlers validate renderer requests and sender ownership.
+- the React dashboard is the routine application surface; the status window is recovery-only.
 
 The wizard owns the minimal installed-app connection setup: Tunnel ID, write-only runtime API key, optional advanced local port, and a single action to start the secure connection.
 
@@ -146,6 +175,8 @@ npm run verify:fuses
 npm run electron:size:windows
 npm run electron:size:linux
 ```
+
+Electron packaging runs the same Vite production build before electron-builder, so packaged `public/dashboard-react.js`, `public/dashboard.css`, and dashboard chunks must come from the current React/CSS sources rather than manual `public/` edits.
 
 Electron runtime resources are fail-closed against packaging drift. Runtime roots listed by the root package (`src/`, `bin/`, `public/`, and `skills/`) are copied as complete trees instead of extension allowlists. `examples/` and `types/` are the explicit non-Electron package roots. `test/electron-launcher-smoke.mjs` requires every runtime root to have an Electron resource mapping, and `scripts/verify-packaged-app.mjs` recursively compares the built artifact's file list and SHA-256 content with source. Adding a new root runtime directory therefore fails verification until it is packaged or deliberately classified as non-Electron.
 

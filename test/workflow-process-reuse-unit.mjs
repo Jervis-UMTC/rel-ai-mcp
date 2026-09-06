@@ -38,6 +38,10 @@ try {
   const changedEnvKeys = await startManagedProcess(workspace, config, { command, kind: 'service', purpose: 'reuse fixture', env: { RELAI_REUSE_KEY: 'one' }, startupWaitMs: 25 }, { taskId: 'task-a', principal: 'principal-a' });
   started.push(changedEnvKeys.processId);
   assert.notEqual(changedEnvKeys.processId, first.processId, 'changed environment key sets must not reuse a process');
+
+  const changedEnvValue = await startManagedProcess(workspace, config, { command, kind: 'service', purpose: 'reuse fixture', env: { RELAI_REUSE_KEY: 'two' }, startupWaitMs: 25 }, { taskId: 'task-a', principal: 'principal-a' });
+  started.push(changedEnvValue.processId);
+  assert.notEqual(changedEnvValue.processId, changedEnvKeys.processId, 'changed environment values must not reuse a process started with stale configuration');
 } finally {
   for (const processId of [...new Set(started)]) {
     try { await stopManagedProcess(config, { processId, graceMs: 50 }, { internal: true }); } catch {}

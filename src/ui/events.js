@@ -1,4 +1,6 @@
 // Dashboard SSE connection state and typed event delivery.
+import { DASHBOARD_LIVE_EVENT_TYPES } from './generated/events-contract.js';
+
 let _es = null;
 let _sourceListeners = [];
 let _onEvent = null;
@@ -9,14 +11,7 @@ let _visibilityWired = false;
 let _generation = 0;
 let _retryCount = 0;
 
-const LIVE_EVENT_TYPES = Object.freeze([
-  'task.updated',
-  'connection.updated',
-  'workspace.updated',
-  'process.updated',
-  'diagnostics.updated',
-  'dashboard.error'
-]);
+const LIVE_EVENT_TYPES = DASHBOARD_LIVE_EVENT_TYPES;
 
 export function initEvents(onEvent, onState) {
   _onEvent = onEvent || null;

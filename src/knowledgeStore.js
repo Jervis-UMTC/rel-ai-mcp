@@ -3,15 +3,26 @@ import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { statePath } from './stateLayout.js';
+import {
+  assertSqliteIntegrity,
+  checkpointSqlite,
+  createSqliteBackup,
+  isSqliteCorruptionError,
+  restoreSqliteBackup,
+  sqliteBackupPath
+} from './sqliteDurability.ts';
 
 const KNOWLEDGE_SCHEMA_VERSION = 4;
 const DEFAULT_BOOTSTRAP_BYTES = 4096;
 
-const SCHEMA_SQL = `
+const META_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS knowledge_meta(
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 ) STRICT;
+`;
+
+const CURRENT_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS validation_affinity(
   workspace TEXT NOT NULL,
   path_prefix TEXT NOT NULL,
@@ -22,16 +33,26 @@ CREATE TABLE IF NOT EXISTS validation_affinity(
 ) WITHOUT ROWID, STRICT;
 `;
 
+const KNOWLEDGE_MIGRATIONS = Object.freeze([
+  { version: 1, apply: () => {} },
+  { version: 2, apply: () => {} },
+  { version: 3, apply: removeLegacyProcedureLearning },
+  { version: 4, apply: removeLegacyGenericMemory }
+]);
+
 function knowledgeSettings(config = {}) {
   const raw = config.knowledge && typeof config.knowledge === 'object' ? config.knowledge : {};
   return {
-    proceduralLearning: raw.proceduralLearning !== false,
     maxBootstrapBytes: clamp(raw.maxBootstrapBytes, 1024, 16384, DEFAULT_BOOTSTRAP_BYTES)
   };
 }
 
 function knowledgeDatabasePath(config = {}) {
   return statePath(config, 'knowledge', 'knowledge.sqlite');
+}
+
+function knowledgeDatabaseBackupPath(config = {}) {
+  return sqliteBackupPath(knowledgeDatabasePath(config));
 }
 
 function openKnowledgeDatabase(config = {}, { readonly = false } = {}) {
@@ -45,7 +66,7 @@ function openKnowledgeDatabase(config = {}, { readonly = false } = {}) {
     if (!readonly) {
       db.exec('PRAGMA journal_mode=WAL');
       db.exec('PRAGMA synchronous=NORMAL');
-      ensureKnowledgeSchema(db);
+      ensureKnowledgeSchema(db, file);
       try { fs.chmodSync(file, 0o600); } catch {}
     }
     return db;
@@ -55,13 +76,30 @@ function openKnowledgeDatabase(config = {}, { readonly = false } = {}) {
   }
 }
 
-function ensureKnowledgeSchema(db) {
+function ensureKnowledgeSchema(db, file) {
+  db.exec(META_SCHEMA_SQL);
   const current = Number(metaValue(db, 'schema_version', 0));
+  if (!Number.isInteger(current) || current < 0) throw new Error(`Knowledge schema version '${current}' is invalid.`);
   if (current > KNOWLEDGE_SCHEMA_VERSION) throw new Error(`Knowledge schema ${current} is newer than supported schema ${KNOWLEDGE_SCHEMA_VERSION}.`);
-  db.exec(SCHEMA_SQL);
-  if (current < 3) removeLegacyProcedureLearning(db);
-  if (current < 4) removeLegacyGenericMemory(db);
-  setMeta(db, 'schema_version', KNOWLEDGE_SCHEMA_VERSION);
+  if (current === KNOWLEDGE_SCHEMA_VERSION) {
+    db.exec(CURRENT_SCHEMA_SQL);
+    return;
+  }
+
+  if (current > 0 && file) createSqliteBackup(db, file, { label: 'Knowledge database' });
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(CURRENT_SCHEMA_SQL);
+    for (const migration of KNOWLEDGE_MIGRATIONS) {
+      if (migration.version <= current) continue;
+      migration.apply(db);
+      setMeta(db, 'schema_version', migration.version);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
 }
 
 function removeLegacyProcedureLearning(db) {
@@ -79,18 +117,45 @@ function removeLegacyGenericMemory(db) {
   `);
 }
 
+function initializeKnowledgeDatabase(config = {}) {
+  const file = knowledgeDatabasePath(config);
+  if (!fs.existsSync(file)) return { ok: true, skipped: true, recovered: false, path: file };
+  try {
+    const db = openKnowledgeDatabase(config);
+    try {
+      assertSqliteIntegrity(db, 'Knowledge database');
+      return { ok: true, recovered: false, path: file };
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    if (!isSqliteCorruptionError(error)) throw error;
+    const recovery = restoreSqliteBackup(file, { label: 'Knowledge database' });
+    const db = openKnowledgeDatabase(config);
+    try { assertSqliteIntegrity(db, 'Knowledge database'); }
+    finally { db.close(); }
+    return { ok: true, recovered: true, path: file, ...recovery };
+  }
+}
+
+function maintainKnowledgeDatabase(config = {}) {
+  const file = knowledgeDatabasePath(config);
+  if (!fs.existsSync(file)) return { ok: true, skipped: true, path: file };
+  const db = openKnowledgeDatabase(config);
+  try {
+    const checkpoint = checkpointSqlite(db, 'Knowledge database');
+    const integrity = assertSqliteIntegrity(db, 'Knowledge database');
+    const backup = createSqliteBackup(db, file, { label: 'Knowledge database' });
+    return { ok: true, path: file, checkpoint, integrity, backupPath: backup.path };
+  } finally {
+    db.close();
+  }
+}
+
 function ensureLearningState(config) {
   const db = openKnowledgeDatabase(config);
   try { return { ok: true }; }
   finally { db.close(); }
-}
-
-function clearLearningState(config) {
-  const db = openKnowledgeDatabase(config);
-  try {
-    db.exec('DELETE FROM validation_affinity;');
-    return { ok: true, clearedValidationAffinity: true };
-  } finally { db.close(); }
 }
 
 function recordTaskValidationAffinity(config, workspace, session = {}, completion = {}) {
@@ -105,7 +170,14 @@ function recordTaskValidationAffinity(config, workspace, session = {}, completio
   if (!workspaceAlias || !changedFiles.length || !checks.length) return null;
   const db = openKnowledgeDatabase(config);
   try {
-    learnValidationAffinity(db, workspaceAlias, changedFiles, checks, new Date().toISOString());
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      learnValidationAffinity(db, workspaceAlias, changedFiles, checks, new Date().toISOString());
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
     return { ok: true, workspace: workspaceAlias, pathCount: changedFiles.length, checkCount: checks.length };
   } finally { db.close(); }
 }
@@ -160,13 +232,15 @@ function clamp(value, min, max, fallback) {
   return Math.min(max, Math.max(min, Math.floor(Number.isFinite(resolved) ? resolved : min)));
 }
 function setMeta(db, key, value) { db.prepare('INSERT INTO knowledge_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(String(key), String(value)); }
-function metaValue(db, key, fallback = '') { try { return db.prepare('SELECT value FROM knowledge_meta WHERE key=?').get(String(key))?.value ?? fallback; } catch { return fallback; } }
+function metaValue(db, key, fallback = '') { return db.prepare('SELECT value FROM knowledge_meta WHERE key=?').get(String(key))?.value ?? fallback; }
 
 export {
-  clearLearningState,
   ensureLearningState,
+  initializeKnowledgeDatabase,
+  knowledgeDatabaseBackupPath,
   knowledgeDatabasePath,
   knowledgeSettings,
   learnedValidationChecks,
+  maintainKnowledgeDatabase,
   recordTaskValidationAffinity
 };

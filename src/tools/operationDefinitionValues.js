@@ -253,15 +253,6 @@ const OPERATION_DEFINITION_VALUES = [
     behavior: {"audit":"edit","cache":"edit","startsSession":true,"deferStagedSession":true,"sessionWrite":true,"summary":"edit","longRunning":true,"concurrencyScope":"mutation","taskScope":"optional"},
   },
   {
-    name: OP.SKILL_MANAGE,
-    title: "Manage Agent-Learned Skill",
-    description: "Create, edit, patch, or delete one Rel.AI-managed reusable SKILL.md chosen by the active agent. Operations validate ownership, scope, skill format, and Rel.AI provenance. work_id is optional provenance attribution; repository validation is not a permission prerequisite. Rel.AI does not infer candidate workflows or decide conceptual similarity.",
-    inputSchema: {"type":"object","properties":{"workspace":{"type":"string"},"action":{"type":"string","enum":["create","edit","patch","delete"]},"name":{"type":"string","minLength":1,"maxLength":64},"scope":{"type":"string","enum":["workspace","global"]},"content":{"type":"string","maxLength":524288},"oldText":{"type":"string","maxLength":524288},"newText":{"type":"string","maxLength":524288}},"required":["workspace","action","name"],"additionalProperties":false},
-    handlerName: 'skillManage',
-    behavior: {"audit":"edit","summary":"edit","concurrencyScope":"task","taskScope":"optional"},
-    dashboard: {"category":"Learning"}
-  },
-  {
     name: OP.WORK_CANCEL,
     title: "Cancel Logical Task",
     description: "Cancel the exact logical task identified by work_id. Cancellation is idempotent, preserves partial progress and final timestamps, records a bounded reason, and cooperatively aborts active subprocess-backed operations when supported.",

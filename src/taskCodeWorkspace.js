@@ -6,8 +6,8 @@ import { resolveWorkspace } from './config.js';
 import { runProcess } from './process.js';
 import { gitStatusArgs, parseGitStatus } from './repo/gitStatus.js';
 import { collectOptionsFromWorkspace, createCollectionPathFilter, isSecretPath, looksBinary, resolveSafePath } from './safety.js';
-import { readTaskHistorySessionRecord } from './taskHistoryStore.js';
-import { taskOwnedChangedFiles } from './taskIntegrity.js';
+import { readTaskHistorySessionRecord } from './taskHistoryStore.ts';
+import { taskOwnedChangedFiles } from './taskIntegrity.ts';
 
 const MAX_DIFF_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_CHANGED_FILES = 500;
@@ -498,7 +498,12 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+function resolveTaskCodeWorkspacePath(config, taskIdValue) {
+  return resolveTaskCodeContext(config, taskIdValue).executionPath;
+}
+
 export {
   describeTaskCodeWorkspace,
-  readTaskCodeDiff
+  readTaskCodeDiff,
+  resolveTaskCodeWorkspacePath
 };

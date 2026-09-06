@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./src/contracts" },
+    { "path": "./src/core" },
+    { "path": "./src/repository/intelligence" }
+  ]
+}

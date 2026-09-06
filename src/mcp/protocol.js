@@ -14,13 +14,18 @@ import {
   validateJsonRpcRequestEnvelope,
   validJsonRpcId
 } from './protocolEnvelope.js';
+import { TRANSPORT_OPERATION } from './contracts.ts';
 const TASK_EXECUTION_MODE = Object.freeze({
   NATIVE_TASKS: 'native_tasks',
   BOUNDED_SYNCHRONOUS: 'bounded_synchronous'
 });
 const MISSING_TASKS_CAPABILITY_CODE = ProtocolErrorCode.MissingRequiredClientCapability;
 const INVALID_TASKS_CAPABILITY_CODE = ProtocolErrorCode.InvalidParams;
-const TASK_METHODS = Object.freeze(['tasks/get', 'tasks/update', 'tasks/cancel']);
+const TASK_METHODS = Object.freeze([
+  TRANSPORT_OPERATION.TASK_GET,
+  TRANSPORT_OPERATION.TASK_UPDATE,
+  TRANSPORT_OPERATION.TASK_CANCEL
+]);
 const LEGACY_LIFECYCLE_METHODS = Object.freeze(['initialize', 'notifications/initialized']);
 
 function negotiateTasksCapability(clientCapabilities) {

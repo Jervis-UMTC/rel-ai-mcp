@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { summarizeDashboardTask } from '../src/http/dashboardData.js';
+import { summarizeDashboardTask } from '../src/core/dashboard-data.ts';
 import { buildTaskSemanticProgress, classifyTaskChangedFiles, semanticMilestoneForEvent } from '../src/taskSemanticProgress.js';
 
 const files = classifyTaskChangedFiles([

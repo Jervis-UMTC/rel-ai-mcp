@@ -35,6 +35,15 @@ const failedResult = await failed.prepare('quit');
 assert.equal(failedResult.clean, false);
 assert.deepEqual(failureCalls, ['marker'], 'uncertain cleanup must preserve the unclean-shutdown marker');
 
+const lifecycleMarkerFailure = createShutdownCoordinator({
+  stopService: async () => ({ cleanup: { clean: true } }),
+  markCleanShutdown: () => { throw new Error('marker write failed'); }
+});
+const lifecycleMarkerResult = await lifecycleMarkerFailure.prepare('quit');
+assert.equal(lifecycleMarkerResult.ok, false);
+assert.equal(lifecycleMarkerResult.clean, false, 'a failed clean-shutdown marker must not be reported as a clean exit');
+assert.equal(lifecycleMarkerResult.errors[0]?.step, 'lifecycle marker');
+
 const forcedClose = deferred();
 const shutdownGate = deferred();
 let closeCallback = null;

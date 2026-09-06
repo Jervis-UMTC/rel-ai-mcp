@@ -2,7 +2,6 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { matchingRelevanceTerms, relevanceTerms } from './context/relevance.js';
-import { managedSkillRoots } from './skillManager.js';
 
 const MAX_SKILLS = 100;
 const MAX_SKILL_FILE_BYTES = 512 * 1024;
@@ -66,8 +65,7 @@ function skillRecords(workspace, options = {}) {
   const userRoot = path.resolve(options.userRoot || path.join(os.homedir(), '.agents', 'skills'));
   const roots = [
     { source: 'project', root: projectRoot },
-    { source: 'user', root: userRoot },
-    ...(options.config ? managedSkillRoots(options.config, workspace.alias) : [])
+    { source: 'user', root: userRoot }
   ];
   const byName = new Map();
   for (const entry of roots) {

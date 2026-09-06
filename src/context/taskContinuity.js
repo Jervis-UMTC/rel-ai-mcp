@@ -1,5 +1,5 @@
 import { knowledgeSettings } from '../knowledgeStore.js';
-import { readConversationContinuity, readCrossWorkspaceTaskEpisodes } from '../taskHistoryStore.js';
+import { readConversationContinuity, readCrossWorkspaceTaskEpisodes } from '../taskHistoryStore.ts';
 import { matchingRelevanceTerms, relevanceTerms } from './relevance.js';
 
 const SOURCE_PRIORITY = Object.freeze({

@@ -74,6 +74,16 @@ assert.equal(normalizeTaskProgress({ mode: 'determinate', completedUnits: 2, tot
 assert.deepEqual(normalizeTaskProgress({ mode: 'determinate', completedUnits: 2, totalUnits: 5 }, 'completed'), {
   mode: 'complete', percentage: 100, label: 'Complete'
 });
+assert.equal(
+  normalizeTaskProgress({ mode: 'determinate', completedUnits: 1, totalUnits: 1, percentage: 100 }, 'validating').percentage,
+  99,
+  'non-completed task states must not claim 100% task completion'
+);
+assert.equal(
+  normalizeTaskProgress({ mode: 'complete', percentage: 100, label: 'Validation complete' }, 'planning').mode,
+  'indeterminate',
+  'operation completion must not be projected as task completion while the task remains open'
+);
 assert.deepEqual(incompleteProgress({
   mode: 'determinate',
   completedUnits: 5,

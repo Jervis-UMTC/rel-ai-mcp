@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { clearAuditHistory } from '../src/audit.js';
 import { callTool as rawCallTool } from '../src/tools.js';
-import { clearTaskHistory, flushTaskHistoryPersistence } from '../src/taskHistoryStore.js';
+import { clearTaskHistory, flushTaskHistoryPersistence } from '../src/taskHistoryStore.ts';
 import { resetToolActivity } from '../src/toolActivity.js';
 import { repositoryIntelligence } from '../src/repository/intelligence/service.js';
 

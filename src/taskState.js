@@ -1,28 +1,16 @@
 'use strict';
 
-const CANONICAL_TASK_STATUSES = Object.freeze([
-  'queued',
-  'planning',
-  'running',
-  'waiting_for_approval',
-  'blocked',
-  'validating',
-  'validation_failed',
-  'inactive',
-  'completed',
-  'failed',
-  'cancelled'
-]);
-const NATIVE_TASK_STATUSES = Object.freeze([
-  'working',
-  'input_required',
-  'completed',
-  'failed',
-  'cancelled'
-]);
+import { CANONICAL_TASK_STATUSES, NATIVE_TASK_STATUSES } from './contracts/tasks.ts';
 
 const CANONICAL_TASK_STATUS_SET = new Set(CANONICAL_TASK_STATUSES);
 const NATIVE_TASK_STATUS_SET = new Set(NATIVE_TASK_STATUSES);
+const NATIVE_TASK_TRANSITIONS = Object.freeze({
+  working: Object.freeze(['working', 'input_required', 'completed', 'failed', 'cancelled']),
+  input_required: Object.freeze(['input_required', 'working', 'completed', 'failed', 'cancelled']),
+  completed: Object.freeze(['completed']),
+  failed: Object.freeze(['failed']),
+  cancelled: Object.freeze(['cancelled'])
+});
 const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 const TASK_TRANSITIONS = Object.freeze({
   queued: Object.freeze(['planning', 'running', 'inactive', 'cancelled']),
@@ -30,7 +18,7 @@ const TASK_TRANSITIONS = Object.freeze({
   running: Object.freeze(['planning', 'waiting_for_approval', 'blocked', 'validating', 'validation_failed', 'inactive', 'completed', 'failed', 'cancelled']),
   waiting_for_approval: Object.freeze(['running', 'blocked', 'inactive', 'failed', 'cancelled']),
   blocked: Object.freeze(['running', 'waiting_for_approval', 'validating', 'validation_failed', 'inactive', 'failed', 'cancelled']),
-  validating: Object.freeze(['running', 'validation_failed', 'inactive', 'completed', 'failed', 'cancelled']),
+  validating: Object.freeze(['planning', 'running', 'validation_failed', 'inactive', 'completed', 'failed', 'cancelled']),
   validation_failed: Object.freeze(['planning', 'running', 'blocked', 'validating', 'inactive', 'completed', 'failed', 'cancelled']),
   inactive: Object.freeze(['planning', 'running', 'blocked', 'validating']),
   completed: Object.freeze([]),
@@ -46,8 +34,19 @@ function isCanonicalTaskStatus(value) {
   return CANONICAL_TASK_STATUS_SET.has(normalizeStatusToken(value));
 }
 
+function normalizeNativeTaskStatus(value) {
+  const status = normalizeStatusToken(value);
+  return NATIVE_TASK_STATUS_SET.has(status) ? status : '';
+}
+
 function isNativeTaskStatus(value) {
-  return NATIVE_TASK_STATUS_SET.has(normalizeStatusToken(value));
+  return Boolean(normalizeNativeTaskStatus(value));
+}
+
+function canTransitionNativeTaskStatus(from, to) {
+  const current = normalizeNativeTaskStatus(from);
+  const next = normalizeNativeTaskStatus(to);
+  return Boolean(current && next && NATIVE_TASK_TRANSITIONS[current]?.includes(next));
 }
 
 function isTerminalTaskStatus(value) {
@@ -129,6 +128,19 @@ function assertTaskStatusTransition(from, to) {
   return next;
 }
 
+function transitionTaskStatus(task, to, options = {}) {
+  if (!task || typeof task !== 'object') throw new TypeError('task must be an object.');
+  const current = normalizeLiveTaskStatus(task.status, task);
+  const next = normalizeLiveTaskStatus(to, task, options);
+  if (current === next) {
+    task.status = next;
+    return next;
+  }
+  assertTaskStatusTransition(current, next);
+  task.status = next;
+  return next;
+}
+
 function legacyInactivityRecord(record = {}) {
   if (record.completionKnown === true || String(record.endReason || '') !== 'inactivity_window') return false;
   if (String(record.cancellationInitiator || '').trim()) return false;
@@ -145,10 +157,11 @@ function hasFailureEvidence(record = {}) {
 export {
   CANONICAL_TASK_STATUSES,
   NATIVE_TASK_STATUSES,
-  TERMINAL_TASK_STATUSES,
+  NATIVE_TASK_TRANSITIONS,
   TASK_TRANSITIONS,
   activeLogicalTaskCount,
   assertTaskStatusTransition,
+  canTransitionNativeTaskStatus,
   canTransitionTaskStatus,
   internalStatusToDashboardStatus,
   isCanonicalTaskStatus,
@@ -158,5 +171,7 @@ export {
   isTerminalTaskStatus,
   nativeStatusToInternalStatus,
   normalizeHistoricalTaskStatus,
-  normalizeLiveTaskStatus
+  normalizeLiveTaskStatus,
+  normalizeNativeTaskStatus,
+  transitionTaskStatus
 };

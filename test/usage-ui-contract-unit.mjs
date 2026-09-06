@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { buildUsageModel, currentUsageMonth } from '../src/ui/features/usage/index.js';
 import { analyticsBounds, analyticsRangeScope } from '../src/ui/features/usage/range-model.js';
 import { loadAnalyticsData } from '../src/ui/features/usage/data.js';
-import { renderUsage } from '../src/ui/features/usage/render.js';
+import { analyticsMetrics, timelineModel } from '../src/ui/features/usage/render.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
@@ -13,50 +13,53 @@ const navigationCatalog = read('src/ui/navigation-catalog.js');
 const dashboard = read('public/dashboard.js');
 const preload = read('electron/preload.cjs');
 const ipc = read('electron/ipc-handlers-dashboard.js');
+const desktopContract = read('src/contracts/desktop.ts');
 const usageSource = read('src/ui/features/usage/index.js');
+const usageReact = read('src/ui/features/usage/react.js');
 const usageRender = read('src/ui/features/usage/render.js');
+const reactMain = read('src/ui/react/main.js');
 const usageRange = read('src/ui/features/usage/range-model.js');
 const usageData = read('src/ui/features/usage/data.js');
 const usageCss = read('src/ui/features/usage/styles.css');
-const usageCombined = `${usageSource}\n${usageRender}\n${usageRange}\n${usageData}`;
+const usageCombined = `${usageSource}\n${usageReact}\n${usageRender}\n${usageRange}\n${usageData}`;
 
 assert.match(navigationCatalog, /route\(['"]usage['"], ['"]Analytics['"]/);
 assert.match(navigationCatalog, /See activity trends, reliability, and problem areas/i);
-assert.match(dashboard, /usage: systemSection\(['"]usage['"]\)/, 'Usage must mount through the generation-safe lazy system route wrapper');
+assert.doesNotMatch(dashboard, /usage: systemSection\(['"]usage['"]\)/, 'Analytics must not retain the legacy System renderer');
+assert.match(reactMain, /registerReactSection\('usage'/, 'Analytics must be registered as a canonical React route');
 assert.match(preload, /getLocalUsage: month => ipcRenderer\.invoke\(['"]desktop:analytics:local['"], month\)/);
 assert.doesNotMatch(preload, /getGatewayUsage|desktop:gateway:usage/);
-assert.match(ipc, /desktop:analytics:local/);
+assert.match(desktopContract, /DESKTOP_ANALYTICS_LOCAL:\s*['"]desktop:analytics:local['"]/);
+assert.match(ipc, /channels\.DESKTOP_ANALYTICS_LOCAL/);
 assert.match(ipc, /Analytics month must use YYYY-MM/);
 assert.doesNotMatch(ipc, /gateway/i);
 assert.match(usageData, /desktop\.getLocalUsage/);
 assert.doesNotMatch(`${usageSource}\n${usageData}`, /getGatewayUsage|connectionMode|pairing_required|cloudUsageAvailability/i);
 assert.doesNotMatch(`${usageSource}\n${usageData}`, /fetch\(|DASHBOARD_DATA_URL|auditTail|taskActivity/);
-assert.match(usageSource, /Analytics are stored on this computer\. Prompts, file paths, command output, and action results are not stored/i);
-assert.match(usageSource, /data-usage-privacy/, 'Analytics must disclose local retention and external telemetry state');
+assert.match(usageReact, /Analytics are stored on this computer\. Prompts, file paths, command output, and action results are not stored/i);
+assert.match(usageReact, /data-usage-privacy/, 'Analytics must disclose local retention and external telemetry state');
 assert.match(usageSource, /External developer telemetry is off/, 'Analytics must make the default external-telemetry state explicit');
 assert.match(usageSource, /OTLP endpoint is configured, but the telemetry switch is disabled/, 'Analytics must distinguish a configured endpoint from an enabled exporter');
 assert.match(usageSource, /raw exception messages are not exported/, 'Analytics must disclose the external trace redaction boundary');
-assert.match(usageSource, /target: 'analytics', confirm: true/, 'Analytics must expose an explicit local-history clear action');
-assert.match(usageSource, /import \{ esc as escapeHtml \} from '\.\.\/\.\.\/utils\.js'/);
-assert.doesNotMatch(usageSource, /function escapeHtml\(/);
-assert.match(usageRender, /import \{ esc \} from '\.\.\/\.\.\/utils\.js'/);
-assert.doesNotMatch(usageRender, /function esc\(/);
-assert.match(usageSource, /data-usage-status role="status" aria-live="polite" aria-atomic="true"/);
-assert.doesNotMatch(usageSource, /data-usage-content aria-live=/);
-assert.match(usageSource, /Analytics updated for \$\{bounds\.label\}/);
-assert.match(usageSource, /export function updateUsageLiveState/, 'Analytics must refresh current metrics from live task activity');
-assert.match(usageRender, /aria-pressed="\$\{i \? 'false' : 'true'\}"/);
-assert.match(usageRender, /setAttribute\('aria-pressed', String\(active\)\)/);
-assert.match(usageRender, /Overall trend \$\{trend\}/, 'Analytics charts must expose the computed trend to assistive technology');
-assert.match(usageRender, /Peak \$\{formatChartValue\(peak, metricLabel\)\}/, 'Analytics charts must expose the peak value to assistive technology');
-assert.match(usageRender, /role="tooltip"/, 'Analytics metric help must expose tooltip semantics');
-assert.match(usageRender, /aria-describedby=/, 'Analytics metric help triggers must reference their tooltip text');
-assert.match(usageRender, /event\.key !== 'Escape'/, 'Analytics metric tooltips must be dismissible with Escape');
+assert.match(usageReact, /target: 'analytics', confirm: true/, 'Analytics must expose an explicit local-history clear action');
+assert.doesNotMatch(`${usageSource}\n${usageRender}`, /innerHTML|replaceChildren|insertAdjacentHTML/, 'Analytics model/view helpers must not retain the legacy DOM renderer');
+assert.match(usageReact, /'data-usage-status': true, role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true'/);
+assert.doesNotMatch(usageReact, /'data-usage-content'.*'aria-live'/);
+assert.match(usageReact, /Analytics updated for \$\{bounds\.label\}/);
+assert.match(usageReact, /taskRevision/, 'Analytics must refresh current local metrics from canonical live task activity');
+assert.match(usageReact, /'aria-pressed': range === key \? 'true' : 'false'/);
+assert.match(usageReact, /role: 'tooltip'/, 'Analytics metric help must expose tooltip semantics');
+assert.match(usageReact, /'aria-describedby': helpId/, 'Analytics metric help triggers must reference their tooltip text');
+assert.match(usageReact, /event\.key === 'Escape'/, 'Analytics metric tooltips must be dismissible with Escape');
 assert.match(usageRender, /percentage points[\s\S]{0,80}90% to 95% is \+5 pp/i, 'Rate help must explain percentage points with an example');
 assert.match(usageCss, /\.usage-metric-help\.is-open \.usage-metric-tooltip/, 'Analytics metric tooltips must have an explicit visible state');
+assert.match(usageReact, /'aria-expanded': open \? 'true' : 'false'/, 'Analytics metric help must expose its expanded state to assistive technology');
+assert.match(usageReact, /onClick: \(\) => setOpen\(value => !value\)/, 'Analytics metric help must support explicit touch and click toggling');
+assert.match(usageReact, /event\.key === 'ArrowLeft'/, 'Analytics timeline must support keyboard period navigation');
+assert.match(usageReact, /event\.key === 'ArrowRight'/, 'Analytics timeline must support keyboard period navigation');
+assert.match(usageReact, /'aria-valuetext': valueText/, 'Analytics breakdown progress must expose readable values');
 assert.match(usageCss, /\.usage-privacy-body/, 'Analytics privacy disclosure must use a stable responsive layout');
 
-const metricRenderTarget = { innerHTML: '', querySelector: () => null, querySelectorAll: () => [] };
 const currentMetricScope = {
   label: 'All projects', kind: 'all', usedMonthlyFallback: false,
   toolCalls: 10, reliabilityCalls: 10, reliableCalls: 9.68, reliabilityRate: 96.8,
@@ -69,18 +72,23 @@ const previousWithoutRateBaselines = {
   infrastructureFailures: 0, recoverableFailures: 0, completed: 0,
   operationSuccessRate: 0, averageDuration: 0
 };
-renderUsage(metricRenderTarget, { bounds: { label: 'Last 24 hours' }, current: currentMetricScope, previous: previousWithoutRateBaselines });
-assert.match(metricRenderTarget.innerHTML, /usage-metric-help-reliabilityRate/, 'Rate metrics must render contextual help');
-assert.doesNotMatch(metricRenderTarget.innerHTML, /\+96\.8 pp/, 'A missing prior reliability baseline must not be displayed as a 0% comparison');
-assert.doesNotMatch(metricRenderTarget.innerHTML, /\+92\.7 pp/, 'A missing prior success-rate baseline must not be displayed as a 0% comparison');
+const noBaselineMetrics = analyticsMetrics(currentMetricScope, previousWithoutRateBaselines);
+assert.equal(noBaselineMetrics.find(metric => metric.key === 'reliabilityRate')?.help.length > 0, true, 'Rate metrics must retain contextual help');
+assert.equal(noBaselineMetrics.find(metric => metric.key === 'reliabilityRate')?.delta, null, 'A missing prior reliability baseline must not be displayed as a 0% comparison');
+assert.equal(noBaselineMetrics.find(metric => metric.key === 'operationSuccessRate')?.delta, null, 'A missing prior success-rate baseline must not be displayed as a 0% comparison');
 
-renderUsage(metricRenderTarget, {
-  bounds: { label: 'Last 24 hours' },
-  current: currentMetricScope,
-  previous: { ...previousWithoutRateBaselines, toolCalls: 10, reliabilityCalls: 10, reliableCalls: 9, reliabilityRate: 90, completed: 10, operationSuccessRate: 90, averageDuration: 7000 }
-});
-assert.match(metricRenderTarget.innerHTML, /\+6\.8 pp/, 'Measured reliability rates must compare in percentage points');
-assert.match(metricRenderTarget.innerHTML, /\+2\.7 pp/, 'Measured success rates must compare in percentage points');
+const comparedMetrics = analyticsMetrics(currentMetricScope, { ...previousWithoutRateBaselines, toolCalls: 10, reliabilityCalls: 10, reliableCalls: 9, reliabilityRate: 90, completed: 10, operationSuccessRate: 90, averageDuration: 7000 });
+assert.equal(comparedMetrics.find(metric => metric.key === 'reliabilityRate')?.delta?.text, '+6.8 pp', 'Measured reliability rates must compare in percentage points');
+assert.equal(comparedMetrics.find(metric => metric.key === 'operationSuccessRate')?.delta?.text, '+2.7 pp', 'Measured success rates must compare in percentage points');
+const timeline = timelineModel([1, 3, 2], 'Actions');
+assert.match(timeline.summary, /Peak 3/);
+assert.match(timeline.summary, /Overall trend increasing/);
+assert.equal(timeline.max, 3);
+assert.equal(timeline.peakIndex, 1);
+assert.equal(timeline.latestIndex, 2);
+assert.deepEqual(timeline.coordinates.map(point => point.value), [1, 3, 2]);
+assert.equal(timeline.coordinates[0].x, 0);
+assert.equal(timeline.coordinates.at(-1).x, timeline.width);
 
 for (const label of ['Actions', 'Reliable actions', 'System errors', 'Retryable problems', 'Successful actions', 'Average time']) {
   assert.match(usageCombined, new RegExp(label), `Usage must render ${label}.`);
@@ -88,9 +96,9 @@ for (const label of ['Actions', 'Reliable actions', 'System errors', 'Retryable 
 for (const field of ['requests', 'toolCalls', 'successes', 'failures', 'requestBytes', 'resultBytes', 'executionMs', 'activeDays']) {
   assert.match(usageCombined, new RegExp(`\\b${field}\\b`), `Analytics must consume ${field}.`);
 }
-assert.match(usageSource, /Analytics unavailable/);
-assert.match(usageSource, /Retry/);
-assert.match(usageSource, /Refresh/);
+assert.match(usageReact, /Analytics unavailable/);
+assert.match(usageReact, /Retry/);
+assert.match(usageReact, /Refresh/);
 assert.match(usageRender, /operationSuccessRate/);
 assert.match(usageRender, /recoverableFailures/);
 assert.match(usageCombined, /What went wrong/);

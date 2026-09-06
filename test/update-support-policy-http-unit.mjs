@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { startHttpServer } from '../src/httpServer.js';
+import { startHttpServer } from '../src/httpServer.ts';
 
-const httpServerSource = fs.readFileSync(new URL('../src/httpServer.js', import.meta.url), 'utf8');
+const httpServerSource = fs.readFileSync(new URL('../src/httpServer.ts', import.meta.url), 'utf8');
 assert.match(httpServerSource, /if \(!isolated\) \{[\s\S]*?pruneManagedProcesses\(runtimeConfig\)/, 'isolated HTTP servers must not prune shared managed-process state');
-assert.match(httpServerSource, /if \(!isolated\) \{[\s\S]*?stopAllManagedProcesses\(runtimeConfig\)/, 'isolated HTTP shutdown must not terminate shared managed processes');
+assert.match(httpServerSource, /createRelaiCoreRuntime\(\{[\s\S]*?isolated,[\s\S]*?stopManagedProcessesOnShutdown:/, 'HTTP shutdown must delegate managed-process ownership to the shared core runtime with the isolated boundary intact');
 
 const server = startHttpServer({
   host: '127.0.0.1',

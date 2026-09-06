@@ -56,7 +56,9 @@ async function relaiDiagnosticsRun(workspace, config, args = {}, context = {}) {
           commandString: command,
           timeout,
           maxOutputBytes: Math.min(Number(args._transportMaxOutputBytes) || 8 * 1024 * 1024, 8 * 1024 * 1024),
-          signal
+          signal,
+          resourceClass: 'heavy',
+          resourceOwner: workspace.alias
         }, config));
         } finally {
           activeDiagnostics.delete(index);
@@ -66,7 +68,7 @@ async function relaiDiagnosticsRun(workspace, config, args = {}, context = {}) {
         const item = { command, ...summary, diagnostics: parsed.length };
         indexedResults[index] = item;
         diagnosticsByIndex[index] = parsed;
-        publishDiagnosticsProgress(commands, visibleResults(), command, index + 1, result.cancelled ? 'cancelled' : result.ok ? 'passed' : result.timedOut ? 'timed_out' : 'failed', false, activeDiagnosticNames());
+        publishDiagnosticsProgress(commands, visibleResults(), command, index + 1, result.cancelled ? 'cancelled' : result.ok ? 'passed' : (result.timedOut || result.queueTimedOut) ? 'timed_out' : 'failed', false, activeDiagnosticNames());
         return item;
       },
       {

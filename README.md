@@ -77,7 +77,7 @@ With a configured workspace, ChatGPT can use Rel.AI to:
 - manage long-running local processes such as dev servers and watchers;
 - review task-scoped diffs and Git state;
 - commit or push changes only when explicitly requested;
-- preserve task continuity, validation evidence, local learned skills, and saved project context across tool calls; and
+- preserve task continuity, validation evidence, and saved project context across tool calls; and
 - use explicit opt-in host computer control when a task genuinely requires desktop interaction.
 
 Rel.AI is **not** a hosted development machine, a new AI model, or a replacement ChatGPT runtime. It is the local harness around ChatGPT for the projects and capabilities you explicitly enable.
@@ -390,7 +390,7 @@ For normal desktop iteration, avoid packaging and keep a source-mode watcher run
 npm run electron:dev:watch
 ```
 
-It rebuilds dashboard CSS continuously and restarts source Electron when relevant `electron/`, `src/`, `public/`, or `bin/` files change. The default command reuses the normal Rel.AI profile, so fully close the installed app first. Use `npm run electron:dev:watch:isolated` when you want a separate persistent Electron/ChatGPT development profile. Neither command writes a packaged app to `dist`.
+It rebuilds dashboard React and CSS assets continuously and restarts source Electron when relevant `electron/`, `src/`, `public/`, or `bin/` files change. The default command reuses the normal Rel.AI profile, so fully close the installed app first. Use `npm run electron:dev:watch:isolated` when you want a separate persistent Electron/ChatGPT development profile. Neither command writes a packaged app to `dist`.
 
 For validation, use the smallest checks that prove the current change and broaden only when the risk warrants it:
 
@@ -424,7 +424,7 @@ See [Development](docs/DEVELOPMENT.md) for source architecture, generated assets
 
 Focused fixes, product improvements, documentation updates, and regression coverage are welcome.
 
-Keep changes scoped. Preserve the repository's security and compatibility boundaries. Prefer direct code and the smallest useful abstraction. Treat tests as risk controls rather than a reason to duplicate coverage. If a change affects runtime ownership, protocol behavior, security boundaries, or packaging, review the relevant architecture documentation before adding another layer.
+Keep changes scoped. Preserve the repository's security and compatibility boundaries. Prefer direct code and the smallest useful abstraction. The routine dashboard is React-owned: add feature UI under `src/ui/features/`, consume backend-owned projections through the revision-aware dashboard store, reuse shared components only after real reuse exists, and do not hand-edit generated `public/dashboard-react.js` or `public/dashboard.css`. Treat tests as risk controls rather than a reason to duplicate coverage. If a change affects runtime ownership, protocol behavior, security boundaries, or packaging, review the relevant architecture documentation before adding another layer.
 
 ## Support
 

@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { LOCAL_ANALYTICS_RETENTION_DAYS, clearLocalAnalytics, flushLocalAnalytics, pruneLocalAnalytics, recordLocalToolOutcome, readLocalUsageSnapshot, readLocalUsageSnapshotAsync } from '../src/localAnalytics.js';
 import { failureCategoryFromCode } from '../src/analyticsFailureCategory.js';
-import { stateDatabasePath, withStateDatabase } from '../src/stateDatabase.js';
+import { stateDatabasePath, withStateDatabase } from '../src/stateDatabase.ts';
 
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-local-analytics-'));
 const config = { stateDir };

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { getMcpAccess } from "../src/http/mcp.js";
+import { getMcpAccess } from "../src/http/mcp.ts";
 import * as serverExports from "../src/server.js";
 import * as toolExports from "../src/tools.js";
 import { connectorInstructions } from "../src/mcpServer.js";

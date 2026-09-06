@@ -8,7 +8,7 @@ import {
   MCP_PROTOCOL_VERSION,
   expectedMcpName,
   validateMcpRequestHeaders
-} from '../src/http/mcpTransport.js';
+} from '../src/http/mcpTransport.ts';
 
 function message(method = 'server/discover', params = {}) {
   return {

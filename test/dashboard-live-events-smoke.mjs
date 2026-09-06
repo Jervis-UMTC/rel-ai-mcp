@@ -3,36 +3,38 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import * as dashboardSessions from '../src/http/dashboardSessions.js';
+import * as dashboardSessions from '../src/http/dashboardSessions.ts';
 import { beginConnectorToolCall, getToolActivity, resetToolActivity } from '../src/toolActivity.js';
-import { resetTaskHistoryCaches } from '../src/taskHistoryStorage.js';
+import { resetTaskHistoryCaches } from '../src/taskHistoryStorage.ts';
 import { mcpConnectionManager } from '../src/mcp/connectionManager.js';
+import { DASHBOARD_LIVE_EVENT_TYPES } from '../src/contracts/events.ts';
 
-const dashboardSource = fs.readFileSync(new URL('../src/http/dashboard.js', import.meta.url), 'utf8');
+const dashboardSource = fs.readFileSync(new URL('../src/http/dashboard.ts', import.meta.url), 'utf8');
+const dashboardCoreSource = fs.readFileSync(new URL('../src/core/dashboard-runtime.ts', import.meta.url), 'utf8');
 const eventClientSource = fs.readFileSync(new URL('../src/ui/events.js', import.meta.url), 'utf8');
 const dashboardClientSource = fs.readFileSync(new URL('../public/dashboard.js', import.meta.url), 'utf8');
 
 assert.match(dashboardSource, /: keepalive/, 'dashboard SSE must include a heartbeat');
-for (const eventName of ['task.updated', 'connection.updated', 'workspace.updated', 'process.updated', 'diagnostics.updated', 'dashboard.error']) {
-  assert.match(dashboardSource, new RegExp(eventName.replace('.', '\\.')), `server must emit ${eventName}`);
-  assert.match(eventClientSource, new RegExp(eventName.replace('.', '\\.')), `client must subscribe to ${eventName}`);
-}
+assert.deepEqual(DASHBOARD_LIVE_EVENT_TYPES, ['task.updated', 'connection.updated', 'workspace.updated', 'process.updated', 'diagnostics.updated', 'dashboard.error']);
+assert.match(dashboardCoreSource, /DASHBOARD_LIVE_EVENTS\./, 'Core must publish through the canonical live-event contract');
+assert.match(eventClientSource, /DASHBOARD_LIVE_EVENT_TYPES/, 'client must subscribe through the canonical live-event contract');
 assert.doesNotMatch(dashboardSource, /dashboard\.bootstrap/, 'SSE must not rebuild the aggregate dashboard snapshot after HTML bootstrap');
 assert.doesNotMatch(eventClientSource, /dashboard\.bootstrap/, 'client must not subscribe to the deleted duplicate bootstrap event');
 assert.doesNotMatch(dashboardSource, /sendSse\(res, ['"]dashboard['"]/, 'legacy broad dashboard SSE events must be deleted');
-assert.match(dashboardSource, /createDashboardTaskEventBatcher/, 'production task updates must be coalesced before SSE publication');
+assert.match(dashboardCoreSource, /createDashboardTaskEventBatcher/, 'Core task updates must be coalesced before SSE publication');
 assert.doesNotMatch(dashboardSource, /DASHBOARD_SNAPSHOT_MAX_WAIT_MS|dashboardStreamPayload|requestedDashboardRevision/);
 assert.doesNotMatch(eventClientSource, /_snapshotRevision|params\.set\(['"]revision['"]/, 'client must not request legacy snapshot catch-up');
 assert.doesNotMatch(eventClientSource, /token|Authorization|URLSearchParams/, 'SSE authentication must rely only on the HttpOnly dashboard session cookie');
 assert.doesNotMatch(dashboardClientSource, /relai_dashboard_token|setToken|getToken/, 'dashboard renderer must never persist or read the MCP bearer token');
 assert.match(eventClientSource, /removeEventListener/, 'SSE listeners must be removed when a source closes');
 assert.match(eventClientSource, /function parseEventData[\s\S]*try[\s\S]*JSON\.parse[\s\S]*catch/, 'SSE payload parsing must fail safely');
-assert.match(dashboardSource, /sendSse\(res, ['"]dashboard\.error['"]/, 'application-side SSE failures must not use EventSource\'s reserved transport error event');
+assert.match(dashboardCoreSource, /sink\.onError/, 'Core application failures must be projected through the typed event subscription');
+assert.match(dashboardSource, /sendSse\(res, 'dashboard\.error'/, 'HTTP must frame application failures as the canonical non-reserved dashboard error event');
 assert.doesNotMatch(dashboardSource, /sendSse\(res, ['"]error['"]/, 'application-side SSE failures must not trigger transport reconnect backoff');
 assert.match(dashboardClientSource, /event\.type === ['"]dashboard\.error['"][\s\S]*recoverDashboard/, 'application-side SSE failures must recover with an authoritative dashboard refresh');
 assert.match(dashboardClientSource, /applyLiveEvent\(event\.type, event\.data\)/, 'browser coordinator must apply typed deltas through the canonical store');
 assert.match(dashboardClientSource, /liveCatchUpRequired/, 'browser coordinator must compare ready revisions and fetch only when live events were missed');
-assert.match(dashboardClientSource, /function viewRevisionKey/, 'route invalidation must use explicit revision keys');
+assert.doesNotMatch(dashboardClientSource, /viewRevisionKey|syncLiveView|renderViewIfChanged/, 'typed store updates must reach React without a duplicate route invalidation renderer');
 assert.doesNotMatch(dashboardClientSource, /viewFingerprint|createSnapshotGate|snapshot-order/, 'legacy snapshot ordering/fingerprinting must be removed');
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-dashboard-events-'));
@@ -60,7 +62,7 @@ fs.writeFileSync(configPath, JSON.stringify({
 process.env.REL_AI_MCP_CONFIG = configPath;
 process.env.REL_AI_MCP_STATE_DIR = sandbox;
 
-const { startHttpServer } = await import('../src/httpServer.js');
+const { startHttpServer } = await import('../src/httpServer.ts');
 const server = startHttpServer({
   host: '127.0.0.1', port: 0, token, exitOnError: false,
   getDesktopStatus: () => desktopStatus,

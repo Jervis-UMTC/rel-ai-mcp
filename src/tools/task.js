@@ -1,7 +1,7 @@
 
 import * as crypto from 'node:crypto';
 import { getCurrentToolActivityContext, getToolActivity, taskError } from '../toolActivity.js';
-import { readTaskHistory, readTaskHistorySessionRecord } from '../taskHistoryStore.js';
+import { readTaskHistory, readTaskHistorySessionRecord } from '../taskHistoryStore.ts';
 import { principalFingerprint } from '../mcp/principal.js';
 import { isTerminalTaskStatus } from '../taskState.js';
 import { classifyTaskIntent } from '../workflow/intent.js';

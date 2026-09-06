@@ -5,11 +5,11 @@ import { performance } from 'node:perf_hooks';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createToolActivityTracker } from '../src/toolActivity.js';
-import { flushTaskHistoryPersistence, recordTaskActivityEvent, readTaskHistory } from '../src/taskHistoryStore.js';
-import { resetTaskHistoryCaches } from '../src/taskHistoryStorage.js';
-import { buildDashboardPayload, buildDashboardTaskDelta } from '../src/http/dashboardData.js';
-import { DASHBOARD_TASK_EVENT_COALESCE_MS, createDashboardTaskEventBatcher } from '../src/http/dashboardEventBatcher.js';
-import { flushLocalAnalytics, recordLocalToolOutcome } from '../src/localAnalytics.js';
+import { flushTaskHistoryPersistence, recordTaskActivityEvent, readTaskHistory } from '../src/taskHistoryStore.ts';
+import { resetTaskHistoryCaches } from '../src/taskHistoryStorage.ts';
+import { buildDashboardPayload, buildDashboardTaskDelta } from '../src/core/dashboard-data.ts';
+import { DASHBOARD_TASK_EVENT_COALESCE_MS, createDashboardTaskEventBatcher } from '../src/core/dashboard-event-batcher.ts';
+import { flushLocalAnalytics, readLocalUsageSnapshot, recordLocalToolOutcome } from '../src/localAnalytics.js';
 import { sanitizeDisplayText } from '../src/taskObservability.js';
 import { createDashboardClock } from '../src/ui/clock.js';
 
@@ -33,7 +33,6 @@ const metrics = [];
 const tracker = createToolActivityTracker({ idleMs: 60_000 });
 let activityEvents = 0;
 let persistenceWrites = 0;
-let analyticsWrites = 0;
 let snapshotPublications = 0;
 let taskDeltaProjectionMs = 0;
 const taskEventBatcher = createDashboardTaskEventBatcher({
@@ -52,7 +51,6 @@ fs.renameSync = function patchedRename(source, target) {
 };
 fs.promises.rename = async function patchedAsyncRename(source, target) {
   if (String(source).includes(`${path.sep}sessions${path.sep}`) && String(source).endsWith('.tmp') && String(target).endsWith('.json')) persistenceWrites += 1;
-  if (String(target).includes(`${path.sep}analytics${path.sep}local${path.sep}`) && String(source).endsWith('.tmp') && String(target).endsWith('.json')) analyticsWrites += 1;
   return originalAsyncRename.call(fs.promises, source, target);
 };
 const unsubscribe = tracker.onToolActivity(event => {
@@ -116,15 +114,32 @@ try {
   }
   addMetric('sanitization_10000_summaries_ms', '10,000 credential-like completion strings', null, round(performance.now() - sanitizerStart), 0, 250, '<=');
 
-  const analyticsWriteBaseline = analyticsWrites;
   const analyticsStart = performance.now();
   for (let index = 0; index < 1000; index += 1) {
     recordLocalToolOutcome(config, { tool: 'relai_read', workspace: 'app', ok: true, durationMs: 4 + (index % 5) });
   }
   const analyticsHotPathMs = performance.now() - analyticsStart;
-  await flushLocalAnalytics(config);
-  addMetric('local_analytics_hot_path_1000_calls_ms', '1,000 in-memory local analytics updates before asynchronous persistence', null, round(analyticsHotPathMs), 0, 150, '<=');
-  addMetric('local_analytics_persistence_writes_per_1000_calls', 'same workload; coalesced monthly analytics persistence', null, analyticsWrites - analyticsWriteBaseline, 0, 2, '<=');
+  const analyticsSnapshot = readLocalUsageSnapshot(config);
+  addMetric(
+    'local_analytics_hot_path_1000_calls_ms',
+    '1,000 synchronous SQLite analytics updates, each durable before recordLocalToolOutcome returns',
+    null,
+    round(analyticsHotPathMs),
+    0,
+    10_000,
+    '<=',
+    undefined,
+    'The current durable-state contract budgets up to 10 ms per synchronous analytics update.'
+  );
+  addMetric(
+    'local_analytics_durable_tool_calls_after_1000_calls',
+    'same workload; the SQLite-backed analytics snapshot must expose all writes immediately without a deferred flush',
+    null,
+    Number(analyticsSnapshot?.totals?.toolCalls || 0),
+    0,
+    1000,
+    '>='
+  );
 
   const activitySnapshot = tracker.getToolActivity();
   const tasks = readTaskHistory(config, activitySnapshot, { limit: 500 });

@@ -118,10 +118,6 @@ function sampleArgs(entry) {
     case 'relai_inspect:trace': args.symbol = 'target'; break;
     case 'relai_inspect:related': args.query = 'target'; break;
     case 'relai_inspect:impact': args.paths = ['src/index.js']; break;
-    case 'relai_skill:create':
-    case 'relai_skill:edit': Object.assign(args, { name: 'catalog-skill', content: 'skill content' }); break;
-    case 'relai_skill:patch': Object.assign(args, { name: 'catalog-skill', oldText: 'old', newText: 'new' }); break;
-    case 'relai_skill:delete': args.name = 'catalog-skill'; break;
     case 'relai_exec:default': args.command = 'node --version'; break;
     case 'relai_process:start': Object.assign(args, { command: 'node server.js', kind: 'service', purpose: 'Catalog parity.' }); break;
     case 'relai_process:read':

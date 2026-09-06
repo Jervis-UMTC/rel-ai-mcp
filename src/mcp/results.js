@@ -1,3 +1,5 @@
+import { MCP_CONTENT_TYPES } from '../contracts/mcp.ts';
+
 const DEFAULT_MAX_TOOL_RESULT_BYTES = 512 * 1024;
 const DEFAULT_MAX_TOOL_TEXT_BYTES = 8 * 1024;
 const MAX_TOOL_RESULT_BYTES = Number(
@@ -23,7 +25,7 @@ function toolResult(payload, isError, meta) {
   });
   return {
     content: [
-      { type: 'text', text: truncateUtf8Head(text, MAX_TOOL_TEXT_BYTES) },
+      { type: MCP_CONTENT_TYPES.TEXT, text: truncateUtf8Head(text, MAX_TOOL_TEXT_BYTES) },
       ...(imageContent ? [imageContent] : []),
       ...(resourceLinkContent ? [resourceLinkContent] : [])
     ],
@@ -39,7 +41,7 @@ function toolImageContent(payload) {
   const data = typeof image.data === 'string' ? image.data : '';
   const mimeType = typeof image.mimeType === 'string' ? image.mimeType : '';
   if (!data || !/^image\/[A-Za-z0-9.+-]+$/.test(mimeType)) return null;
-  return { type: 'image', data, mimeType };
+  return { type: MCP_CONTENT_TYPES.IMAGE, data, mimeType };
 }
 
 function toolResourceLinkContent(payload) {
@@ -49,7 +51,7 @@ function toolResourceLinkContent(payload) {
   const name = typeof link.name === 'string' ? link.name : '';
   if (!uri || !name) return null;
   return {
-    type: 'resource_link',
+    type: MCP_CONTENT_TYPES.RESOURCE_LINK,
     uri,
     name,
     ...(typeof link.description === 'string' && link.description ? { description: link.description } : {}),
