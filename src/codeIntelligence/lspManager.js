@@ -10,6 +10,8 @@ import { isTestPath } from '../repository/intelligence/languages.js';
 import { LspClient } from './lspClient.js';
 
 const IDLE_EVICT_MS = 2 * 60 * 1000;
+const DIAGNOSTIC_WAIT_MS = 3_000;
+const MAX_LSP_DIAGNOSTICS = 200;
 const MAX_SEMANTIC_EDIT_FILES = 100;
 const sessions = new Map();
 
@@ -52,6 +54,7 @@ class LspSession {
     this.client = null;
     this.capabilities = {};
     this.openDocuments = new Map();
+    this.publishedDiagnostics = new Map();
     this.documentQueue = Promise.resolve();
     this.lastUsedAt = 0;
     this.lastResponseMs = null;
@@ -71,6 +74,7 @@ class LspSession {
   async start(options = {}) {
     if (!runtimeAvailable(this.spec)) throw unavailableError(this.spec);
     this.openDocuments.clear();
+    this.publishedDiagnostics.clear();
     const client = new LspClient({
       executable: this.spec.executable,
       argv: this.spec.argv,
@@ -79,6 +83,10 @@ class LspSession {
       name: this.spec.id
     });
     try {
+      client.onNotification('textDocument/publishDiagnostics', params => {
+        const key = diagnosticUriKey(params?.uri);
+        if (key) this.publishedDiagnostics.set(key, params);
+      });
       await client.start();
       const rootUri = pathToFileURL(this.workspace.path).href;
       const initialized = await client.request('initialize', {
@@ -96,7 +104,8 @@ class LspSession {
             implementation: { dynamicRegistration: false },
             rename: { dynamicRegistration: false, prepareSupport: true },
             documentSymbol: { dynamicRegistration: false },
-            diagnostic: { dynamicRegistration: false }
+            diagnostic: { dynamicRegistration: false },
+            publishDiagnostics: { relatedInformation: true, versionSupport: true, codeDescriptionSupport: true }
           }
         }
       }, { signal: options.signal });
@@ -149,7 +158,10 @@ class LspSession {
     const uri = pathToFileURL(safe.absolutePath).href;
     if (current && current.mtimeMs === stat.mtimeMs && current.size === stat.size) return current;
     await this.ensure(options);
-    if (current) this.client.notify('textDocument/didClose', { textDocument: { uri: current.uri } });
+    if (current) {
+      this.publishedDiagnostics.delete(diagnosticUriKey(current.uri));
+      this.client.notify('textDocument/didClose', { textDocument: { uri: current.uri } });
+    }
     const languageId = languageIdForPath(this.spec, safe.relativePath);
     const document = { uri, text, languageId, version: (current?.version || 0) + 1, mtimeMs: stat.mtimeMs, size: stat.size };
     this.client.notify('textDocument/didOpen', {
@@ -160,12 +172,55 @@ class LspSession {
     return document;
   }
 
+  async diagnostics(relativePath, options = {}) {
+    const document = await this.open(relativePath, options);
+    const published = await this.waitForDiagnostics(document.uri, relativePath, options);
+    return published;
+  }
+
+  waitForDiagnostics(uri, relativePath, options = {}) {
+    const key = diagnosticUriKey(uri);
+    if (this.publishedDiagnostics.has(key)) return Promise.resolve(this.publishedDiagnostics.get(key));
+    const client = this.client;
+    const timeoutMs = Math.max(1, Math.min(DIAGNOSTIC_WAIT_MS, Number(options.timeoutMs || DIAGNOSTIC_WAIT_MS)));
+    return new Promise((resolve, reject) => {
+      let timer;
+      const signal = options.signal;
+      const cleanupNotification = client.onNotification('textDocument/publishDiagnostics', params => {
+        if (diagnosticUriKey(params?.uri) === key) finish(resolve, params);
+      });
+      const onAbort = () => {
+        const error = new Error(`Cancelled ${this.spec.id} diagnostics for ${relativePath}.`);
+        error.name = 'AbortError';
+        finish(reject, error);
+      };
+      const finish = (settle, value) => {
+        clearTimeout(timer);
+        cleanupNotification();
+        signal?.removeEventListener?.('abort', onAbort);
+        settle(value);
+      };
+      signal?.addEventListener?.('abort', onAbort, { once: true });
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      if (this.publishedDiagnostics.has(key)) {
+        finish(resolve, this.publishedDiagnostics.get(key));
+        return;
+      }
+      timer = setTimeout(() => finish(reject, new Error(`${this.spec.id} did not publish diagnostics for ${relativePath} within ${timeoutMs}ms.`)), timeoutMs);
+      timer.unref?.();
+    });
+  }
+
   noteDiskChanges(paths = []) {
     if (!this.client || this.client.closed) return;
     const changes = [];
     for (const relativePath of paths) {
       const current = this.openDocuments.get(relativePath);
       if (current) {
+        this.publishedDiagnostics.delete(diagnosticUriKey(current.uri));
         this.client.notify('textDocument/didClose', { textDocument: { uri: current.uri } });
         this.openDocuments.delete(relativePath);
       }
@@ -183,7 +238,7 @@ class LspSession {
       available: runtimeAvailable(this.spec),
       active: Boolean(this.client && !this.client.closed),
       authority: 'language-server',
-      capabilities: advertisedCapabilities(this.capabilities),
+      capabilities: advertisedCapabilities(this.capabilities, this.publishedDiagnostics.size > 0),
       lastResponseMs: this.lastResponseMs,
       ...(this.lastError ? { error: this.lastError } : {})
     };
@@ -202,6 +257,7 @@ class LspSession {
     const client = this.client;
     this.client = null;
     this.openDocuments.clear();
+    this.publishedDiagnostics.clear();
     if (client) await client.stop().catch(() => {});
   }
 }
@@ -265,6 +321,37 @@ async function inspectWithLsp(workspace, args, anchor, options = {}) {
       available: false,
       provider: spec.id,
       reason: 'language-server-request-failed',
+      error: error instanceof Error ? error.message : String(error),
+      status: session.status()
+    };
+  }
+}
+
+async function diagnosticsWithLsp(workspace, args = {}, options = {}) {
+  const requestedPath = String(args.path || '').trim().replaceAll('\\', '/');
+  if (!requestedPath) return { available: false, reason: 'diagnostics-path-required' };
+  const parsed = parseWorkspaceSourcePath(workspace, requestedPath);
+  const relativePath = parsed.relativePath;
+  const scopedWorkspace = sourceWorkspace(workspace, parsed.source);
+  const spec = providerForPath(relativePath);
+  if (!spec) return { available: false, reason: 'no-language-server-provider' };
+  const session = getSession(scopedWorkspace, spec);
+  if (!runtimeAvailable(spec)) return { available: false, provider: spec.id, reason: 'language-server-unavailable', status: session.status() };
+  try {
+    const published = await session.diagnostics(relativePath, options);
+    return {
+      available: true,
+      provider: spec.id,
+      authority: 'language-server',
+      path: qualifyWorkspaceSourcePath(parsed.source, relativePath),
+      result: normalizePublishedDiagnostics(scopedWorkspace, spec.id, published, parsed.source),
+      status: session.status()
+    };
+  } catch (error) {
+    return {
+      available: false,
+      provider: spec.id,
+      reason: 'language-server-diagnostics-failed',
       error: error instanceof Error ? error.message : String(error),
       status: session.status()
     };
@@ -359,6 +446,25 @@ function offsetAt(text, position = {}) {
   return Math.min(text.length, offset + targetCharacter);
 }
 
+function normalizePublishedDiagnostics(workspace, providerId, published = {}, source = null) {
+  const relativePath = workspaceRelativeUri(workspace, published?.uri);
+  if (!relativePath) return [];
+  const qualifiedPath = source ? qualifyWorkspaceSourcePath(source, relativePath) : relativePath;
+  return (Array.isArray(published?.diagnostics) ? published.diagnostics : []).slice(0, MAX_LSP_DIAGNOSTICS).map(item => ({
+    path: qualifiedPath,
+    ...normalizeRange(item?.range),
+    severity: diagnosticSeverity(item?.severity),
+    message: String(item?.message || '').slice(0, 2_000),
+    ...(item?.code == null ? {} : { code: String(item.code).slice(0, 200) }),
+    source: String(item?.source || providerId).slice(0, 120),
+    provider: providerId
+  }));
+}
+
+function diagnosticSeverity(value) {
+  return ({ 1: 'error', 2: 'warning', 3: 'information', 4: 'hint' })[Number(value)] || 'information';
+}
+
 function normalizeLspResult(workspace, action, raw, source = null) {
   if (action === 'hover' || action === 'symbol') return normalizeHover(raw);
   const locations = Array.isArray(raw) ? raw : raw ? [raw] : [];
@@ -404,6 +510,16 @@ function normalizeRange(range = {}) {
     endLine: Number(range.end?.line || 0) + 1,
     endColumn: Number(range.end?.character || 0) + 1
   };
+}
+
+function diagnosticUriKey(uri) {
+  if (!String(uri || '').startsWith('file:')) return String(uri || '');
+  try {
+    const absolute = path.resolve(fileURLToPath(uri));
+    return process.platform === 'win32' ? absolute.toLowerCase() : absolute;
+  } catch {
+    return String(uri || '');
+  }
 }
 
 function workspaceRelativeUri(workspace, uri) {
@@ -467,7 +583,7 @@ function findExecutable(name) {
   return '';
 }
 
-function advertisedCapabilities(capabilities = {}) {
+function advertisedCapabilities(capabilities = {}, publishedDiagnostics = false) {
   const mapping = [
     ['definition', 'definitionProvider'],
     ['references', 'referencesProvider'],
@@ -477,7 +593,9 @@ function advertisedCapabilities(capabilities = {}) {
     ['documentSymbols', 'documentSymbolProvider'],
     ['diagnostics', 'diagnosticProvider']
   ];
-  return mapping.filter(([, key]) => Boolean(capabilities?.[key])).map(([name]) => name);
+  const result = mapping.filter(([, key]) => Boolean(capabilities?.[key])).map(([name]) => name);
+  if (publishedDiagnostics && !result.includes('diagnostics')) result.push('diagnostics');
+  return result;
 }
 
 function unavailableError(spec) {
@@ -516,6 +634,7 @@ async function shutdownLspSessions() {
 }
 
 export {
+  diagnosticsWithLsp,
   disposeLspWorkspace,
   inspectWithLsp,
   noteLspMutation,

@@ -70,6 +70,7 @@ const files = [
   'intelligence-runtime-unit.mjs',
   'repository-architecture-unit.mjs',
   'intelligence-lsp-unit.mjs',
+  'lsp-client-unit.mjs',
   'branch-concurrency-unit.mjs',
   'task-ownership-concurrency-unit.mjs',
   'process-manager-unit.mjs',

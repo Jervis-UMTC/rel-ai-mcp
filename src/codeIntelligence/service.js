@@ -1,5 +1,5 @@
 import { repositoryIntelligence } from '../repository/intelligence/service.js';
-import { disposeLspWorkspace, inspectWithLsp, noteLspMutation, planSemanticRename, providerStatuses, shutdownLspSessions } from './lspManager.js';
+import { diagnosticsWithLsp, disposeLspWorkspace, inspectWithLsp, noteLspMutation, planSemanticRename, providerStatuses, shutdownLspSessions } from './lspManager.js';
 
 const LSP_ACTIONS = new Set(['definition', 'references', 'hover', 'implementation']);
 
@@ -17,10 +17,32 @@ function createCodeIntelligenceService() {
       }
 
       if (action === 'diagnostics') {
+        const base = native || { ok: true, workspace: workspace.alias, action };
+        if (!args.path) {
+          return {
+            ...base,
+            languageServers: providerStatuses(workspace),
+            intelligence: evidence('relai-native', [], false)
+          };
+        }
+        const lsp = await diagnosticsWithLsp(workspace, args, options);
+        if (!lsp.available) {
+          return {
+            ...base,
+            languageServers: providerStatuses(workspace),
+            intelligence: evidence('relai-native', lsp.provider ? [lsp.provider] : [], true, lsp.status, lsp.error || lsp.reason)
+          };
+        }
         return {
-          ...(native || { ok: true, workspace: workspace.alias, action }),
+          ...base,
+          diagnostics: lsp.result,
+          diagnosticCount: lsp.result.length,
+          diagnosticsExecuted: true,
           languageServers: providerStatuses(workspace),
-          intelligence: evidence('relai-native', [], false)
+          next: lsp.result.length
+            ? 'Address the reported language-server diagnostics, then run repository validation.'
+            : 'No language-server diagnostics were reported for this path. Run repository validation for the full project boundary.',
+          intelligence: evidence(lsp.provider, ['relai-native'], false, lsp.status)
         };
       }
       if (action === 'architecture') {

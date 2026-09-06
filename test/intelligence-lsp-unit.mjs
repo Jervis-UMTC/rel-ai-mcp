@@ -10,8 +10,9 @@ import { repositoryIntelligence } from '../src/repository/intelligence/service.j
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-lsp-intelligence-'));
 const secondary = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-lsp-secondary-'));
+const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-lsp-state-'));
 const workspace = { alias: 'lsp-fixture', path: root, sourcePaths: [root, secondary], context: {} };
-const config = { stateDir: path.join(root, '.state'), workspaces: { 'lsp-fixture': workspace } };
+const config = { stateDir: stateRoot, workspaces: { 'lsp-fixture': workspace } };
 
 try {
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
@@ -22,6 +23,7 @@ try {
   }, null, 2));
   fs.writeFileSync(path.join(root, 'src', 'math.ts'), 'export function add(left: number, right: number): number {\n  return left + right;\n}\n');
   fs.writeFileSync(path.join(root, 'src', 'use.ts'), "import { add } from './math.js';\nexport const total = add(1, 2);\n");
+  fs.writeFileSync(path.join(root, 'src', 'bad.ts'), 'export const broken: string = 123;\n');
 
   const definition = await relaiCodeInspect(workspace, config, {
     action: 'definition', path: 'src/use.ts', line: 2, column: 22, maxResults: 20
@@ -45,6 +47,15 @@ try {
   assert.equal(references.intelligence.primary, 'typescript-language-server');
   assert.ok(references.items.some(item => item.path === 'src/use.ts'));
 
+  const diagnostics = await relaiCodeInspect(workspace, config, {
+    action: 'diagnostics', path: 'src/bad.ts', maxResults: 20
+  });
+  assert.equal(diagnostics.ok, true);
+  assert.equal(diagnostics.diagnosticsExecuted, true);
+  assert.equal(diagnostics.intelligence.primary, 'typescript-language-server');
+  assert.ok(diagnostics.diagnosticCount > 0);
+  assert.ok(diagnostics.diagnostics.some(item => item.path === 'src/bad.ts' && item.severity === 'error' && /not assignable/i.test(item.message)));
+
   const rename = await planEdit(workspace, config, {
     semantic: { action: 'rename', path: 'src/math.ts', line: 1, column: 17, newName: 'sum' }
   });
@@ -59,6 +70,7 @@ try {
   fs.writeFileSync(path.join(root, 'pyproject.toml'), '[project]\nname = "lsp-fixture"\nversion = "0.0.0"\n');
   fs.writeFileSync(path.join(root, 'src', 'calc_mod.py'), 'def multiply(left: int, right: int) -> int:\n    return left * right\n');
   fs.writeFileSync(path.join(root, 'src', 'use_calc.py'), 'from calc_mod import multiply\nvalue = multiply(2, 3)\n');
+  fs.writeFileSync(path.join(root, 'src', 'bad.py'), 'value: str = 123\n');
 
   const pythonDefinition = await relaiCodeInspect(workspace, config, {
     action: 'definition', path: 'src/use_calc.py', line: 2, column: 9, maxResults: 20
@@ -66,6 +78,14 @@ try {
   assert.equal(pythonDefinition.ok, true);
   assert.equal(pythonDefinition.intelligence.primary, 'pyright');
   assert.ok(pythonDefinition.definitions.some(item => item.path === 'src/calc_mod.py'));
+
+  const pythonDiagnostics = await relaiCodeInspect(workspace, config, {
+    action: 'diagnostics', path: 'src/bad.py', maxResults: 20
+  });
+  assert.equal(pythonDiagnostics.ok, true);
+  assert.equal(pythonDiagnostics.diagnosticsExecuted, true);
+  assert.equal(pythonDiagnostics.intelligence.primary, 'pyright');
+  assert.ok(pythonDiagnostics.diagnostics.some(item => item.path === 'src/bad.py' && item.severity === 'error' && /not assignable/i.test(item.message)));
 
   fs.mkdirSync(path.join(secondary, 'src'), { recursive: true });
   fs.writeFileSync(path.join(secondary, 'package.json'), JSON.stringify({ name: 'lsp-secondary', private: true, type: 'module' }, null, 2));
@@ -103,4 +123,5 @@ try {
   await repositoryIntelligence.shutdown().catch(() => {});
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.rmSync(secondary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  fs.rmSync(stateRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

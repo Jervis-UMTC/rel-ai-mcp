@@ -65,21 +65,25 @@ class LspClient {
     const id = this.nextId++;
     const timeoutMs = Number(options.timeoutMs || this.requestTimeoutMs);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`${this.name} request timed out: ${method}`));
-      }, timeoutMs);
-      timer.unref?.();
       const signal = options.signal;
-      const onAbort = () => {
+      let timer;
+      const rejectPending = error => {
+        const pending = this.pending.get(id);
+        if (!pending) return;
         this.pending.delete(id);
-        clearTimeout(timer);
+        pending.reject(error);
+      };
+      const cancel = error => {
         try { this.notify('$/cancelRequest', { id }); } catch {}
+        rejectPending(error);
+      };
+      const onAbort = () => {
         const error = new Error(`Cancelled ${this.name} request: ${method}`);
         error.name = 'AbortError';
-        reject(error);
+        cancel(error);
       };
-      signal?.addEventListener?.('abort', onAbort, { once: true });
+      timer = setTimeout(() => cancel(new Error(`${this.name} request timed out: ${method}`)), timeoutMs);
+      timer.unref?.();
       this.pending.set(id, {
         resolve: value => {
           clearTimeout(timer);
@@ -92,7 +96,16 @@ class LspClient {
           reject(error);
         }
       });
-      this.send({ jsonrpc: '2.0', id, method, params });
+      signal?.addEventListener?.('abort', onAbort, { once: true });
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      try {
+        this.send({ jsonrpc: '2.0', id, method, params });
+      } catch (error) {
+        rejectPending(error);
+      }
     });
   }
 
