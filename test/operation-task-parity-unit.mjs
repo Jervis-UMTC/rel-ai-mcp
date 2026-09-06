@@ -15,6 +15,7 @@ import {
   getNativeTask,
   getNativeTaskRecord
 } from '../src/mcp/nativeTaskService.js';
+import { stateDatabasePath } from '../src/stateDatabase.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-native-tool-task-parity-'));
 const config = { stateDir: root };
@@ -39,7 +40,8 @@ try {
   assert.equal(nativeCreated.origin.logicalTaskId, 'logical-a');
   assert.equal(nativeCreated.internal.workspace, 'repo');
   assert.equal(Object.hasOwn(nativeCreated.internal, 'compatibilityOperation'), false);
-  assert.ok(fs.existsSync(path.join(root, 'native-tasks', `${created.taskId}.json`)));
+  assert.ok(fs.existsSync(stateDatabasePath(config)));
+  assert.equal(fs.existsSync(path.join(root, 'native-tasks')), false);
   assert.equal(fs.existsSync(path.join(root, 'operation-tasks')), false);
 
   assert.throws(

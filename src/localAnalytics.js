@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { statePath } from './stateLayout.js';
-import { writeTextAtomicAsync } from './durableState.js';
+import { setStateMeta, stateMetaValue, withStateDatabase } from './stateDatabase.js';
 import { failureCategoryFromCode, normalizeFailureCategory } from './analyticsFailureCategory.js';
 import { classifyAnalyticsOutcome, reliabilityCountersForOutcome } from './analyticsOutcome.js';
 import { telemetryStatus } from './telemetry.js';
@@ -12,12 +12,9 @@ const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCAL_DEVICE_ID = 'local-device';
 const LOCAL_DEVICE_NAME = 'This device';
-const ANALYTICS_FLUSH_DELAY_MS = 250;
-const ANALYTICS_FLUSH_MAX_WAIT_MS = 1000;
 const LOCAL_ANALYTICS_RETENTION_DAYS = 180;
 const RETENTION_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const documentCache = new Map();
-const writeStates = new Map();
+const LEGACY_MIGRATION_KEY = 'local_analytics_legacy_migrated_v1';
 const retentionPruneTimes = new Map();
 
 function recordLocalToolOutcome(config = {}, event = {}) {
@@ -33,39 +30,41 @@ function recordLocalToolOutcome(config = {}, event = {}) {
     const category = failure ? failureCategoryFromCode(event.errorCode) : '';
     const outcome = classifyAnalyticsOutcome(event);
     const reliability = reliabilityCountersForOutcome(outcome);
-    const document = readDocument(config, month);
+    migrateLegacyLocalAnalytics(config);
+    withStateDatabase(config, db => {
+      const document = readDocumentFromDatabase(db, month);
+      incrementTotals(document.totals, success, failure, durationMs, reliability);
+      incrementNamed(document.tools, 'tool', tool, success, failure, durationMs, reliability);
+      if (workspace) {
+        incrementNamed(document.workspaces, 'workspace', workspace, success, failure, durationMs, reliability);
+        incrementWorkspaceTool(document.workspaceTools, workspace, tool, success, failure, durationMs, reliability);
+      }
+      if (failure) {
+        incrementFailureCategory(document.failureCategories, category);
+        if (workspace) incrementWorkspaceFailureCategory(document.workspaceFailureCategories, workspace, category);
+      }
 
-    incrementTotals(document.totals, success, failure, durationMs, reliability);
-    incrementNamed(document.tools, 'tool', tool, success, failure, durationMs, reliability);
-    if (workspace) {
-      incrementNamed(document.workspaces, 'workspace', workspace, success, failure, durationMs, reliability);
-      incrementWorkspaceTool(document.workspaceTools, workspace, tool, success, failure, durationMs, reliability);
-    }
-    if (failure) {
-      incrementFailureCategory(document.failureCategories, category);
-      if (workspace) incrementWorkspaceFailureCategory(document.workspaceFailureCategories, workspace, category);
-    }
-
-    const hourly = findOrCreate(document.hours, row => row.hour === hour, () => ({
-      hour,
-      ...emptyAggregate(true),
-      tools: [],
-      workspaces: [],
-      workspaceTools: [],
-      failureCategories: [],
-      workspaceFailureCategories: []
-    }));
-    incrementTotals(hourly, success, failure, durationMs, reliability);
-    incrementNamed(hourly.tools, 'tool', tool, success, failure, durationMs, reliability);
-    if (workspace) {
-      incrementNamed(hourly.workspaces, 'workspace', workspace, success, failure, durationMs, reliability);
-      incrementWorkspaceTool(hourly.workspaceTools, workspace, tool, success, failure, durationMs, reliability);
-    }
-    if (failure) {
-      incrementFailureCategory(hourly.failureCategories, category);
-      if (workspace) incrementWorkspaceFailureCategory(hourly.workspaceFailureCategories, workspace, category);
-    }
-    scheduleDocumentWrite(config, document);
+      const hourly = findOrCreate(document.hours, row => row.hour === hour, () => ({
+        hour,
+        ...emptyAggregate(true),
+        tools: [],
+        workspaces: [],
+        workspaceTools: [],
+        failureCategories: [],
+        workspaceFailureCategories: []
+      }));
+      incrementTotals(hourly, success, failure, durationMs, reliability);
+      incrementNamed(hourly.tools, 'tool', tool, success, failure, durationMs, reliability);
+      if (workspace) {
+        incrementNamed(hourly.workspaces, 'workspace', workspace, success, failure, durationMs, reliability);
+        incrementWorkspaceTool(hourly.workspaceTools, workspace, tool, success, failure, durationMs, reliability);
+      }
+      if (failure) {
+        incrementFailureCategory(hourly.failureCategories, category);
+        if (workspace) incrementWorkspaceFailureCategory(hourly.workspaceFailureCategories, workspace, category);
+      }
+      upsertDocument(db, document);
+    }, { transaction: true });
     scheduleRetentionPrune(config);
     return true;
   } catch {
@@ -167,30 +166,28 @@ function projectLocalUsageSnapshot(config, month, document) {
 }
 
 function readDocument(config, month) {
-  const file = analyticsPath(config, month);
-  const cached = documentCache.get(file);
-  if (cached) return cached;
-  let document;
-  try {
-    const stat = fs.statSync(file);
-    if (!stat.isFile() || stat.size > MAX_FILE_BYTES) document = emptyDocument(month);
-    else document = parseDocument(fs.readFileSync(file, 'utf8'), month);
-  } catch {
-    document = emptyDocument(month);
-  }
-  documentCache.set(file, document);
-  return document;
+  migrateLegacyLocalAnalytics(config);
+  return withStateDatabase(config, db => readDocumentFromDatabase(db, month));
 }
 
 async function readDocumentFresh(config, month) {
-  const file = analyticsPath(config, month);
+  return readDocument(config, month);
+}
+
+function readDocumentFromDatabase(db, month) {
+  const row = db.prepare('SELECT payload FROM analytics_months WHERE month=?').get(month);
+  if (!row) return emptyDocument(month);
   try {
-    const stat = await fs.promises.stat(file);
-    if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return emptyDocument(month);
-    return parseDocument(await fs.promises.readFile(file, 'utf8'), month);
+    return parseDocument(row.payload, month);
   } catch {
     return emptyDocument(month);
   }
+}
+
+function upsertDocument(db, document, updatedAtMs = Date.now()) {
+  db.prepare(`INSERT INTO analytics_months(month,updated_at_ms,payload) VALUES(?,?,?)
+    ON CONFLICT(month) DO UPDATE SET updated_at_ms=excluded.updated_at_ms,payload=excluded.payload`)
+    .run(document.month, Math.max(0, Math.floor(Number(updatedAtMs) || Date.now())), JSON.stringify(document));
 }
 
 function parseDocument(text, month) {
@@ -201,90 +198,42 @@ function parseDocument(text, month) {
     : emptyDocument(month);
 }
 
-function scheduleDocumentWrite(config, document) {
-  const file = analyticsPath(config, document.month);
-  documentCache.set(file, document);
-  let state = writeStates.get(file);
-  if (!state) {
-    state = { document, version: 0, persistedVersion: 0, timer: null, writing: false, firstQueuedAt: 0, promise: Promise.resolve() };
-    writeStates.set(file, state);
-  }
-  state.document = document;
-  state.version += 1;
-  const now = Date.now();
-  if (!state.firstQueuedAt) state.firstQueuedAt = now;
-  if (state.timer) clearTimeout(state.timer);
-  if (state.writing) return;
-  const remaining = Math.max(0, ANALYTICS_FLUSH_MAX_WAIT_MS - (now - state.firstQueuedAt));
-  state.timer = setTimeout(() => {
-    state.timer = null;
-    void flushDocumentWrite(file, state);
-  }, Math.min(ANALYTICS_FLUSH_DELAY_MS, remaining));
-  state.timer.unref?.();
-}
-
-async function flushDocumentWrite(file, state) {
-  if (!state || state.persistedVersion >= state.version) return true;
-  if (state.writing) return state.promise;
-  state.writing = true;
-  const version = state.version;
-  const document = state.document;
-  let succeeded = false;
-  state.promise = writeTextAtomicAsync(file, `${JSON.stringify(document)}\n`, { mode: 0o600, durable: false })
-    .then(() => {
-      succeeded = true;
-      return true;
-    })
-    .catch(error => {
-      if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] deferred local analytics write:', error);
-      return false;
-    })
-    .finally(() => {
-      state.writing = false;
-      if (succeeded) {
-        state.persistedVersion = version;
-        state.firstQueuedAt = 0;
-      }
-      if (state.persistedVersion < state.version && !state.timer) {
-        state.firstQueuedAt ||= Date.now();
-        state.timer = setTimeout(() => {
-          state.timer = null;
-          void flushDocumentWrite(file, state);
-        }, succeeded ? 0 : 1000);
-        state.timer.unref?.();
-      }
-    });
-  return state.promise;
-}
-
-async function flushLocalAnalytics(config = null) {
-  const prefix = config ? `${statePath(config, 'analytics', 'local')}${path.sep}` : '';
-  const entries = [...writeStates.entries()].filter(([file]) => !prefix || file.startsWith(prefix));
-  let failed = 0;
-  for (const [file, state] of entries) {
-    while (state.persistedVersion < state.version) {
-      if (state.timer) {
-        clearTimeout(state.timer);
-        state.timer = null;
-      }
-      const persistedBefore = state.persistedVersion;
-      const succeeded = await flushDocumentWrite(file, state);
-      if (!succeeded) {
-        failed += 1;
-        break;
-      }
-      if (state.persistedVersion <= persistedBefore) break;
+function migrateLegacyLocalAnalytics(config = {}) {
+  let migrated = false;
+  withStateDatabase(config, db => {
+    if (stateMetaValue(db, LEGACY_MIGRATION_KEY, '') === '1') return;
+    const directory = statePath(config, 'analytics', 'local');
+    let entries = [];
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error;
     }
-  }
-  const pending = entries.filter(([, state]) => state.persistedVersion < state.version).length;
-  return { ok: failed === 0 && pending === 0, failed, pending };
+    for (const entry of entries) {
+      if (!entry.isFile() || !/^\d{4}-\d{2}\.json$/.test(entry.name)) continue;
+      const month = entry.name.slice(0, 7);
+      const file = path.join(directory, entry.name);
+      try {
+        const stat = fs.statSync(file);
+        if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
+        upsertDocument(db, parseDocument(fs.readFileSync(file, 'utf8'), month), stat.mtimeMs);
+      } catch {}
+    }
+    setStateMeta(db, LEGACY_MIGRATION_KEY, '1');
+    migrated = true;
+  }, { transaction: true });
+  if (migrated) removeLegacyAnalyticsDirectory(config);
+}
+
+async function flushLocalAnalytics() {
+  return { ok: true, failed: 0, pending: 0 };
 }
 
 function scheduleRetentionPrune(config = {}) {
-  const directory = statePath(config, 'analytics', 'local');
+  const key = statePath(config, 'durable-state.sqlite');
   const now = Date.now();
-  if (now - Number(retentionPruneTimes.get(directory) || 0) < RETENTION_PRUNE_INTERVAL_MS) return false;
-  retentionPruneTimes.set(directory, now);
+  if (now - Number(retentionPruneTimes.get(key) || 0) < RETENTION_PRUNE_INTERVAL_MS) return false;
+  retentionPruneTimes.set(key, now);
   const timer = setTimeout(() => {
     void pruneLocalAnalytics(config).catch(error => {
       if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] local analytics retention prune:', error);
@@ -295,70 +244,43 @@ function scheduleRetentionPrune(config = {}) {
 }
 
 async function pruneLocalAnalytics(config = {}, options = {}) {
-  const directory = statePath(config, 'analytics', 'local');
+  migrateLegacyLocalAnalytics(config);
   const retentionDays = Math.max(1, Math.floor(Number(options.retentionDays || LOCAL_ANALYTICS_RETENTION_DAYS)));
   const now = options.now instanceof Date ? options.now : new Date(options.now == null ? Date.now() : options.now);
   const nowMs = Number.isFinite(now.getTime()) ? now.getTime() : Date.now();
   const cutoffMs = nowMs - retentionDays * 24 * 60 * 60 * 1000;
-  let entries;
-  try {
-    entries = await fs.promises.readdir(directory, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return { ok: true, removedFiles: 0, removedBytes: 0 };
-    throw error;
-  }
-  let removedFiles = 0;
-  let removedBytes = 0;
-  for (const entry of entries) {
-    if (!entry.isFile() || !/^\d{4}-\d{2}\.json$/.test(entry.name)) continue;
-    const month = entry.name.slice(0, 7);
-    if (monthEndMs(month) >= cutoffMs) continue;
-    const file = path.join(directory, entry.name);
-    const state = writeStates.get(file);
-    if (state?.writing || (state && state.persistedVersion < state.version)) continue;
-    try {
-      const stat = await fs.promises.stat(file);
-      await fs.promises.rm(file, { force: true });
-      writeStates.delete(file);
-      documentCache.delete(file);
+  const result = withStateDatabase(config, db => {
+    const rows = db.prepare('SELECT month,payload FROM analytics_months').all();
+    const remove = db.prepare('DELETE FROM analytics_months WHERE month=?');
+    let removedFiles = 0;
+    let removedBytes = 0;
+    for (const row of rows) {
+      if (monthEndMs(row.month) >= cutoffMs) continue;
       removedFiles += 1;
-      removedBytes += Math.max(0, Number(stat.size || 0));
-    } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      removedBytes += Buffer.byteLength(String(row.payload || ''), 'utf8');
+      remove.run(row.month);
     }
-  }
-  return { ok: true, removedFiles, removedBytes };
+    return { ok: true, removedFiles, removedBytes };
+  }, { transaction: true });
+  retentionPruneTimes.set(statePath(config, 'durable-state.sqlite'), nowMs);
+  return result;
 }
 
 async function clearLocalAnalytics(config = {}) {
-  const directory = statePath(config, 'analytics', 'local');
-  const prefix = `${directory}${path.sep}`;
-  const states = [...writeStates.entries()].filter(([file]) => file.startsWith(prefix));
-  for (const [file, state] of states) {
-    if (state.timer) {
-      clearTimeout(state.timer);
-      state.timer = null;
-    }
-    state.version = state.persistedVersion;
-    await state.promise.catch(() => false);
-    if (state.timer) clearTimeout(state.timer);
-    writeStates.delete(file);
-    documentCache.delete(file);
-  }
-  for (const file of [...documentCache.keys()]) if (file.startsWith(prefix)) documentCache.delete(file);
-  retentionPruneTimes.delete(directory);
+  migrateLegacyLocalAnalytics(config);
+  const result = withStateDatabase(config, db => {
+    const rows = db.prepare('SELECT payload FROM analytics_months').all();
+    const removedBytes = rows.reduce((sum, row) => sum + Buffer.byteLength(String(row.payload || ''), 'utf8'), 0);
+    db.exec('DELETE FROM analytics_months');
+    return { ok: true, removedFiles: rows.length, removedBytes };
+  }, { transaction: true });
+  retentionPruneTimes.delete(statePath(config, 'durable-state.sqlite'));
+  removeLegacyAnalyticsDirectory(config);
+  return result;
+}
 
-  let entries = [];
-  try { entries = await fs.promises.readdir(directory, { withFileTypes: true }); } catch {}
-  let removedFiles = 0;
-  let removedBytes = 0;
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    removedFiles += 1;
-    try { removedBytes += Math.max(0, Number((await fs.promises.stat(path.join(directory, entry.name))).size || 0)); } catch {}
-  }
-  await fs.promises.rm(directory, { recursive: true, force: true });
-  return { ok: true, removedFiles, removedBytes };
+function removeLegacyAnalyticsDirectory(config = {}) {
+  try { fs.rmSync(statePath(config, 'analytics', 'local'), { recursive: true, force: true }); } catch {}
 }
 
 function monthEndMs(month) {
@@ -368,10 +290,6 @@ function monthEndMs(month) {
   const monthIndex = Number(match[2]) - 1;
   if (monthIndex < 0 || monthIndex > 11) return Number.POSITIVE_INFINITY;
   return Date.UTC(year, monthIndex + 1, 1) - 1;
-}
-
-function analyticsPath(config, month) {
-  return statePath(config, 'analytics', 'local', `${month}.json`);
 }
 
 function emptyDocument(month) {

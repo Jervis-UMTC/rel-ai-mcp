@@ -31,7 +31,7 @@ app.whenReady().then(async () => {
   const { readComputerStatus } = await import(moduleUrl);
   const status = await readComputerStatus({ computerControl: { enabled: false } });
   if (!status.available) throw new Error(status.message || 'Packaged computer runtime is unavailable.');
-  console.log(JSON.stringify({ available: status.available, platform: status.platform, screen: status.screen }));
+  console.log(JSON.stringify({ available: status.available, platform: status.platform, engine: status.engine, displays: status.displays }));
   app.quit();
 }).catch(error => {
   console.error(error && (error.stack || error.message) || error);
@@ -62,8 +62,9 @@ try {
   const parsed = JSON.parse(output);
   assert.equal(parsed.available, true, 'Packaged computer runtime must report available.');
   assert.equal(parsed.platform, platform, 'Packaged computer runtime reported the wrong platform.');
-  assert.ok(Number(parsed.screen?.width) > 0 && Number(parsed.screen?.height) > 0, 'Packaged computer runtime must report a usable screen size.');
-  console.log(`Packaged computer runtime verified on ${platform}: ${parsed.screen.width}x${parsed.screen.height}.`);
+  assert.equal(parsed.engine, '@midscene/computer', 'Packaged computer runtime must use the Midscene engine.');
+  assert.ok(Number(parsed.displays) > 0, 'Packaged computer runtime must enumerate at least one display.');
+  console.log(`Packaged Midscene computer runtime verified on ${platform} with ${parsed.displays} display(s).`);
 } finally {
   fs.rmSync(probe, { force: true });
 }

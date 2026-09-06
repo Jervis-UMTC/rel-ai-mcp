@@ -158,7 +158,6 @@
   "dependencies": {
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
-    "@nut-tree-fork/libnut": "4.2.6",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
     "@opentelemetry/resources": "^2.10.0",
@@ -167,12 +166,12 @@
     "monaco-editor": "0.56.0",
     "playwright-core": "^1.62.1",
     "pyright": "1.1.413",
-    "screenshot-desktop": "1.15.6",
     "tree-sitter-wasms": "^0.1.13",
     "typescript-language-server": "6.0.0",
     "typescript-lsp-runtime": "npm:typescript@6.0.3",
     "web-tree-sitter": "0.25.10",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@midscene/computer": "1.12.3"
   },
   "overrides": {
     "@hono/node-server": "2.1.1",
@@ -180,9 +179,8 @@
     "oxc-resolver": "11.24.2"
   },
   "bundleDependencies": [
+    "@midscene/computer",
     "@modelcontextprotocol/server",
-    "@nut-tree-fork/libnut",
-    "screenshot-desktop",
     "@opentelemetry/api",
     "@opentelemetry/exporter-trace-otlp-http",
     "@opentelemetry/resources",

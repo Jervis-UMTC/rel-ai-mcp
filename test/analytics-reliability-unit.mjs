@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { OUTCOME_CLASSES, classifyAnalyticsOutcome } from '../src/analyticsOutcome.js';
+import { withStateDatabase } from '../src/stateDatabase.js';
 import { flushLocalAnalytics, recordLocalToolOutcome, readLocalUsageSnapshot } from '../src/localAnalytics.js';
 import { analyticsBounds, analyticsRangeScope, normalizeUsageSnapshot } from '../src/ui/features/usage/range-model.js';
 import { renderUsage } from '../src/ui/features/usage/render.js';
@@ -95,7 +96,8 @@ try {
     assert.equal(afterNewCall.totals.reliabilityCalls, 1, 'reliability starts with the first newly classified call');
     assert.equal(afterNewCall.totals.reliableCalls, 1);
     await flushLocalAnalytics({ stateDir: legacyStateDir });
-    const migratedDocument = JSON.parse(fs.readFileSync(path.join(analyticsDir, '2026-08.json'), 'utf8'));
+    assert.equal(fs.existsSync(analyticsDir), false, 'legacy analytics JSON must be removed after SQLite migration');
+    const migratedDocument = withStateDatabase({ stateDir: legacyStateDir }, db => JSON.parse(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08').payload));
     assert.equal(migratedDocument.schemaVersion, 2);
     assert.equal(migratedDocument.totals.reliabilityCalls, 1);
   } finally {
@@ -119,43 +121,25 @@ try {
   assert.ok(content.innerHTML.indexOf(failureHeading) < content.innerHTML.indexOf(projectHeading), 'failure categories should sit beside project activity in the compact final row');
 
   await flushLocalAnalytics(config);
-  const persisted = fs.readFileSync(path.join(stateDir, 'analytics', 'local', '2026-08.json'), 'utf8');
+  const persisted = withStateDatabase(config, db => String(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08')?.payload || ''));
   for (const secret of ['spawn EINVAL', 'Operation cancelled.', 'found 2 matches']) {
     assert.equal(persisted.includes(secret), false, `reliability classification must not persist raw error text: ${secret}`);
   }
 
-  const blockedStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-reliability-blocked-'));
+  const blockedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-reliability-blocked-'));
+  const blockedStateDir = path.join(blockedRoot, 'state-file');
   try {
-    fs.writeFileSync(path.join(blockedStateDir, 'analytics'), 'blocked');
+    fs.writeFileSync(blockedStateDir, 'blocked');
     const blockedConfig = { stateDir: blockedStateDir };
-    recordLocalToolOutcome(blockedConfig, {
+    assert.equal(recordLocalToolOutcome(blockedConfig, {
       tool: 'relai_read', workspace: 'repo', ok: true, durationMs: 1, at: '2026-08-15T02:45:00Z'
-    });
-    const blockedFlush = await withTimeout(
-      flushLocalAnalytics(blockedConfig),
-      2000,
-      'analytics flush did not return after a permanent persistence failure'
-    );
-    assert.deepEqual(blockedFlush, { ok: false, failed: 1, pending: 1 }, 'shutdown analytics flush must report permanent storage failure instead of retrying forever');
+    }), false, 'synchronous SQLite analytics writes must report a permanent persistence failure at the write boundary');
+    assert.deepEqual(await flushLocalAnalytics(blockedConfig), { ok: true, failed: 0, pending: 0 }, 'SQLite analytics have no deferred JSON write queue to flush');
   } finally {
-    fs.rmSync(blockedStateDir, { recursive: true, force: true });
+    fs.rmSync(blockedRoot, { recursive: true, force: true });
   }
 } finally {
   fs.rmSync(stateDir, { recursive: true, force: true });
 }
 
 console.log('Analytics reliability classification tests passed.');
-
-async function withTimeout(promise, timeoutMs, message) {
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-      })
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}

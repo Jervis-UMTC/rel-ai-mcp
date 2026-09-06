@@ -140,7 +140,7 @@ function resolveDirectProcess(executable, argv) {
 function resolveNpmCli(command) {
   const file = command === 'npx' ? 'npx-cli.js' : 'npm-cli.js';
   const candidates = [
-    command === 'npm' ? process.env.npm_execpath : '',
+    command === 'npm' ? (process.env.npm_execpath || '') : '',
     path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', file)
   ].filter(Boolean);
   return candidates.find(candidate => fs.existsSync(candidate)) || '';

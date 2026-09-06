@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { getStateDir } from '../statePaths.js';
+import { isSqliteBusyError, setStateMeta, stateDatabasePath, stateMetaValue, withStateDatabase } from '../stateDatabase.js';
 import { isTerminalNativeTaskStatus } from '../taskState.js';
 import { normalizePrincipalKey, principalFingerprint } from './principal.js';
 
@@ -15,7 +16,6 @@ const MAX_INPUT_MAP_BYTES = 256 * 1024;
 const MAX_INTERNAL_BYTES = 256 * 1024;
 const MAX_INPUT_ENTRIES = 64;
 const MAX_INPUT_UPDATES = 100;
-const STALE_LOCK_MS = 30_000;
 const LOCK_RETRY_TIMEOUT_MS = 5_000;
 const LOCK_RETRY_DELAY_MS = 10;
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
@@ -30,14 +30,18 @@ const TASK_TRANSITIONS = Object.freeze({
   failed: new Set(['failed']),
   cancelled: new Set(['cancelled'])
 });
-const RUNTIME_ID = crypto.randomUUID();
+const LEGACY_NATIVE_MIGRATION_KEY = 'native_tasks_legacy_migrated_v1';
 const executors = new Map();
 const lastPruneAtByDirectory = new Map();
+const activeNativeDatabases = new Map();
+const migratedNativeDatabases = new Set();
 
 class NativeTaskUnavailableError extends Error {
-  constructor() {
+  constructor(options = {}) {
     super('Invalid task ID or task is not available to this client.');
     this.code = 'NATIVE_TASK_UNAVAILABLE';
+    this.expired = options.expired === true;
+    this.taskId = String(options.taskId || '');
   }
 }
 
@@ -369,95 +373,73 @@ function nativeTaskSignal(taskId) {
 }
 
 function pruneNativeTasks(config, options = {}) {
-  const directory = taskDirectory(config);
+  migrateLegacyNativeTasks(config);
   const quarantineRemoved = pruneNativeTaskQuarantine(config, options.now);
-  if (!fs.existsSync(directory)) return { removed: 0, reconciled: 0, quarantined: 0, artifactsRemoved: 0, quarantineRemoved };
   let removed = 0;
   let reconciled = 0;
   let quarantined = 0;
-  let artifactsRemoved = 0;
-  let entries;
   try {
-    entries = fs.readdirSync(directory, { withFileTypes: true });
-  } catch (error) {
-    throw taskStoreError('read_failed', error);
-  }
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    if (!entry.name.endsWith('.json')) {
-      if (isStaleStoreArtifact(directory, entry.name, options.now)) {
-        removeUnrecognizedTaskFile(directory, entry.name);
-        artifactsRemoved += 1;
-      }
-      continue;
-    }
-    const taskId = entry.name.slice(0, -5);
-    try {
-      withTaskLock(config, taskId, () => {
-        const task = readTask(config, taskId);
-        if (!task) return;
-        if (isExpired(task, options.now)) {
-          removeTask(config, task.taskId);
-          removed += 1;
-          return;
+    withStateDatabase(config, db => withActiveNativeDatabase(config, db, () => {
+      const rows = db.prepare('SELECT task_id FROM native_tasks ORDER BY updated_at_ms ASC').all();
+      for (const row of rows) {
+        const taskId = String(row.task_id || '');
+        try {
+          const task = readTask(config, taskId);
+          if (!task) continue;
+          if (isExpired(task, options.now)) {
+            removeTask(config, task.taskId);
+            removed += 1;
+            continue;
+          }
+          const beforeStatus = task.status;
+          const beforeRevision = task.revision;
+          reconcileTaskUnlocked(config, task, options.now);
+          if (task.status !== beforeStatus || task.revision !== beforeRevision) reconciled += 1;
+        } catch (error) {
+          if (error?.code === 'NATIVE_TASK_STORE_ERROR' && error.reason === 'record_corrupt') {
+            if (quarantineTaskRecord(config, taskId, options.now)) quarantined += 1;
+            continue;
+          }
+          if (error?.code === 'NATIVE_TASK_UNAVAILABLE') {
+            db.prepare('DELETE FROM native_tasks WHERE task_id=?').run(taskId);
+            removed += 1;
+            continue;
+          }
+          throw error;
         }
-        const beforeStatus = task.status;
-        const beforeRevision = task.revision;
-        reconcileTaskUnlocked(config, task, options.now);
-        if (task.status !== beforeStatus || task.revision !== beforeRevision) reconciled += 1;
-      });
-    } catch (error) {
-      if (error?.code === 'NATIVE_TASK_STORE_ERROR' && error.reason === 'record_corrupt') {
-        if (quarantineTaskRecord(config, taskId, options.now)) quarantined += 1;
-        continue;
       }
-      if (error?.code === 'NATIVE_TASK_UNAVAILABLE') {
-        removeUnrecognizedTaskFile(directory, entry.name);
-        removed += 1;
-        continue;
-      }
-      throw error;
-    }
+    }), { transaction: true });
+  } catch (error) {
+    if (error?.code === 'NATIVE_TASK_STORE_ERROR') throw error;
+    throw taskStoreError(isSqliteBusyError(error) ? 'lock_busy' : 'read_failed', error);
   }
-  return { removed, reconciled, quarantined, artifactsRemoved, quarantineRemoved };
+  return { removed, reconciled, quarantined, artifactsRemoved: 0, quarantineRemoved };
 }
 
 function opportunisticPrune(config, nowMs) {
-  const directory = taskDirectory(config);
-  const lastPruneAt = Number(lastPruneAtByDirectory.get(directory) || 0);
+  const key = stateDatabasePath(config);
+  const lastPruneAt = Number(lastPruneAtByDirectory.get(key) || 0);
   if (lastPruneAt && nowMs - lastPruneAt < PRUNE_INTERVAL_MS) return;
   try {
     pruneNativeTasks(config, { now: nowMs });
-    lastPruneAtByDirectory.set(directory, nowMs);
+    lastPruneAtByDirectory.set(key, nowMs);
   } catch (error) {
     if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] native task opportunistic prune:', error);
   }
 }
 
 function pruneNativeTaskQuarantine(config, nowSource) {
-  const directory = path.join(getStateDir(config), 'native-tasks-quarantine');
-  if (!fs.existsSync(directory)) return 0;
-  const nowMs = nowValue(nowSource);
-  let removed = 0;
-  let entries;
+  migrateLegacyNativeTasks(config);
+  const cutoff = nowValue(nowSource) - QUARANTINE_RETENTION_MS;
   try {
-    entries = fs.readdirSync(directory, { withFileTypes: true });
+    return withStateDatabase(config, db => {
+      const before = Number(db.prepare('SELECT COUNT(*) AS count FROM native_task_quarantine WHERE quarantined_at_ms <= ?').get(cutoff)?.count || 0);
+      db.prepare('DELETE FROM native_task_quarantine WHERE quarantined_at_ms <= ?').run(cutoff);
+      return before;
+    }, { transaction: true });
   } catch (error) {
-    throw taskStoreError('read_failed', error);
+    throw taskStoreError(isSqliteBusyError(error) ? 'lock_busy' : 'delete_failed', error);
   }
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const target = path.join(directory, entry.name);
-    try {
-      const stat = fs.statSync(target);
-      if (nowMs - stat.mtimeMs <= QUARANTINE_RETENTION_MS) continue;
-      fs.rmSync(target, { force: true });
-      removed += 1;
-    } catch (error) {
-      if (error?.code !== 'ENOENT') throw taskStoreError('delete_failed', error);
-    }
-  }
-  return removed;
 }
 
 function transitionTerminal(config, taskId, status, payload, options = {}) {
@@ -500,18 +482,10 @@ function terminalConflict(current, requested) {
 
 function requireTaskUnlocked(config, taskId, options = {}) {
   const id = validateTaskId(taskId);
-  let task;
-  try {
-    task = readTask(config, id);
-  } catch (error) {
-    if (error?.code === 'NATIVE_TASK_STORE_ERROR' && error.reason === 'record_corrupt') {
-      quarantineTaskRecord(config, id, options.now);
-    }
-    throw error;
-  }
-  if (!task || isExpired(task, options.now)) {
-    if (task) removeTask(config, id);
-    throw new NativeTaskUnavailableError();
+  const task = readTask(config, id);
+  if (!task) throw new NativeTaskUnavailableError();
+  if (isExpired(task, options.now)) {
+    throw new NativeTaskUnavailableError({ expired: true, taskId: id });
   }
   if (options.principal !== undefined && !safeEqual(task.principalFingerprint, principalFingerprint(options.principal))) {
     throw new NativeTaskUnavailableError();
@@ -630,77 +604,132 @@ async function retryNativeTaskOperation(operation, options = {}) {
   }
 }
 
+function nativeDatabaseKey(config) {
+  return stateDatabasePath(config);
+}
+
+function currentNativeDatabase(config) {
+  return activeNativeDatabases.get(nativeDatabaseKey(config)) || null;
+}
+
+function withActiveNativeDatabase(config, db, operation) {
+  const key = nativeDatabaseKey(config);
+  const previous = activeNativeDatabases.get(key);
+  activeNativeDatabases.set(key, db);
+  try {
+    return operation();
+  } finally {
+    if (previous) activeNativeDatabases.set(key, previous);
+    else activeNativeDatabases.delete(key);
+  }
+}
+
+function migrateLegacyNativeTasks(config = {}) {
+  const key = nativeDatabaseKey(config);
+  if (migratedNativeDatabases.has(key)) return;
+  const activeDirectory = path.join(getStateDir(config), 'native-tasks');
+  const quarantineDirectory = path.join(getStateDir(config), 'native-tasks-quarantine');
+  try {
+    withStateDatabase(config, db => {
+      if (stateMetaValue(db, LEGACY_NATIVE_MIGRATION_KEY, '') === '1') return;
+      const importDirectory = (directory, quarantineOnly = false) => {
+        let entries;
+        try {
+          entries = fs.readdirSync(directory, { withFileTypes: true });
+        } catch (error) {
+          if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error;
+          return;
+        }
+        for (const entry of entries) {
+          if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+          const file = path.join(directory, entry.name);
+          let source = '';
+          try {
+            source = fs.readFileSync(file, 'utf8');
+            if (Buffer.byteLength(source, 'utf8') > MAX_TASK_RECORD_BYTES) throw new Error('legacy task record is too large');
+            if (quarantineOnly) {
+              const taskId = entry.name.slice(0, -5);
+              db.prepare(`INSERT INTO native_task_quarantine(task_id,quarantined_at_ms,reason,payload)
+                VALUES(?,?,?,?)`).run(taskId, Date.now(), 'legacy_quarantine', source);
+              continue;
+            }
+            const parsed = JSON.parse(source);
+            const taskId = validateTaskId(parsed?.taskId || entry.name.slice(0, -5));
+            const task = normalizeStoredTask(parsed, taskId);
+            const updatedAtMs = Date.parse(task.lastUpdatedAt);
+            db.prepare(`INSERT INTO native_tasks(task_id,updated_at_ms,payload) VALUES(?,?,?)
+              ON CONFLICT(task_id) DO UPDATE SET updated_at_ms=excluded.updated_at_ms,payload=excluded.payload`)
+              .run(taskId, updatedAtMs, JSON.stringify(task));
+          } catch {
+            const taskId = entry.name.slice(0, -5);
+            db.prepare(`INSERT INTO native_task_quarantine(task_id,quarantined_at_ms,reason,payload)
+              VALUES(?,?,?,?)`).run(taskId, Date.now(), 'legacy_record_corrupt', source.slice(0, MAX_TASK_RECORD_BYTES));
+          }
+        }
+      };
+      importDirectory(activeDirectory, false);
+      importDirectory(quarantineDirectory, true);
+      setStateMeta(db, LEGACY_NATIVE_MIGRATION_KEY, '1');
+    }, { transaction: true, timeoutMs: 0 });
+    fs.rmSync(activeDirectory, { recursive: true, force: true });
+    fs.rmSync(quarantineDirectory, { recursive: true, force: true });
+    migratedNativeDatabases.add(key);
+  } catch (error) {
+    if (error?.code === 'NATIVE_TASK_STORE_ERROR') throw error;
+    throw taskStoreError(isSqliteBusyError(error) ? 'lock_busy' : 'write_failed', error);
+  }
+}
+
 function withTaskLock(config, taskId, operation) {
   const id = validateTaskId(taskId);
-  const directory = taskDirectory(config);
-  const lockPath = path.join(directory, `${id}.lock`);
-  let descriptor = null;
+  migrateLegacyNativeTasks(config);
   try {
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    try {
-      descriptor = fs.openSync(lockPath, 'wx', 0o600);
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
-      const removed = removeStaleLock(lockPath);
-      if (!removed) throw taskStoreError('lock_busy', error, id);
-      try {
-        descriptor = fs.openSync(lockPath, 'wx', 0o600);
-      } catch (retryError) {
-        if (retryError?.code === 'EEXIST') throw taskStoreError('lock_busy', retryError, id);
-        throw retryError;
-      }
-    }
-    fs.writeFileSync(descriptor, `${process.pid}:${RUNTIME_ID}\n`);
-    return operation();
+    return withStateDatabase(
+      config,
+      db => withActiveNativeDatabase(config, db, operation),
+      { transaction: true, timeoutMs: 0 }
+    );
   } catch (error) {
+    if (isSqliteBusyError(error)) throw taskStoreError('lock_busy', error, id);
+    if (error?.code === 'NATIVE_TASK_STORE_ERROR' && error.reason === 'record_corrupt') {
+      quarantineTaskRecord(config, id);
+      throw error;
+    }
+    if (error?.code === 'NATIVE_TASK_UNAVAILABLE' && error.expired === true) {
+      removeTask(config, error.taskId || id);
+      throw error;
+    }
     if (error?.code === 'NATIVE_TASK_STORE_ERROR' || error?.code === 'NATIVE_TASK_UNAVAILABLE' || error?.code === 'NATIVE_TASK_INVALID_REQUEST') {
       throw error;
     }
     throw taskStoreError('lock_failed', error, id);
-  } finally {
-    if (descriptor != null) {
-      try { fs.closeSync(descriptor); } catch {}
-      try { fs.rmSync(lockPath, { force: true }); } catch {}
-    }
   }
-}
-
-function removeStaleLock(lockPath) {
-  try {
-    const stats = fs.statSync(lockPath);
-    if (Date.now() - stats.mtimeMs <= STALE_LOCK_MS) return false;
-    fs.rmSync(lockPath, { force: true });
-    return true;
-  } catch (error) {
-    if (error?.code === 'ENOENT') return true;
-    throw error;
-  }
-}
-
-function taskDirectory(config) {
-  return path.join(getStateDir(config), 'native-tasks');
-}
-
-function taskPath(config, taskId) {
-  return path.join(taskDirectory(config), `${validateTaskId(taskId)}.json`);
 }
 
 function readTask(config, taskId) {
-  const file = taskPath(config, taskId);
-  let source;
+  const id = validateTaskId(taskId);
+  migrateLegacyNativeTasks(config);
+  const read = db => {
+    const row = db.prepare('SELECT payload FROM native_tasks WHERE task_id=?').get(id);
+    if (!row) return null;
+    const source = String(row.payload || '');
+    if (Buffer.byteLength(source, 'utf8') > MAX_TASK_RECORD_BYTES) {
+      throw taskStoreError('record_corrupt', null, id);
+    }
+    try {
+      return normalizeStoredTask(JSON.parse(source), id);
+    } catch (error) {
+      if (error?.code === 'NATIVE_TASK_STORE_ERROR') throw error;
+      throw taskStoreError('record_corrupt', error, id);
+    }
+  };
+  const active = currentNativeDatabase(config);
+  if (active) return read(active);
   try {
-    source = fs.readFileSync(file, 'utf8');
-  } catch (error) {
-    if (error?.code === 'ENOENT') return null;
-    throw taskStoreError('read_failed', error, taskId);
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(source);
-    return normalizeStoredTask(parsed, taskId);
+    return withStateDatabase(config, read);
   } catch (error) {
     if (error?.code === 'NATIVE_TASK_STORE_ERROR') throw error;
-    throw taskStoreError('record_corrupt', error, taskId);
+    throw taskStoreError(isSqliteBusyError(error) ? 'lock_busy' : 'read_failed', error, id);
   }
 }
 
@@ -759,74 +788,64 @@ function normalizeStoredTask(parsed, taskId) {
   };
 }
 
+function withNativeWriteDatabase(config, operation) {
+  const active = currentNativeDatabase(config);
+  if (active) return operation(active);
+  return withStateDatabase(config, operation, { transaction: true, timeoutMs: 0 });
+}
+
 function persistTask(config, task) {
-  const directory = taskDirectory(config);
-  const target = taskPath(config, task.taskId);
-  const temporary = `${target}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  migrateLegacyNativeTasks(config);
   task.revision = normalizeRevision(task.revision) + 1;
   const serialized = `${JSON.stringify(task, null, 2)}\n`;
   if (Buffer.byteLength(serialized, 'utf8') > MAX_TASK_RECORD_BYTES) {
     task.revision -= 1;
     throw new NativeTaskRequestError('Native task record exceeds the durable storage limit.', 'payload_too_large');
   }
-  let descriptor = null;
+  const updatedAtMs = Number.isFinite(Date.parse(task.lastUpdatedAt || '')) ? Date.parse(task.lastUpdatedAt) : Date.now();
   try {
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    descriptor = fs.openSync(temporary, 'wx', 0o600);
-    fs.writeFileSync(descriptor, serialized, 'utf8');
-    fs.fsyncSync(descriptor);
-    fs.closeSync(descriptor);
-    descriptor = null;
-    fs.renameSync(temporary, target);
-    syncDirectory(directory);
+    withNativeWriteDatabase(config, db => {
+      db.prepare(`INSERT INTO native_tasks(task_id,updated_at_ms,payload) VALUES(?,?,?)
+        ON CONFLICT(task_id) DO UPDATE SET updated_at_ms=excluded.updated_at_ms,payload=excluded.payload`)
+        .run(task.taskId, updatedAtMs, serialized);
+    });
   } catch (error) {
     task.revision -= 1;
-    if (descriptor != null) {
-      try { fs.closeSync(descriptor); } catch {}
-    }
-    try { fs.rmSync(temporary, { force: true }); } catch {}
     if (error?.code === 'NATIVE_TASK_INVALID_REQUEST') throw error;
-    throw taskStoreError('write_failed', error, task.taskId);
-  }
-}
-
-function syncDirectory(directory) {
-  let descriptor;
-  try {
-    descriptor = fs.openSync(directory, 'r');
-    fs.fsyncSync(descriptor);
-  } catch (error) {
-    if (!['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP', 'EISDIR'].includes(error?.code)) throw error;
-  } finally {
-    if (descriptor != null) {
-      try { fs.closeSync(descriptor); } catch {}
-    }
+    throw taskStoreError(isSqliteBusyError(error) ? 'lock_busy' : 'write_failed', error, task.taskId);
   }
 }
 
 function removeTask(config, taskId) {
-  abortExecutor(taskId, 'Native task expired before execution completed.');
+  const id = validateTaskId(taskId);
+  migrateLegacyNativeTasks(config);
+  abortExecutor(id, 'Native task expired before execution completed.');
   try {
-    fs.rmSync(taskPath(config, taskId), { force: true });
+    withNativeWriteDatabase(config, db => {
+      db.prepare('DELETE FROM native_tasks WHERE task_id=?').run(id);
+    });
   } catch (error) {
-    throw taskStoreError('delete_failed', error, taskId);
+    throw taskStoreError(isSqliteBusyError(error) ? 'lock_busy' : 'delete_failed', error, id);
   }
 }
 
 function quarantineTaskRecord(config, taskId, nowSource) {
-  const source = taskPath(config, taskId);
-  if (!fs.existsSync(source)) return false;
-  const directory = path.join(getStateDir(config), 'native-tasks-quarantine');
-  const timestamp = new Date(nowValue(nowSource)).toISOString().replace(/[:.]/g, '-');
-  const target = path.join(directory, `${taskId}.${timestamp}.json`);
+  const id = validateTaskId(taskId);
+  migrateLegacyNativeTasks(config);
   try {
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    fs.renameSync(source, target);
-    abortExecutor(taskId, 'Native task record became unreadable while execution was active.');
-    return true;
+    const quarantined = withNativeWriteDatabase(config, db => {
+      const row = db.prepare('SELECT payload FROM native_tasks WHERE task_id=?').get(id);
+      if (!row) return false;
+      db.prepare(`INSERT INTO native_task_quarantine(task_id,quarantined_at_ms,reason,payload)
+        VALUES(?,?,?,?)`).run(id, nowValue(nowSource), 'record_corrupt', String(row.payload || ''));
+      db.prepare('DELETE FROM native_tasks WHERE task_id=?').run(id);
+      return true;
+    });
+    if (quarantined) abortExecutor(id, 'Native task record became unreadable while execution was active.');
+    return quarantined;
   } catch (error) {
-    if (error?.code === 'ENOENT') return false;
-    throw taskStoreError('quarantine_failed', error, taskId);
+    if (error?.code === 'NATIVE_TASK_STORE_ERROR') throw error;
+    throw taskStoreError(isSqliteBusyError(error) ? 'lock_busy' : 'quarantine_failed', error, id);
   }
 }
 
@@ -836,24 +855,6 @@ function abortExecutor(taskId, reason) {
     executor.controller.abort(new Error(reason));
   }
   executors.delete(taskId);
-}
-
-function removeUnrecognizedTaskFile(directory, name) {
-  try {
-    fs.rmSync(path.join(directory, name), { force: true });
-  } catch (error) {
-    throw taskStoreError('delete_failed', error);
-  }
-}
-
-function isStaleStoreArtifact(directory, name, nowSource) {
-  if (!/\.(?:tmp|lock)$/.test(name)) return false;
-  try {
-    const stats = fs.statSync(path.join(directory, name));
-    return nowValue(nowSource) - stats.mtimeMs > STALE_LOCK_MS;
-  } catch (error) {
-    return error?.code === 'ENOENT';
-  }
 }
 
 function taskStoreError(reason, cause, taskId = '') {

@@ -38,7 +38,8 @@ try {
       ms: 5
     }));
   }
-  assert.equal(fs.existsSync(path.join(sandbox, '.task-history-v3')), true, 'current history format marker must be created');
+  assert.equal(fs.existsSync(path.join(sandbox, 'durable-state.sqlite')), true, 'current task history must be persisted in the shared SQLite store');
+  assert.equal(fs.existsSync(path.join(sandbox, '.task-history-v3')), false, 'obsolete task-history format markers must not be recreated');
 
   let sessions = readTaskHistory(config, { state: 'idle' }, { limit: 500 });
   assert.equal(sessions.length, 251);

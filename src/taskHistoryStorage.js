@@ -1,78 +1,68 @@
-import { getStateDir } from './statePaths.js';
-import { readJsonFile, writeJsonAtomic, writeJsonAtomicAsync } from './durableState.js';
-
-import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+
+import { getStateDir } from './statePaths.js';
+import { setStateMeta, stateMetaValue, withStateDatabase } from './stateDatabase.js';
 import { normalizeTaskProgress, sanitizeTaskRecord } from './taskObservability.js';
 import { isTerminalTaskStatus } from './taskState.js';
-import { watchPathFor } from './watchPath.js';
+
 const MAX_SESSIONS = 500;
 const TASK_HISTORY_VERSION = 3;
 const HISTORY_FORMAT_MARKER = '.task-history-v3';
-const MAX_PARSED_CACHE_ENTRIES = 2 * MAX_SESSIONS;
-const DIRECTORY_METADATA_RESCAN_MS = 5000;
-const parsedCache = new Map();
-const directoryMetadataCache = new Map();
+const LEGACY_MIGRATION_KEY = 'task_history_legacy_migrated_v1';
 
 function getTaskHistoryDir(config = {}) {
   return path.join(getStateDir(config), 'sessions');
 }
 
-function ensureCurrentHistory(config) {
-  const directory = getTaskHistoryDir(config);
-  const marker = path.join(path.dirname(directory), HISTORY_FORMAT_MARKER);
-  if (fs.existsSync(marker)) return;
-  fs.mkdirSync(path.dirname(directory), { recursive: true, mode: 0o700 });
-  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(marker, `${new Date().toISOString()}\n`, { mode: 0o600 });
+function configForDirectory(directory) {
+  return { stateDir: path.dirname(path.resolve(directory)) };
 }
 
-function sessionFileNames(directory) {
-  try {
-    return fs.readdirSync(directory, { withFileTypes: true })
-      .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
-      .map(entry => entry.name);
-  } catch {
-    return null;
-  }
-}
-
-function sessionMetadata(directory, names) {
-  const metadata = [];
-  for (const name of names) {
-    const item = fileMetadata(path.join(directory, name), name);
-    if (item) metadata.push(item);
-  }
-  metadata.sort((left, right) => {
-    if (left.mtimeNs === right.mtimeNs) return left.name.localeCompare(right.name);
-    return left.mtimeNs > right.mtimeNs ? -1 : 1;
-  });
-  return metadata;
+function ensureCurrentHistory(config = {}) {
+  migrateLegacyTaskHistory(config);
 }
 
 function listSessions(directory, limit = MAX_SESSIONS) {
-  return cachedSessionMetadata(directory)
-    .slice(0, limit)
-    .map(item => readCachedSession(item.file, item.identity))
-    .filter(session => session && session.id);
+  const config = configForDirectory(directory);
+  migrateLegacyTaskHistory(config);
+  return withStateDatabase(config, db => {
+    const rows = db.prepare('SELECT id,payload FROM task_history ORDER BY updated_at_ms DESC,id ASC LIMIT ?')
+      .all(Math.max(0, Math.floor(Number(limit) || 0)));
+    const sessions = [];
+    const invalid = [];
+    for (const row of rows) {
+      const session = parseStoredSession(row.payload);
+      if (session) sessions.push(session);
+      else invalid.push(String(row.id));
+    }
+    if (invalid.length) {
+      const remove = db.prepare('DELETE FROM task_history WHERE id=?');
+      for (const id of invalid) remove.run(id);
+    }
+    return sessions;
+  }, { transaction: true });
 }
 
 function readSession(directory, id) {
-  const file = sessionPath(directory, id);
-  const metadata = fileMetadata(file, path.basename(file));
-  return metadata ? readCachedSession(file, metadata.identity) : null;
+  const config = configForDirectory(directory);
+  migrateLegacyTaskHistory(config);
+  return withStateDatabase(config, db => {
+    const row = db.prepare('SELECT payload FROM task_history WHERE id=?').get(String(id || ''));
+    if (!row) return null;
+    const session = parseStoredSession(row.payload);
+    if (session) return session;
+    db.prepare('DELETE FROM task_history WHERE id=?').run(String(id || ''));
+    return null;
+  }, { transaction: true });
 }
 
 function removeSession(directory, id) {
-  const file = sessionPath(directory, id);
-  fs.rmSync(file, { force: true });
-  parsedCache.delete(file);
-  const cached = directoryMetadataCache.get(directory);
-  if (cached) {
-    cached.items.delete(path.basename(file));
-    cached.checkedAt = Date.now();
-  }
+  const config = configForDirectory(directory);
+  migrateLegacyTaskHistory(config);
+  withStateDatabase(config, db => {
+    db.prepare('DELETE FROM task_history WHERE id=?').run(String(id || ''));
+  }, { transaction: true });
 }
 
 function normalizeStoredSession(session, { forWrite = false } = {}) {
@@ -101,166 +91,114 @@ function writeSession(directory, session) {
   if (!session?.id) return;
   const sanitized = normalizeStoredSession(session, { forWrite: true });
   if (!sanitized) throw new Error('Task history writes require a current session record.');
-  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const target = sessionPath(directory, sanitized.id);
-  writeJsonAtomic(target, sanitized, { mode: 0o600, spacing: 0 });
-  rememberWrittenSession(directory, target, sanitized);
+  const config = configForDirectory(directory);
+  migrateLegacyTaskHistory(config);
+  withStateDatabase(config, db => upsertSession(db, sanitized), { transaction: true });
 }
 
 async function writeSessionAsync(directory, session) {
-  if (!session?.id) return;
-  const sanitized = normalizeStoredSession(session, { forWrite: true });
-  if (!sanitized) throw new Error('Task history writes require a current session record.');
-  await fs.promises.mkdir(directory, { recursive: true, mode: 0o700 });
-  const target = sessionPath(directory, sanitized.id);
-  await writeJsonAtomicAsync(target, sanitized, { mode: 0o600, spacing: 0, durable: false });
-  rememberWrittenSession(directory, target, sanitized);
+  writeSession(directory, session);
 }
 
 function pruneSessions(directory, limit = MAX_SESSIONS) {
-  const metadata = cachedSessionMetadata(directory);
-  if (metadata.length <= limit) return;
-  const cached = directoryMetadataCache.get(directory);
-  let retained = metadata.length;
-  for (const item of [...metadata].reverse()) {
-    if (retained <= limit) break;
-    const session = readCachedSession(item.file, item.identity);
-    if (!session || !isTerminalTaskStatus(session.status)) continue;
-    fs.rmSync(item.file, { force: true });
-    parsedCache.delete(item.file);
-    cached?.items.delete(item.name);
-    retained -= 1;
-  }
+  const config = configForDirectory(directory);
+  migrateLegacyTaskHistory(config);
+  withStateDatabase(config, db => {
+    const max = Math.max(0, Math.floor(Number(limit) || 0));
+    const rows = db.prepare('SELECT id,payload FROM task_history ORDER BY updated_at_ms DESC,id ASC').all();
+    if (rows.length <= max) return;
+    let retained = rows.length;
+    const remove = db.prepare('DELETE FROM task_history WHERE id=?');
+    for (let index = rows.length - 1; index >= 0 && retained > max; index -= 1) {
+      const row = rows[index];
+      const session = parseStoredSession(row.payload);
+      if (!session || isTerminalTaskStatus(session.status)) {
+        remove.run(String(row.id));
+        retained -= 1;
+      }
+    }
+  }, { transaction: true });
 }
 
-function clearTaskHistory(config) {
-  const directory = getTaskHistoryDir(config);
-  closeDirectoryMetadataCache(directory);
-  fs.rmSync(directory, { recursive: true, force: true });
-  clearCachedDirectory(directory);
+function clearTaskHistory(config = {}) {
+  migrateLegacyTaskHistory(config);
+  withStateDatabase(config, db => db.exec('DELETE FROM task_history'), { transaction: true });
+  removeLegacyHistoryFiles(config);
 }
 
-function clearCachedDirectory(directory) {
-  for (const file of parsedCache.keys()) {
-    if (file.startsWith(directory + path.sep)) parsedCache.delete(file);
-  }
-}
-
-function readCachedSession(file, identity) {
-  const cached = parsedCache.get(file);
-  if (cached?.identity === identity) return cached.session;
-  const parsed = safeReadJson(file);
-  const session = parsed ? normalizeStoredSession(parsed) : null;
-  if (session) {
-    parsedCache.set(file, { identity, session });
-    trimParsedCache();
-  } else {
-    parsedCache.delete(file);
-    if (parsed && typeof parsed === 'object') fs.rmSync(file, { force: true });
-  }
-  return session;
-}
-
-function cachedSessionMetadata(directory) {
-  let cached = directoryMetadataCache.get(directory);
-  if (cached && !cached.dirty && Date.now() - cached.checkedAt < DIRECTORY_METADATA_RESCAN_MS) return orderedMetadata(cached.items.values());
-  const names = sessionFileNames(directory);
-  if (!names) return [];
-  const items = new Map(sessionMetadata(directory, names).map(item => [item.name, item]));
-  if (!cached) {
-    cached = { items, dirty: false, watcher: null, checkedAt: Date.now() };
-    directoryMetadataCache.set(directory, cached);
-    watchSessionDirectory(directory, cached);
-  } else {
-    cached.items = items;
-    cached.dirty = false;
-    cached.checkedAt = Date.now();
-  }
-  return orderedMetadata(items.values());
-}
-
-function orderedMetadata(items) {
-  return [...items].sort((left, right) => {
-    if (left.mtimeNs === right.mtimeNs) return left.name.localeCompare(right.name);
-    return left.mtimeNs > right.mtimeNs ? -1 : 1;
-  });
-}
-
-function watchSessionDirectory(directory, cached) {
+function parseStoredSession(payload) {
   try {
-    const watchDirectory = watchPathFor(directory);
-    cached.watcher = fs.watch(watchDirectory, { persistent: false }, (_event, filename) => {
-      const name = String(filename || '');
-      if (!name || name.endsWith('.tmp') || name.endsWith('.old')) return;
-      cached.dirty = true;
-    });
-    cached.watcher.on('error', () => { cached.dirty = true; });
-  } catch {
-    cached.watcher = null;
-    cached.dirty = true;
-  }
-}
-
-function rememberWrittenSession(directory, target, session) {
-  const metadata = fileMetadata(target, path.basename(target));
-  if (!metadata) {
-    parsedCache.delete(target);
-    const cached = directoryMetadataCache.get(directory);
-    if (cached) cached.dirty = true;
-    return;
-  }
-  parsedCache.set(target, { identity: metadata.identity, session });
-  trimParsedCache();
-  const cached = directoryMetadataCache.get(directory);
-  if (cached) {
-    cached.items.set(metadata.name, metadata);
-    cached.checkedAt = Date.now();
-  }
-}
-
-function closeDirectoryMetadataCache(directory) {
-  const cached = directoryMetadataCache.get(directory);
-  try { cached?.watcher?.close(); } catch {}
-  directoryMetadataCache.delete(directory);
-}
-
-function trimParsedCache() {
-  if (parsedCache.size <= MAX_PARSED_CACHE_ENTRIES) return;
-  const overflow = parsedCache.size - MAX_PARSED_CACHE_ENTRIES;
-  let removed = 0;
-  for (const key of parsedCache.keys()) {
-    parsedCache.delete(key);
-    if (++removed >= overflow) return;
-  }
-}
-
-function fileMetadata(file, name) {
-  try {
-    const stat = fs.statSync(file, { bigint: true });
-    return {
-      file,
-      name,
-      mtimeNs: stat.mtimeNs,
-      size: stat.size,
-      identity: `${stat.mtimeNs}:${stat.size}`
-    };
+    return normalizeStoredSession(JSON.parse(String(payload || '')));
   } catch {
     return null;
   }
 }
 
-function sessionPath(directory, id) {
-  const digest = crypto.createHash('sha256').update(String(id)).digest('hex');
-  return path.join(directory, `${digest}.json`);
+function upsertSession(db, session, updatedAtMs = Date.now()) {
+  const previous = db.prepare('SELECT updated_at_ms FROM task_history WHERE id=?').get(session.id);
+  const stamp = Math.max(Math.floor(Number(updatedAtMs) || Date.now()), Number(previous?.updated_at_ms || 0) + 1);
+  db.prepare(`INSERT INTO task_history(id,updated_at_ms,payload) VALUES(?,?,?)
+    ON CONFLICT(id) DO UPDATE SET updated_at_ms=excluded.updated_at_ms,payload=excluded.payload`)
+    .run(session.id, stamp, JSON.stringify(session));
 }
 
-function safeReadJson(file) {
-  return readJsonFile(file, { fallback: null });
+function migrateLegacyTaskHistory(config = {}) {
+  let migrated = false;
+  withStateDatabase(config, db => {
+    if (stateMetaValue(db, LEGACY_MIGRATION_KEY, '') === '1') return;
+    const directory = getTaskHistoryDir(config);
+    let entries = [];
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const file = path.join(directory, entry.name);
+      try {
+        const source = fs.readFileSync(file, 'utf8');
+        const session = normalizeStoredSession(JSON.parse(source));
+        if (!session) continue;
+        let mtimeMs = Date.now();
+        try { mtimeMs = fs.statSync(file).mtimeMs; } catch {}
+        upsertSession(db, session, mtimeMs);
+      } catch {}
+    }
+    setStateMeta(db, LEGACY_MIGRATION_KEY, '1');
+    migrated = true;
+  }, { transaction: true });
+  if (migrated) removeLegacyHistoryFiles(config);
 }
 
-function resetTaskHistoryCaches() {
-  parsedCache.clear();
-  for (const directory of [...directoryMetadataCache.keys()]) closeDirectoryMetadataCache(directory);
+function removeLegacyHistoryFiles(config = {}) {
+  const directory = getTaskHistoryDir(config);
+  try {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json') || entry.name.endsWith('-policy.json')) continue;
+      try { fs.rmSync(path.join(directory, entry.name), { force: true }); } catch {}
+    }
+    try { fs.rmdirSync(directory); } catch (error) {
+      if (error?.code !== 'ENOTEMPTY' && error?.code !== 'ENOENT') throw error;
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error;
+  }
+  try { fs.rmSync(path.join(getStateDir(config), HISTORY_FORMAT_MARKER), { force: true }); } catch {}
 }
 
-export { MAX_SESSIONS, clearTaskHistory, ensureCurrentHistory, getTaskHistoryDir, listSessions, pruneSessions, readSession, removeSession, resetTaskHistoryCaches, writeSession, writeSessionAsync };
+function resetTaskHistoryCaches() {}
+
+export {
+  MAX_SESSIONS,
+  clearTaskHistory,
+  ensureCurrentHistory,
+  getTaskHistoryDir,
+  listSessions,
+  pruneSessions,
+  readSession,
+  removeSession,
+  resetTaskHistoryCaches,
+  writeSession,
+  writeSessionAsync
+};

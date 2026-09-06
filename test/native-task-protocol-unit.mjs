@@ -12,6 +12,7 @@ import {
   createNativeTask,
   requestNativeTaskInput
 } from '../src/mcp/nativeTaskService.js';
+import { withStateDatabase } from '../src/stateDatabase.js';
 import {
   INVALID_TASKS_CAPABILITY_CODE,
   MCP_PROTOCOL_VERSION,
@@ -185,8 +186,7 @@ try {
     restartPolicy: 'restart_reconcilable',
     recovery: { mode: 'deadline', completeAtMs: Date.now() + 60_000, result: { ok: true } }
   });
-  const corruptFile = path.join(root, 'native-tasks', `${corrupt.taskId}.json`);
-  fs.writeFileSync(corruptFile, '{corrupt', 'utf8');
+  withStateDatabase(config, db => db.prepare('UPDATE native_tasks SET payload=? WHERE task_id=?').run('{corrupt', corrupt.taskId), { transaction: true });
   const corruptResponse = await handle(config, message(14, 'tasks/get', { taskId: corrupt.taskId }));
   assert.equal(corruptResponse.body.error.code, -32603);
   assert.equal(corruptResponse.body.error.message, 'Native task record is corrupt.');
@@ -195,7 +195,7 @@ try {
     retryable: false
   });
   assert.doesNotMatch(JSON.stringify(corruptResponse), /[A-Za-z]:\\|\/Users\/|\/home\//);
-  assert.equal(fs.existsSync(corruptFile), false);
+  assert.equal(withStateDatabase(config, db => Number(db.prepare('SELECT COUNT(*) AS count FROM native_tasks WHERE task_id=?').get(corrupt.taskId)?.count || 0)), 0);
 
   const blockedState = path.join(root, 'blocked-state');
   fs.writeFileSync(blockedState, 'not a directory', 'utf8');

@@ -9,8 +9,9 @@ function git(args, options = {}) {
   return execFileSync(GIT_EXECUTABLE, args, options);
 }
 
-import { ensureSessionStarted, touchSessionPolicy, readSessionPolicy, resolvePolicy, writeSessionPolicy, POLICY_CACHE_RECHECK_MS, SESSION_IDLE_TTL_MS } from "../src/policyResolver.js";
+import { ensureSessionStarted, touchSessionPolicy, readSessionPolicy, resolvePolicy, writeSessionPolicy, SESSION_IDLE_TTL_MS } from "../src/policyResolver.js";
 import { relaiRead, workspaceTidyPlan } from "../src/localRepoBridge.js";
+import { withStateDatabase } from '../src/stateDatabase.js';
 
 function makeRepo() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-auto-session-'));
@@ -25,7 +26,6 @@ function makeRepo() {
   return { root, workspacePath, stateDir: path.join(root, 'state') };
 }
 
-const sessionFile = (stateDir, alias, taskId) => path.join(stateDir, 'sessions', `${encodeURIComponent(alias)}--${encodeURIComponent(taskId)}-policy.json`);
 
 // 1. ensureSessionStarted creates a session and captures the pre-write baseline.
 {
@@ -67,12 +67,12 @@ const sessionFile = (stateDir, alias, taskId) => path.join(stateDir, 'sessions',
   const config = { stateDir };
   const taskId = 'task-idempotent';
   await ensureSessionStarted(config, 'ws', workspacePath, { taskId });
-  const first = JSON.parse(fs.readFileSync(sessionFile(stateDir, 'ws', taskId), 'utf8'));
+  const first = readSessionPolicy(config, 'ws', taskId);
   // New file appears AFTER the session started — it must NOT enter the baseline.
   fs.writeFileSync(path.join(workspacePath, 'session-made.txt'), 'agent file\n');
   const startedAgain = await ensureSessionStarted(config, 'ws', workspacePath, { taskId });
   assert.equal(startedAgain, false, 'second call must not start a new session');
-  const second = JSON.parse(fs.readFileSync(sessionFile(stateDir, 'ws', taskId), 'utf8'));
+  const second = readSessionPolicy(config, 'ws', taskId);
   assert.equal(second.createdAt, first.createdAt, 'createdAt must be preserved');
   assert.ok(!(second.baselineDirty || []).includes('session-made.txt'), 'post-session file must not enter baseline');
   fs.rmSync(root, { recursive: true, force: true });
@@ -85,12 +85,12 @@ const sessionFile = (stateDir, alias, taskId) => path.join(stateDir, 'sessions',
   const config = { stateDir };
   const taskId = 'task-expired';
   await writeSessionPolicy(config, 'ws', { workspaceRoot: workspacePath, taskId });
-  const file = sessionFile(stateDir, 'ws', taskId);
-  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  data.updatedAt = new Date(Date.now() - SESSION_IDLE_TTL_MS - 1000).toISOString();
-  fs.writeFileSync(file, JSON.stringify(data));
-  await new Promise(resolve => setTimeout(resolve, POLICY_CACHE_RECHECK_MS + 20));
-  assert.equal(readSessionPolicy(config, 'ws', taskId), null, 'stale session must read as expired after the bounded external-file cache window');
+  const data = readSessionPolicy(config, 'ws', taskId);
+  const expiredAt = Date.now() - SESSION_IDLE_TTL_MS - 1000;
+  data.updatedAt = new Date(expiredAt).toISOString();
+  withStateDatabase(config, db => db.prepare('UPDATE session_policies SET updated_at_ms=?,payload=? WHERE workspace=? AND task_id=?')
+    .run(expiredAt, JSON.stringify(data), 'ws', taskId), { transaction: true });
+  assert.equal(readSessionPolicy(config, 'ws', taskId), null, 'stale SQLite session must read as expired immediately');
   const restarted = await ensureSessionStarted(config, 'ws', workspacePath, { taskId });
   assert.equal(restarted, true, 'expired session must be restartable');
   fs.rmSync(root, { recursive: true, force: true });
@@ -103,13 +103,14 @@ const sessionFile = (stateDir, alias, taskId) => path.join(stateDir, 'sessions',
   fs.writeFileSync(path.join(workspacePath, 'preexisting.txt'), 'user file\n');
   const taskId = 'task-touch';
   await writeSessionPolicy(config, 'ws', { workspaceRoot: workspacePath, taskId });
-  const before = JSON.parse(fs.readFileSync(sessionFile(stateDir, 'ws', taskId), 'utf8'));
-  before.updatedAt = new Date(Date.now() - 60_000).toISOString();
-  fs.writeFileSync(sessionFile(stateDir, 'ws', taskId), JSON.stringify(before));
-  await new Promise(resolve => setTimeout(resolve, POLICY_CACHE_RECHECK_MS + 20));
+  const before = readSessionPolicy(config, 'ws', taskId);
+  const oldUpdatedAtMs = Date.now() - 60_000;
+  before.updatedAt = new Date(oldUpdatedAtMs).toISOString();
+  withStateDatabase(config, db => db.prepare('UPDATE session_policies SET updated_at_ms=?,payload=? WHERE workspace=? AND task_id=?')
+    .run(oldUpdatedAtMs, JSON.stringify(before), 'ws', taskId), { transaction: true });
   const ok = touchSessionPolicy(config, 'ws', taskId);
   assert.equal(ok, true);
-  const after = JSON.parse(fs.readFileSync(sessionFile(stateDir, 'ws', taskId), 'utf8'));
+  const after = readSessionPolicy(config, 'ws', taskId);
   assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), 'updatedAt must advance');
   assert.deepEqual(after.baselineDirty, before.baselineDirty, 'baseline must be untouched');
   fs.rmSync(root, { recursive: true, force: true });

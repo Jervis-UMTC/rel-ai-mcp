@@ -1,24 +1,24 @@
 import { getCurrentToolActivityContext } from './toolActivity.js';
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
 import { runProcess } from './process.js';
 import { gitStatusArgs, parseGitStatus } from "./repo/gitStatus.js";
-import { writeJsonAtomic } from './durableState.js';
+import { getStateDir } from './statePaths.js';
+import {
+  setStateMeta,
+  stateDatabasePath,
+  stateMetaValue,
+  withStateDatabase,
+} from './stateDatabase.js';
 import { DEFAULT_TASK_STALE_MS } from './taskTiming.js';
 
 const SESSION_IDLE_TTL_MS = DEFAULT_TASK_STALE_MS;
 const SESSION_TOUCH_PERSIST_INTERVAL_MS = 60 * 1000;
-const POLICY_CACHE_RECHECK_MS = 250;
-const policyCache = new Map();
+const LEGACY_SESSION_POLICY_MIGRATION_KEY = 'session_policies_legacy_migrated_v1';
+const migratedSessionDatabases = new Set();
 
 function sessionsDir(config) {
-  const stateDir = config.stateDir || path.join(os.homedir(), '.rel-ai-mcp');
-  return path.join(stateDir, 'sessions');
-}
-
-function taskSessionFilePath(config, alias, taskId) {
-  return path.join(sessionsDir(config), `${encodeURIComponent(alias)}--${encodeURIComponent(taskId)}-policy.json`);
+  return path.join(getStateDir(config), 'sessions');
 }
 
 function currentTaskId() {
@@ -39,91 +39,113 @@ function sessionLastActivity(parsed) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function readPolicyFile(filePath, alias, expectedTaskId = '') {
-  try {
-    const now = Date.now();
-    const cached = policyCache.get(filePath);
-    if (cached && now - cached.checkedAt < POLICY_CACHE_RECHECK_MS) {
-      if (!validPolicy(cached.policy, alias, expectedTaskId)) return null;
-      if (isExpiredPolicy(cached.policy)) {
-        policyCache.delete(filePath);
-        return null;
-      }
-      return structuredClone(cached.policy);
-    }
-    const revision = policyFileRevision(filePath);
-    if (cached && cached.fileRevision === revision) {
-      cached.checkedAt = now;
-      if (!validPolicy(cached.policy, alias, expectedTaskId)) return null;
-      if (isExpiredPolicy(cached.policy)) {
-        policyCache.delete(filePath);
-        return null;
-      }
-      return structuredClone(cached.policy);
-    }
-    if (cached) policyCache.delete(filePath);
-    if (!fs.existsSync(filePath)) return null;
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    if (!validPolicy(parsed, alias, expectedTaskId) || isExpiredPolicy(parsed)) return null;
-    cachePolicy(filePath, parsed, sessionLastActivity(parsed) || Date.now());
-    return structuredClone(parsed);
-  } catch (error) {
-    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] session policy read:', error);
-    return null;
-  }
-}
-
 function validPolicy(parsed, alias, expectedTaskId = '') {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
   if (parsed.workspace !== alias) return false;
   return !expectedTaskId || String(parsed.taskId || '') === expectedTaskId;
 }
 
-function isExpiredPolicy(parsed) {
+function isExpiredPolicy(parsed, now = Date.now()) {
   const last = sessionLastActivity(parsed);
-  return last !== null && Date.now() - last > SESSION_IDLE_TTL_MS;
+  return last !== null && now - last > SESSION_IDLE_TTL_MS;
 }
 
-function cachePolicy(filePath, policy, lastPersistedAt = Date.now(), fileRevision = policyFileRevision(filePath)) {
-  policyCache.set(filePath, { policy: structuredClone(policy), lastPersistedAt, fileRevision, checkedAt: Date.now() });
-}
-
-function policyFileRevision(filePath) {
+function migrateLegacySessionPolicies(config = {}) {
+  const databaseKey = stateDatabasePath(config);
+  if (migratedSessionDatabases.has(databaseKey)) return;
+  const directory = sessionsDir(config);
+  withStateDatabase(config, db => {
+    if (stateMetaValue(db, LEGACY_SESSION_POLICY_MIGRATION_KEY, '') === '1') return;
+    let names = [];
+    try {
+      names = fs.readdirSync(directory);
+    } catch (error) {
+      if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error;
+    }
+    for (const name of names) {
+      if (!name.endsWith('-policy.json')) continue;
+      try {
+        const parsed = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'));
+        const workspace = String(parsed?.workspace || '').trim();
+        const taskId = String(parsed?.taskId || '').trim();
+        if (!workspace || !taskId || !validPolicy(parsed, workspace, taskId)) continue;
+        const updatedAtMs = sessionLastActivity(parsed) || Date.now();
+        db.prepare(`INSERT INTO session_policies(workspace,task_id,updated_at_ms,payload) VALUES(?,?,?,?)
+          ON CONFLICT(workspace,task_id) DO UPDATE SET updated_at_ms=excluded.updated_at_ms,payload=excluded.payload`)
+          .run(workspace, taskId, updatedAtMs, JSON.stringify(parsed));
+      } catch (error) {
+        if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] legacy session policy migration:', error);
+      }
+    }
+    setStateMeta(db, LEGACY_SESSION_POLICY_MIGRATION_KEY, '1');
+  }, { transaction: true, timeoutMs: 0 });
   try {
-    const stat = fs.statSync(filePath, { bigint: true });
-    return `${stat.size}:${stat.mtimeNs}`;
+    for (const name of fs.readdirSync(directory)) {
+      if (name.endsWith('-policy.json')) fs.rmSync(path.join(directory, name), { force: true });
+    }
+    try { fs.rmdirSync(directory); } catch (error) {
+      if (error?.code !== 'ENOTEMPTY' && error?.code !== 'ENOENT') throw error;
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error;
+  }
+  migratedSessionDatabases.add(databaseKey);
+}
+
+function parseStoredPolicy(payload, alias, taskId = '') {
+  try {
+    const parsed = JSON.parse(String(payload || ''));
+    return validPolicy(parsed, alias, taskId) ? parsed : null;
   } catch {
-    return '';
+    return null;
   }
 }
 
 function readSessionPolicies(config, alias) {
-  const directory = sessionsDir(config);
-  const policies = [];
+  migrateLegacySessionPolicies(config);
   try {
-    if (!fs.existsSync(directory)) return policies;
-    const prefix = `${encodeURIComponent(alias)}--`;
-    for (const name of fs.readdirSync(directory)) {
-      if (!name.startsWith(prefix) || !name.endsWith('-policy.json')) continue;
-      const parsed = readPolicyFile(path.join(directory, name), alias);
-      if (parsed) policies.push(parsed);
-    }
+    return withStateDatabase(config, db => {
+      const rows = db.prepare('SELECT task_id,payload FROM session_policies WHERE workspace=? ORDER BY updated_at_ms DESC').all(alias);
+      const policies = [];
+      for (const row of rows) {
+        const taskId = String(row.task_id || '');
+        const parsed = parseStoredPolicy(row.payload, alias, taskId);
+        if (!parsed || isExpiredPolicy(parsed)) {
+          db.prepare('DELETE FROM session_policies WHERE workspace=? AND task_id=?').run(alias, taskId);
+          continue;
+        }
+        policies.push(parsed);
+      }
+      return policies;
+    }, { transaction: true, timeoutMs: 0 });
   } catch (error) {
     if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] session policy list:', error);
+    return [];
   }
-  const byTask = new Map();
-  for (const policy of policies) {
-    const key = String(policy.taskId || '').trim();
-    if (key) byTask.set(key, policy);
-  }
-  return [...byTask.values()];
 }
 
 function readSessionPolicy(config, alias, taskId = '') {
   const resolved = resolvedTaskId(taskId);
-  if (resolved) return readPolicyFile(taskSessionFilePath(config, alias, resolved), alias, resolved);
-  const policies = readSessionPolicies(config, alias);
-  return policies.length === 1 ? policies[0] : null;
+  if (!resolved) {
+    const policies = readSessionPolicies(config, alias);
+    return policies.length === 1 ? policies[0] : null;
+  }
+  migrateLegacySessionPolicies(config);
+  try {
+    return withStateDatabase(config, db => {
+      const row = db.prepare('SELECT payload FROM session_policies WHERE workspace=? AND task_id=?').get(alias, resolved);
+      if (!row) return null;
+      const parsed = parseStoredPolicy(row.payload, alias, resolved);
+      if (!parsed || isExpiredPolicy(parsed)) {
+        db.prepare('DELETE FROM session_policies WHERE workspace=? AND task_id=?').run(alias, resolved);
+        return null;
+      }
+      return parsed;
+    }, { transaction: true, timeoutMs: 0 });
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] session policy read:', error);
+    return null;
+  }
 }
 
 async function captureBaselineState(workspaceRoot) {
@@ -154,10 +176,9 @@ async function captureBaselineDirty(workspaceRoot) {
 async function writeSessionPolicy(config, alias, { taskHint, workspaceRoot, taskId } = {}) {
   const resolved = String(taskId || currentTaskId() || '').trim();
   if (!resolved) throw new Error('Session policy requires a taskId.');
-  const filePath = taskSessionFilePath(config, alias, resolved);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const baseline = await captureBaselineState(workspaceRoot);
-  const now = new Date().toISOString();
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
   const data = {
     workspace: alias,
     createdAt: now,
@@ -168,37 +189,38 @@ async function writeSessionPolicy(config, alias, { taskHint, workspaceRoot, task
     taskId: resolved,
     ...(taskHint ? { taskHint } : {}),
   };
-  persistPolicy(filePath, data);
-  cachePolicy(filePath, data);
+  migrateLegacySessionPolicies(config);
+  withStateDatabase(config, db => {
+    db.prepare(`INSERT INTO session_policies(workspace,task_id,updated_at_ms,payload) VALUES(?,?,?,?)
+      ON CONFLICT(workspace,task_id) DO UPDATE SET updated_at_ms=excluded.updated_at_ms,payload=excluded.payload`)
+      .run(alias, resolved, nowMs, JSON.stringify(data));
+  }, { transaction: true, timeoutMs: 0 });
 }
 
 function touchSessionPolicy(config, alias, taskId = '') {
   const resolved = resolvedTaskId(taskId);
   if (!resolved) return false;
-  const filePath = taskSessionFilePath(config, alias, resolved);
-  for (const candidate of [filePath]) {
-    try {
-      const parsed = readPolicyFile(candidate, alias, resolved);
-      if (!parsed) continue;
-      const now = Date.now();
-      parsed.updatedAt = new Date(now).toISOString();
-      const cached = policyCache.get(candidate);
-      const lastPersistedAt = cached?.lastPersistedAt || 0;
-      cachePolicy(candidate, parsed, lastPersistedAt, cached?.fileRevision || policyFileRevision(candidate));
-      if (now - lastPersistedAt >= SESSION_TOUCH_PERSIST_INTERVAL_MS) {
-        persistPolicy(candidate, parsed);
-        cachePolicy(candidate, parsed, now);
+  migrateLegacySessionPolicies(config);
+  try {
+    return withStateDatabase(config, db => {
+      const row = db.prepare('SELECT updated_at_ms,payload FROM session_policies WHERE workspace=? AND task_id=?').get(alias, resolved);
+      if (!row) return false;
+      const parsed = parseStoredPolicy(row.payload, alias, resolved);
+      if (!parsed || isExpiredPolicy(parsed)) {
+        db.prepare('DELETE FROM session_policies WHERE workspace=? AND task_id=?').run(alias, resolved);
+        return false;
       }
+      const now = Date.now();
+      if (now - Number(row.updated_at_ms || 0) < SESSION_TOUCH_PERSIST_INTERVAL_MS) return true;
+      parsed.updatedAt = new Date(now).toISOString();
+      db.prepare('UPDATE session_policies SET updated_at_ms=?,payload=? WHERE workspace=? AND task_id=?')
+        .run(now, JSON.stringify(parsed), alias, resolved);
       return true;
-    } catch (error) {
-      if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] session policy touch:', error);
-    }
+    }, { transaction: true, timeoutMs: 0 });
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] session policy touch:', error);
+    return false;
   }
-  return false;
-}
-
-function persistPolicy(filePath, policy) {
-  writeJsonAtomic(filePath, policy, { mode: 0o600, spacing: 2 });
 }
 
 async function ensureSessionStarted(config, alias, workspaceRoot, options = {}) {
@@ -217,12 +239,13 @@ async function ensureSessionStarted(config, alias, workspaceRoot, options = {}) 
 function clearSessionPolicy(config, alias, taskId = '') {
   const resolved = resolvedTaskId(taskId);
   if (!resolved) return { cleared: false };
-  const filePath = taskSessionFilePath(config, alias, resolved);
+  migrateLegacySessionPolicies(config);
   try {
-    if (!fs.existsSync(filePath)) return { cleared: false };
-    fs.unlinkSync(filePath);
-    policyCache.delete(filePath);
-    return { cleared: true };
+    const cleared = withStateDatabase(config, db => {
+      const result = db.prepare('DELETE FROM session_policies WHERE workspace=? AND task_id=?').run(alias, resolved);
+      return Number(result.changes || 0) > 0;
+    }, { transaction: true, timeoutMs: 0 });
+    return { cleared };
   } catch (error) {
     if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] session policy clear:', error);
     return { cleared: false };
@@ -243,7 +266,7 @@ function resolvePolicy(workspace, config) {
       baselineDirty: Array.isArray(session.baselineDirty) ? session.baselineDirty : [],
       baselineCaptured: session.baselineCaptured === true,
       baselineCaptureError: session.baselineCaptureError || null,
-      source: 'task_session_file'
+      source: 'task_session_store'
     };
   }
   const activePolicies = taskId ? [] : readSessionPolicies(config, alias);
@@ -262,4 +285,4 @@ function resolvePolicy(workspace, config) {
   };
 }
 
-export { resolvePolicy, writeSessionPolicy, touchSessionPolicy, ensureSessionStarted, clearSessionPolicy, readSessionPolicy, captureBaselineDirty, POLICY_CACHE_RECHECK_MS, SESSION_IDLE_TTL_MS, SESSION_TOUCH_PERSIST_INTERVAL_MS };
+export { resolvePolicy, writeSessionPolicy, touchSessionPolicy, ensureSessionStarted, clearSessionPolicy, readSessionPolicy, captureBaselineDirty, SESSION_IDLE_TTL_MS, SESSION_TOUCH_PERSIST_INTERVAL_MS };

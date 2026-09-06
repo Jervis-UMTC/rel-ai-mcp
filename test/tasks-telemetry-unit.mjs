@@ -34,7 +34,7 @@ try {
   assert.equal(completed.status, 'completed');
   assert.deepEqual(getNativeTask(config, created.taskId, { principal: 'client-a' }).result, { ok: true });
   assert.equal(fs.existsSync(path.join(root, 'operation-tasks')), false);
-  assert.equal(fs.existsSync(path.join(root, 'native-tasks')), true);
+  assert.equal(fs.existsSync(path.join(root, 'native-tasks')), false, 'native tasks must not create a JSON/lock directory');
 
   const attributes = sanitizeAttributes({
     'relai.workspace': 'app',

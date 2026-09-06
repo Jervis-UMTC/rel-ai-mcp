@@ -9,7 +9,8 @@ function git(args, options = {}) {
   return spawnSync(GIT_EXECUTABLE, args, options);
 }
 
-import { writeSessionPolicy, resolvePolicy, captureBaselineDirty, POLICY_CACHE_RECHECK_MS } from "../src/policyResolver.js";
+import { writeSessionPolicy, resolvePolicy, captureBaselineDirty, readSessionPolicy } from "../src/policyResolver.js";
+import { withStateDatabase } from '../src/stateDatabase.js';
 import { recordTaskIntegrityEvent } from "../src/taskIntegrity.js";
 import { buildWorkspaceStates } from "../src/workspaceState.js";
 
@@ -77,13 +78,12 @@ assert.deepEqual(await captureBaselineDirty(''), []);
   // Seed session file with baseline
   const taskId = 'task-ownership';
   await writeSessionPolicy(config, 'myapp', { taskHint: 'x', taskId });
-  // Manually inject baselineDirty into the task-scoped session file.
-  const sessionFile = path.join(stateDir, 'sessions', `myapp--${taskId}-policy.json`);
-  const data = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+  // Manually inject baselineDirty into the task-scoped SQLite session row.
+  const data = readSessionPolicy(config, 'myapp', taskId);
   data.baselineDirty = ['old/generated.cmake', 'old/registrant.swift'];
   data.baselineCaptured = true;
-  fs.writeFileSync(sessionFile, JSON.stringify(data));
-  await new Promise(resolve => setTimeout(resolve, POLICY_CACHE_RECHECK_MS + 20));
+  withStateDatabase(config, db => db.prepare('UPDATE session_policies SET updated_at_ms=?,payload=? WHERE workspace=? AND task_id=?')
+    .run(Date.now() + 1, JSON.stringify(data), 'myapp', taskId), { transaction: true });
 
   const statusOutput = ' M old/generated.cmake\0 M old/registrant.swift\0 M lib/new_edit.dart\0?? new/untracked.dart\0';
   const workspace = { alias: 'myapp' };
@@ -120,12 +120,11 @@ assert.deepEqual(await captureBaselineDirty(''), []);
   const config = { stateDir };
   const taskId = 'task-rename';
   await writeSessionPolicy(config, 'myapp', { taskId });
-  const sessionFile = path.join(stateDir, 'sessions', `myapp--${taskId}-policy.json`);
-  const data = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+  const data = readSessionPolicy(config, 'myapp', taskId);
   data.baselineDirty = ['lib/old/zone_validator.dart'];
   data.baselineCaptured = true;
-  fs.writeFileSync(sessionFile, JSON.stringify(data));
-  await new Promise(resolve => setTimeout(resolve, POLICY_CACHE_RECHECK_MS + 20));
+  withStateDatabase(config, db => db.prepare('UPDATE session_policies SET updated_at_ms=?,payload=? WHERE workspace=? AND task_id=?')
+    .run(Date.now() + 1, JSON.stringify(data), 'myapp', taskId), { transaction: true });
   const status = 'R  lib/new/schedule_validator.dart\0lib/old/zone_validator.dart\0';
   const { sessionChanged, baselineChanged } = classifyStatusOwnership({ alias: 'myapp' }, config, status);
   // Destination path is what shows in current worktree, so classify on destination

@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { LOCAL_ANALYTICS_RETENTION_DAYS, clearLocalAnalytics, flushLocalAnalytics, pruneLocalAnalytics, recordLocalToolOutcome, readLocalUsageSnapshot, readLocalUsageSnapshotAsync } from '../src/localAnalytics.js';
 import { failureCategoryFromCode } from '../src/analyticsFailureCategory.js';
+import { stateDatabasePath, withStateDatabase } from '../src/stateDatabase.js';
 
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-local-analytics-'));
 const config = { stateDir };
@@ -40,34 +41,31 @@ try {
   assert.deepEqual(snapshot.workspaceFailureCategorySeries, [{ hour: '2026-08-08T11', deviceId: 'local-device', workspace: 'repo', workspaceKey: 'local-device::repo', category: 'policy', failures: 1 }]);
 
   await flushLocalAnalytics(config);
-  const analyticsFile = path.join(stateDir, 'analytics', 'local', '2026-08.json');
-  const persisted = fs.readFileSync(analyticsFile, 'utf8');
+  assert.equal(fs.existsSync(stateDatabasePath(config)), true, 'local analytics must use the shared SQLite state database');
+  assert.equal(fs.existsSync(path.join(stateDir, 'analytics', 'local', '2026-08.json')), false, 'canonical analytics must not create monthly JSON files');
+  const persisted = withStateDatabase(config, db => String(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08')?.payload || ''));
   for (const secret of ['SECRET_PROMPT', 'SECRET_PATH', 'SECRET_RESULT', 'SECRET_COMMAND', 'SECRET_ERROR_MESSAGE', 'SENSITIVE_PATH_RESTRICTED']) assert.equal(persisted.includes(secret), false, `local analytics must not persist ${secret}`);
 
   const external = JSON.parse(persisted);
   external.totals.requests = 9;
   external.totals.toolCalls = 9;
   external.totals.successes = 8;
-  fs.writeFileSync(analyticsFile, `${JSON.stringify(external)}\n`);
-  assert.equal(readLocalUsageSnapshot(config, '2026-08').totals.toolCalls, 3, 'the runtime aggregate path may retain its process-local write cache');
-  const freshSnapshot = await readLocalUsageSnapshotAsync(config, '2026-08');
-  assert.equal(freshSnapshot.totals.toolCalls, 9, 'desktop analytics reads must bypass another process cache and observe persisted state');
+  withStateDatabase(config, db => db.prepare('UPDATE analytics_months SET updated_at_ms=?,payload=? WHERE month=?').run(Date.now() + 1, JSON.stringify(external), '2026-08'), { transaction: true });
+  assert.equal(readLocalUsageSnapshot(config, '2026-08').totals.toolCalls, 9, 'SQLite analytics reads must observe another process durable update immediately');
+  assert.equal((await readLocalUsageSnapshotAsync(config, '2026-08')).totals.toolCalls, 9);
 
-  const oldAnalyticsFile = path.join(stateDir, 'analytics', 'local', '2025-01.json');
   recordLocalToolOutcome(config, { tool: 'relai_read', workspace: 'repo', ok: true, durationMs: 1, at: '2025-01-15T00:00:00Z' });
-  await flushLocalAnalytics(config);
-  assert.equal(fs.existsSync(oldAnalyticsFile), true, 'old analytics fixture must exercise a persisted in-memory write state');
   const pruned = await pruneLocalAnalytics(config, { now: new Date('2026-09-04T00:00:00Z') });
-  assert.equal(pruned.removedFiles, 1, 'analytics retention must remove monthly files older than the supported history window');
-  assert.equal(fs.existsSync(oldAnalyticsFile), false);
-  assert.equal(fs.existsSync(analyticsFile), true, 'retention must preserve analytics inside the supported history window');
+  assert.equal(pruned.removedFiles, 1, 'analytics retention must remove SQLite monthly rows older than the supported history window');
+  assert.equal(readLocalUsageSnapshot(config, '2025-01').totals.toolCalls, 0);
+  assert.equal(readLocalUsageSnapshot(config, '2026-08').totals.toolCalls, 9, 'retention must preserve analytics inside the supported history window');
 
   const cleared = await clearLocalAnalytics(config);
   assert.equal(cleared.ok, true);
   assert.ok(cleared.removedFiles >= 1);
-  assert.equal(readLocalUsageSnapshot(config, '2026-08').totals.toolCalls, 0, 'clearing analytics must invalidate process-local caches as well as files');
+  assert.equal(readLocalUsageSnapshot(config, '2026-08').totals.toolCalls, 0, 'clearing analytics must clear the SQLite analytics rows');
 } finally {
   fs.rmSync(stateDir, { recursive: true, force: true });
 }
 
-console.log('Local aggregate analytics storage passed.');
+console.log('Local aggregate SQLite analytics storage passed.');

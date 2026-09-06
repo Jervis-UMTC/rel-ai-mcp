@@ -27,6 +27,7 @@ import {
   updateNativeTaskRecovery
 } from '../src/mcp/nativeTaskService.js';
 import { createNativeToolTask } from '../src/mcp/nativeToolTasks.js';
+import { openStateDatabase, stateDatabasePath, withStateDatabase } from '../src/stateDatabase.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-native-task-service-'));
 const config = { stateDir: root };
@@ -131,16 +132,17 @@ try {
   const owned = activeTask('ownership-test', { logicalTaskId: 'logical-a' });
   assert.match(owned.taskId, /^task_[A-Za-z0-9_-]{32,160}$/);
 
-  const contentionLock = path.join(root, 'native-tasks', `${owned.taskId}.lock`);
-  fs.writeFileSync(contentionLock, 'other-runtime\n', 'utf8');
+  const contentionDb = openStateDatabase(config, { timeoutMs: 0 });
+  contentionDb.exec('BEGIN IMMEDIATE');
   const contentionStartedAt = Date.now();
   assert.throws(
     () => getNativeTask(config, owned.taskId, { principal: owner }),
     error => error instanceof NativeTaskStoreError && error.reason === 'lock_busy',
-    'fresh native-task lock contention must fail fast rather than block the MCP event loop'
+    'SQLite writer contention must fail fast rather than block the MCP event loop'
   );
-  assert.ok(Date.now() - contentionStartedAt < 1000, 'native-task lock contention must return in under one second');
-  fs.rmSync(contentionLock, { force: true });
+  assert.ok(Date.now() - contentionStartedAt < 1000, 'SQLite writer contention must return in under one second');
+  contentionDb.exec('ROLLBACK');
+  contentionDb.close();
   assert.equal(getNativeTask(config, owned.taskId, { principal: sameOwner }).status, 'working');
   const beforeNoopUpdate = getNativeTaskRecord(config, owned.taskId, { principal: owner });
   updateNativeTask(config, owned.taskId, { status: 'working' }, { principal: owner });
@@ -401,8 +403,9 @@ try {
   );
   assert.equal(oversizedState.status, 'failed');
   assert.equal(oversizedState.error.data.reason, 'result_too_large');
-  const oversizedFile = path.join(root, 'native-tasks', `${oversized.taskId}.json`);
-  assert.ok(fs.statSync(oversizedFile).size < 100_000, 'oversized results must not become oversized task records');
+  const oversizedPayload = withStateDatabase(config, db => String(db.prepare('SELECT payload FROM native_tasks WHERE task_id=?').get(oversized.taskId)?.payload || ''));
+  assert.ok(Buffer.byteLength(oversizedPayload) < 100_000, 'oversized results must not become oversized task records');
+  assert.equal(fs.existsSync(path.join(root, 'native-tasks')), false, 'native tasks must not create canonical JSON or lock-file directories');
 
   const expiring = createNativeTask(config, {
     principal: 'client-a',
@@ -463,19 +466,13 @@ try {
   const atomic = createNativeTask(config, {
     principal: 'client-a',
     method: 'tools/call',
-    name: 'atomic-write-interruption-test',
+    name: 'atomic-sqlite-write-test',
     restartPolicy: 'restart_reconcilable',
     recovery: { mode: 'deadline', completeAtMs: Date.now() + 60_000, result: { ok: true } }
   });
-  const atomicFile = path.join(root, 'native-tasks', `${atomic.taskId}.json`);
-  const staleTemporary = `${atomicFile}.999999.interrupted.tmp`;
-  fs.writeFileSync(staleTemporary, '{partial', 'utf8');
-  fs.utimesSync(staleTemporary, new Date(0), new Date(0));
   assert.equal(getNativeTask(config, atomic.taskId, { principal: 'client-a' }).status, 'working');
-  const artifactPrune = pruneNativeTasks(config);
-  assert.ok(artifactPrune.artifactsRemoved >= 1);
-  assert.equal(fs.existsSync(staleTemporary), false);
-  assert.equal(fs.existsSync(atomicFile), true, 'a partial temporary write must not replace the durable record');
+  assert.equal(pruneNativeTasks(config).artifactsRemoved, 0, 'SQLite persistence has no stale native-task temp or lock artifacts to prune');
+  assert.equal(fs.existsSync(stateDatabasePath(config)), true);
 
   const pruneTarget = createNativeTask(config, {
     principal: 'client-a',
@@ -500,8 +497,7 @@ try {
     restartPolicy: 'restart_reconcilable',
     recovery: { mode: 'deadline', completeAtMs: 60_000, result: { ok: true } }
   });
-  const opportunisticExpiredFile = path.join(opportunisticConfig.stateDir, 'native-tasks', `${opportunisticExpired.taskId}.json`);
-  assert.equal(fs.existsSync(opportunisticExpiredFile), true);
+  assert.equal(withStateDatabase(opportunisticConfig, db => Number(db.prepare('SELECT COUNT(*) AS count FROM native_tasks WHERE task_id=?').get(opportunisticExpired.taskId)?.count || 0)), 1);
   createNativeTask(opportunisticConfig, {
     principal: 'client-a',
     method: 'tools/call',
@@ -510,8 +506,8 @@ try {
     restartPolicy: 'restart_reconcilable',
     recovery: { mode: 'deadline', completeAtMs: 10_000_000, result: { ok: true } }
   });
-  assert.equal(fs.existsSync(opportunisticExpiredFile), false,
-    'creating native tasks after the prune interval must opportunistically remove expired records');
+  assert.equal(withStateDatabase(opportunisticConfig, db => Number(db.prepare('SELECT COUNT(*) AS count FROM native_tasks WHERE task_id=?').get(opportunisticExpired.taskId)?.count || 0)), 0,
+    'creating native tasks after the prune interval must opportunistically remove expired SQLite records');
 
   const corrupt = createNativeTask(config, {
     principal: 'client-a',
@@ -520,8 +516,7 @@ try {
     restartPolicy: 'restart_reconcilable',
     recovery: { mode: 'deadline', completeAtMs: Date.now() + 60_000, result: { ok: true } }
   });
-  const corruptFile = path.join(root, 'native-tasks', `${corrupt.taskId}.json`);
-  fs.writeFileSync(corruptFile, '{corrupt', 'utf8');
+  withStateDatabase(config, db => db.prepare('UPDATE native_tasks SET payload=? WHERE task_id=?').run('{corrupt', corrupt.taskId), { transaction: true });
   assert.throws(
     () => getNativeTask(config, corrupt.taskId, { principal: 'client-a' }),
     error => error instanceof NativeTaskStoreError
@@ -529,9 +524,8 @@ try {
       && error.retryable === false
       && !error.message.includes(root)
   );
-  assert.equal(fs.existsSync(corruptFile), false, 'a corrupt record must leave the active task directory');
-  const quarantineDir = path.join(root, 'native-tasks-quarantine');
-  assert.ok(fs.readdirSync(quarantineDir).some(name => name.startsWith(`${corrupt.taskId}.`)));
+  assert.equal(withStateDatabase(config, db => Number(db.prepare('SELECT COUNT(*) AS count FROM native_tasks WHERE task_id=?').get(corrupt.taskId)?.count || 0)), 0, 'a corrupt record must leave the active task table');
+  assert.equal(withStateDatabase(config, db => Number(db.prepare('SELECT COUNT(*) AS count FROM native_task_quarantine WHERE task_id=?').get(corrupt.taskId)?.count || 0)), 1, 'corrupt native tasks must move to SQLite quarantine');
 
   const pruneCorrupt = createNativeTask(config, {
     principal: 'client-a',
@@ -540,7 +534,7 @@ try {
     restartPolicy: 'restart_reconcilable',
     recovery: { mode: 'deadline', completeAtMs: Date.now() + 60_000, result: { ok: true } }
   });
-  fs.writeFileSync(path.join(root, 'native-tasks', `${pruneCorrupt.taskId}.json`), '{}', 'utf8');
+  withStateDatabase(config, db => db.prepare('UPDATE native_tasks SET payload=? WHERE task_id=?').run('{}', pruneCorrupt.taskId), { transaction: true });
   const corruptionPrune = pruneNativeTasks(config);
   assert.equal(corruptionPrune.quarantined, 1);
 
@@ -552,19 +546,16 @@ try {
     restartPolicy: 'restart_reconcilable',
     recovery: { mode: 'deadline', completeAtMs: Date.now() + 60_000, result: { ok: true } }
   });
-  const quarantineTargetFile = path.join(quarantineConfig.stateDir, 'native-tasks', `${quarantineTarget.taskId}.json`);
-  fs.writeFileSync(quarantineTargetFile, '{corrupt', 'utf8');
+  withStateDatabase(quarantineConfig, db => db.prepare('UPDATE native_tasks SET payload=? WHERE task_id=?').run('{corrupt', quarantineTarget.taskId), { transaction: true });
   assert.throws(
     () => getNativeTask(quarantineConfig, quarantineTarget.taskId, { principal: 'client-a' }),
     error => error instanceof NativeTaskStoreError && error.reason === 'record_corrupt'
   );
-  const retentionDirectory = path.join(quarantineConfig.stateDir, 'native-tasks-quarantine');
-  const retentionFile = path.join(retentionDirectory, fs.readdirSync(retentionDirectory)[0]);
-  fs.utimesSync(retentionFile, new Date(0), new Date(0));
+  withStateDatabase(quarantineConfig, db => db.prepare('UPDATE native_task_quarantine SET quarantined_at_ms=0 WHERE task_id=?').run(quarantineTarget.taskId), { transaction: true });
   const retentionPrune = pruneNativeTasks(quarantineConfig, { now: 8 * 24 * 60 * 60 * 1000 });
   assert.equal(retentionPrune.quarantineRemoved, 1,
-    'native task pruning must remove quarantine artifacts older than the retention window');
-  assert.equal(fs.existsSync(retentionFile), false);
+    'native task pruning must remove SQLite quarantine rows older than the retention window');
+  assert.equal(withStateDatabase(quarantineConfig, db => Number(db.prepare('SELECT COUNT(*) AS count FROM native_task_quarantine WHERE task_id=?').get(quarantineTarget.taskId)?.count || 0)), 0);
 
   const blockedState = path.join(root, 'blocked-state');
   fs.writeFileSync(blockedState, 'not a directory', 'utf8');

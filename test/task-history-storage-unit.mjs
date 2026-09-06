@@ -1,37 +1,29 @@
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { listSessions, readSession, resetTaskHistoryCaches, writeSession } from "../src/taskHistoryStorage.js";
-import { watchPathFor } from '../src/watchPath.js';
+import { listSessions, readSession, resetTaskHistoryCaches, writeSession } from '../src/taskHistoryStorage.js';
+import { stateDatabasePath, withStateDatabase } from '../src/stateDatabase.js';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-history-storage-'));
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const id = 'shared-task';
-const file = path.join(directory, `${crypto.createHash('sha256').update(id).digest('hex')}.json`);
+const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-history-storage-'));
+const directory = path.join(stateDir, 'sessions');
+const config = { stateDir };
 
 try {
-  assert.equal(watchPathFor(directory, 'linux'), directory, 'non-Windows watch paths must remain unchanged');
-  assert.equal(watchPathFor(directory, 'win32'), fs.realpathSync.native(directory),
-    'Windows watch paths must use native long-path resolution before reaching libuv');
-
+  const id = 'shared-task';
   writeSession(directory, { id, workspace: 'repo', summary: 'before' });
   assert.equal(listSessions(directory, 10)[0]?.summary, 'before');
+  assert.equal(fs.existsSync(stateDatabasePath(config)), true, 'task history must use the shared SQLite state database');
+  assert.equal(fs.existsSync(path.join(directory, `${id}.json`)), false, 'task history must not create canonical JSON session files');
 
-  // Simulate another Rel.AI process replacing the same session file with a same-size
-  // payload. A filename-only metadata cache used to keep returning "before" forever.
-  fs.writeFileSync(file, JSON.stringify({ version: 3, id, taskId: id, sessionId: id, workspace: 'repo', summary: 'after!' }));
-  const future = new Date(Date.now() + 2000);
-  fs.utimesSync(file, future, future);
-
-  let refreshed = listSessions(directory, 10)[0]?.summary;
-  for (let attempt = 0; refreshed !== 'after!' && attempt < 20; attempt += 1) {
-    await delay(10);
-    refreshed = listSessions(directory, 10)[0]?.summary;
-  }
-  assert.equal(refreshed, 'after!', 'directory watcher invalidation must surface external session rewrites promptly');
+  withStateDatabase(config, db => {
+    const row = db.prepare('SELECT payload FROM task_history WHERE id=?').get(id);
+    const session = JSON.parse(row.payload);
+    session.summary = 'after!';
+    db.prepare('UPDATE task_history SET updated_at_ms=?,payload=? WHERE id=?').run(Date.now() + 1, JSON.stringify(session), id);
+  }, { transaction: true });
+  assert.equal(listSessions(directory, 10)[0]?.summary, 'after!', 'SQLite readers must observe another process durable update immediately');
   assert.equal(readSession(directory, id)?.summary, 'after!');
 
   const completedId = 'completed-task';
@@ -46,8 +38,33 @@ try {
   assert.equal(completed?.progress?.percentage, 100);
   assert.equal(completed?.resultSummary, 'Completed work.');
 
-  console.log('Task-history listings refresh externally rewritten files and normalize completed task state.');
+  const legacyStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-history-legacy-'));
+  try {
+    const legacyDirectory = path.join(legacyStateDir, 'sessions');
+    fs.mkdirSync(legacyDirectory, { recursive: true });
+    fs.writeFileSync(path.join(legacyDirectory, 'legacy.json'), JSON.stringify({
+      version: 3,
+      id: 'legacy-task',
+      taskId: 'legacy-task',
+      sessionId: 'legacy-task',
+      workspace: 'repo',
+      status: 'completed',
+      title: 'Legacy task',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:01:00.000Z',
+      summary: 'legacy history'
+    }));
+    const policyFile = path.join(legacyDirectory, 'repo--task-policy-policy.json');
+    fs.writeFileSync(policyFile, JSON.stringify({ workspace: 'repo', taskId: 'task-policy' }));
+    assert.equal(listSessions(legacyDirectory, 10)[0]?.summary, 'legacy history');
+    assert.equal(fs.existsSync(path.join(legacyDirectory, 'legacy.json')), false, 'legacy task-history JSON must be removed after migration');
+    assert.equal(fs.existsSync(policyFile), true, 'task-history migration must leave legacy policy JSON for the policy migrator');
+  } finally {
+    fs.rmSync(legacyStateDir, { recursive: true, force: true });
+  }
+
+  console.log('Task-history SQLite persistence, migration, and completed-state normalization passed.');
 } finally {
   resetTaskHistoryCaches();
-  fs.rmSync(directory, { recursive: true, force: true });
+  fs.rmSync(stateDir, { recursive: true, force: true });
 }

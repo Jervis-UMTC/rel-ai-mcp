@@ -158,18 +158,19 @@ try {
   const failureState = path.join(sandbox, 'persistence-failure');
   const failureConfig = { stateDir: failureState, auditLogPath: path.join(failureState, 'audit.jsonl') };
   recordTaskActivityEvent(failureConfig, { taskId: 'task-persistence', task: { ...baseTask, id: 'task-persistence', taskId: 'task-persistence', sessionId: 'task-persistence' } });
-  const failureDirectory = path.join(failureState, 'sessions');
-  fs.rmSync(failureDirectory, { recursive: true, force: true });
-  fs.writeFileSync(failureDirectory, 'blocked');
+  const failureDatabase = path.join(failureState, 'durable-state.sqlite');
   recordTaskActivityEvent(failureConfig, {
     taskId: 'task-persistence',
     task: { ...baseTask, id: 'task-persistence', taskId: 'task-persistence', sessionId: 'task-persistence', updatedAt: '2026-07-28T10:02:00.000Z' }
   }, { defer: true });
+  fs.rmSync(failureDatabase, { recursive: true, force: true });
+  fs.mkdirSync(failureDatabase);
   const flushResult = await flushTaskHistoryPersistence();
   assert.equal(flushResult.ok, false, 'shutdown flush must stop after a failed persistence attempt instead of retrying forever');
   assert.equal(flushResult.failed, 1);
   assert.equal(taskHistoryPersistenceSnapshot().healthy, false, 'task-history persistence failures must remain observable');
   assert.ok(taskHistoryPersistenceSnapshot().lastError);
+  fs.rmSync(failureDatabase, { recursive: true, force: true });
   clearTaskHistory(failureConfig);
   assert.equal(taskHistoryPersistenceSnapshot().healthy, true, 'clearing the failed history should clear its persistence warning');
 
@@ -179,9 +180,7 @@ try {
     taskId: 'storm-seed',
     task: { ...baseTask, id: 'storm-seed', taskId: 'storm-seed', sessionId: 'storm-seed' }
   });
-  const stormDirectory = path.join(stormState, 'sessions');
-  fs.rmSync(stormDirectory, { recursive: true, force: true });
-  fs.writeFileSync(stormDirectory, 'blocked');
+  const stormDatabase = path.join(stormState, 'durable-state.sqlite');
   for (let index = 0; index < 50; index += 1) {
     const taskId = `storm-${index}`;
     recordTaskActivityEvent(stormConfig, {
@@ -189,6 +188,8 @@ try {
       task: { ...baseTask, id: taskId, taskId, sessionId: taskId, updatedAt: '2026-07-28T10:03:00.000Z' }
     }, { defer: true });
   }
+  fs.rmSync(stormDatabase, { recursive: true, force: true });
+  fs.mkdirSync(stormDatabase);
   assert.equal(taskHistoryPersistenceSnapshot().pending, 50);
   assert.equal(taskHistoryPersistenceSnapshot().scheduledFlushes, 1, 'many pending sessions in one state directory must share one persistence timer');
   const stormFlush = await flushTaskHistoryPersistence();
@@ -196,6 +197,7 @@ try {
   assert.equal(stormFlush.failed, 1, 'a broken shared history directory must fail once per explicit flush instead of once per pending session');
   assert.equal(stormFlush.pending, 50);
   assert.equal(taskHistoryPersistenceSnapshot().scheduledFlushes, 1, 'failed shared storage must retain only one backoff retry timer');
+  fs.rmSync(stormDatabase, { recursive: true, force: true });
   clearTaskHistory(stormConfig);
   assert.equal(taskHistoryPersistenceSnapshot().scheduledFlushes, 0);
 } finally {

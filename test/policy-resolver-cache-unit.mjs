@@ -9,73 +9,48 @@ import {
   readSessionPolicy,
   touchSessionPolicy,
   writeSessionPolicy,
-  POLICY_CACHE_RECHECK_MS,
   SESSION_TOUCH_PERSIST_INTERVAL_MS
 } from '../src/policyResolver.js';
+import { withStateDatabase } from '../src/stateDatabase.js';
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-policy-cache-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-policy-store-'));
 const config = { stateDir: path.join(root, 'state') };
 const workspaceRoot = path.join(root, 'workspace');
 fs.mkdirSync(workspaceRoot, { recursive: true });
 
-function taskFile(alias, taskId) {
-  return path.join(config.stateDir, 'sessions', `${encodeURIComponent(alias)}--${encodeURIComponent(taskId)}-policy.json`);
-}
-
 try {
   const alias = 'app';
   const taskId = 'task-1';
-  await writeSessionPolicy(config, alias, { workspaceRoot, taskId, taskHint: 'cache test' });
-  const file = taskFile(alias, taskId);
-  const persistedBeforeTouch = fs.readFileSync(file, 'utf8');
+  await writeSessionPolicy(config, alias, { workspaceRoot, taskId, taskHint: 'store test' });
+  const before = withStateDatabase(config, db => db.prepare('SELECT updated_at_ms,payload FROM session_policies WHERE workspace=? AND task_id=?').get(alias, taskId));
 
   assert.equal(touchSessionPolicy(config, alias, taskId), true);
-  assert.equal(
-    fs.readFileSync(file, 'utf8'),
-    persistedBeforeTouch,
-    'hot-path activity touches must update memory without rewriting the policy JSON inside the persistence interval'
-  );
-  assert.equal(readSessionPolicy(config, alias, taskId)?.taskHint, 'cache test');
-  assert.equal(
-    await ensureSessionStarted(config, alias, workspaceRoot, { taskId, taskHint: 'ignored' }),
-    false,
-    'an active cached session must not recapture baseline state'
-  );
-  assert.equal(fs.readFileSync(file, 'utf8'), persistedBeforeTouch);
+  const afterHotTouch = withStateDatabase(config, db => db.prepare('SELECT updated_at_ms,payload FROM session_policies WHERE workspace=? AND task_id=?').get(alias, taskId));
+  assert.deepEqual(afterHotTouch, before, 'hot-path touches must not rewrite SQLite inside the persistence interval');
+  assert.equal(readSessionPolicy(config, alias, taskId)?.taskHint, 'store test');
+  assert.equal(await ensureSessionStarted(config, alias, workspaceRoot, { taskId, taskHint: 'ignored' }), false);
 
-  const externallyEdited = JSON.parse(persistedBeforeTouch);
+  const externallyEdited = JSON.parse(before.payload);
   externallyEdited.taskHint = 'external edit';
-  fs.writeFileSync(file, `${JSON.stringify(externallyEdited, null, 2)}\n`);
-  assert.equal(readSessionPolicy(config, alias, taskId)?.taskHint, 'cache test', 'the short hot-cache window should avoid an immediate stat');
-  await new Promise(resolve => setTimeout(resolve, POLICY_CACHE_RECHECK_MS + 20));
-  assert.equal(readSessionPolicy(config, alias, taskId)?.taskHint, 'external edit', 'external policy edits must be observed after the bounded recheck window');
+  withStateDatabase(config, db => db.prepare('UPDATE session_policies SET updated_at_ms=?,payload=? WHERE workspace=? AND task_id=?')
+    .run(Date.now() + 1, JSON.stringify(externallyEdited), alias, taskId), { transaction: true });
+  assert.equal(readSessionPolicy(config, alias, taskId)?.taskHint, 'external edit', 'SQLite reads must observe external durable updates immediately');
 
   assert.equal(clearSessionPolicy(config, alias, taskId).cleared, true);
-  assert.equal(fs.existsSync(file), false);
-  assert.equal(readSessionPolicy(config, alias, taskId), null, 'clearing a session removes both disk and memory state');
+  assert.equal(readSessionPolicy(config, alias, taskId), null);
 
   const oldTaskId = 'task-old';
-  const oldFile = taskFile(alias, oldTaskId);
-  fs.mkdirSync(path.dirname(oldFile), { recursive: true });
-  const oldUpdatedAt = new Date(Date.now() - SESSION_TOUCH_PERSIST_INTERVAL_MS - 5_000).toISOString();
-  fs.writeFileSync(oldFile, `${JSON.stringify({
-    workspace: alias,
-    taskId: oldTaskId,
-    createdAt: oldUpdatedAt,
-    updatedAt: oldUpdatedAt,
-    baselineCaptured: true,
-    baselineDirty: []
-  }, null, 2)}\n`);
-
+  const oldUpdatedAtMs = Date.now() - SESSION_TOUCH_PERSIST_INTERVAL_MS - 5_000;
+  const oldUpdatedAt = new Date(oldUpdatedAtMs).toISOString();
+  const oldPolicy = { workspace: alias, taskId: oldTaskId, createdAt: oldUpdatedAt, updatedAt: oldUpdatedAt, baselineCaptured: true, baselineDirty: [] };
+  withStateDatabase(config, db => db.prepare('INSERT INTO session_policies(workspace,task_id,updated_at_ms,payload) VALUES(?,?,?,?)')
+    .run(alias, oldTaskId, oldUpdatedAtMs, JSON.stringify(oldPolicy)), { transaction: true });
   assert.equal(touchSessionPolicy(config, alias, oldTaskId), true);
-  const persistedOldTouch = JSON.parse(fs.readFileSync(oldFile, 'utf8'));
-  assert.ok(
-    Date.parse(persistedOldTouch.updatedAt) > Date.parse(oldUpdatedAt),
-    'a touch after the persistence interval must refresh durable activity time'
-  );
+  const persistedOldTouch = readSessionPolicy(config, alias, oldTaskId);
+  assert.ok(Date.parse(persistedOldTouch.updatedAt) > oldUpdatedAtMs);
   clearSessionPolicy(config, alias, oldTaskId);
 
-  console.log('Session policy memory-cache and persistence-throttle tests passed.');
+  console.log('Session policy SQLite visibility and persistence-throttle tests passed.');
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
