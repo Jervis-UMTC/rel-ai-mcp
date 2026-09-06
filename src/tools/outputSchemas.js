@@ -414,7 +414,7 @@ const TOOL_FIELDS = Object.freeze({
   [OP.CHANGES_RESTORE]: ['ok', 'workspace', 'work_id', 'mode', 'paths', 'command', 'commandSummary', 'cwd', 'shell', 'durationMs', 'exitCode', 'stdout', 'stderr', 'stdoutBytes', 'stderrBytes', 'stdoutTruncated', 'stderrTruncated', 'timedOut', 'cancelled', 'terminationConfirmed', 'forcedTermination', 'signal', 'error'],
   [OP.CHANGES_RESET]: ['ok', 'workspace', 'work_id', 'mode', 'removeUntracked', 'reset', 'clean'],
   [OP.WORK_STATUS]: ['ok', 'version', 'workspace', 'work_id', 'operationId', 'workspaceAliases', 'workspaceCount', 'toolSurface', 'tools', 'toolGroups', 'scripts', 'ci', 'runtime', 'repositoryRuntime', 'runtimeCompatibility', 'repository', 'readiness', 'state', 'task', 'activeRelatedWork', 'backgroundOperation'],
-  [OP.PUBLISH_COMMIT]: ['ok', 'workspace', 'work_id', 'dryRun', 'message', 'addAll', 'paths', 'sensitiveAuthorization', 'statusBefore', 'add', 'commit', 'statusAfter', 'secretStagedFiles', 'unauthorizedSecretPaths', 'indexRestored', 'error'],
+  [OP.PUBLISH_COMMIT]: ['ok', 'workspace', 'work_id', 'dryRun', 'message', 'addAll', 'paths', 'sensitiveAuthorization', 'statusBefore', 'add', 'commit', 'head', 'statusAfter', 'secretStagedFiles', 'unauthorizedSecretPaths', 'indexRestored', 'error'],
   [OP.PUBLISH_PUSH]: ['ok', 'workspace', 'work_id', 'remote', 'branch', 'dryRun', 'setUpstream', 'push'],
   [OP.PUBLISH_DRAFT_PR]: ['ok', 'workspace', 'work_id', 'base', 'head', 'title', 'body', 'changedFiles', 'changedFileCount', 'emptyDiff', 'draftOnly', 'remoteChanged', 'warning', 'diff'],
   [OP.EDIT]: ['ok', 'workspace', 'work_id', 'dryRun', 'operationId', 'operation', 'path', 'changed', 'changedFiles', 'oldSha256', 'newSha256', 'shaMismatch', 'replacements', 'verified', 'bytes', 'sha256', 'fileId', 'fileName', 'mimeType', 'plannerPath', 'plannerReason', 'semantic', 'semanticTarget', 'result', 'writeId', 'chunks', 'cleared', 'staged', 'editCount', 'appliedCount', 'preflightAtomic', 'rollbackAtomic', 'batchInputBytes', 'replacementCount', 'snapshotBytes', 'resultDetailsCompacted', 'rollback', 'preflight', 'results', 'touchedPaths', 'patchBytes', 'sourceFormat', 'converted', 'verify', 'apply', 'check', 'diagnostics', 'checks', 'diff', 'execution', 'summary', 'validationStatus', 'error', 'next'],
@@ -423,7 +423,7 @@ const TOOL_FIELDS = Object.freeze({
 });
 
 const SUCCESS_REQUIRED_FIELDS = Object.freeze({
-  [OP.EXEC]: ['workspace', 'work_id', 'executed', 'commandSucceeded', 'exitCode', 'durationMs'],
+  [OP.EXEC]: ['workspace', 'executed', 'commandSucceeded', 'exitCode', 'durationMs'],
   [OP.VALIDATE_DIAGNOSTICS]: ['workspace', 'work_id', 'diagnostics', 'diagnosticCount'],
   [OP.VALIDATE_CHECKS]: ['workspace', 'work_id', 'results', 'validationStatus'],
   [OP.PROCESS_START]: ['work_id', 'processId', 'status', 'lifecycle'],

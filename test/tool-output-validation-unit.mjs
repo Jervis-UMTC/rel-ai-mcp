@@ -164,6 +164,18 @@ await assert.doesNotReject(() => validateToolOutput({}, 'relai_exec', {
   durationMs: 1
 }));
 
+await assert.doesNotReject(() => validateToolOutput({}, 'relai_exec', {
+  workspace: 'repo',
+  command: 'npm test'
+}, {
+  ok: true,
+  workspace: 'repo',
+  executed: true,
+  commandSucceeded: true,
+  exitCode: 0,
+  durationMs: 1
+}));
+
 await assert.doesNotReject(() => validateToolOutput({}, 'relai_publish', {
   action: 'commit',
   work_id: 'work_output',
@@ -178,6 +190,23 @@ await assert.doesNotReject(() => validateToolOutput({}, 'relai_publish', {
   addAll: false,
   paths: ['CHANGELOG.md'],
   statusBefore: { branch: 'main' }
+}));
+
+await assert.doesNotReject(() => validateToolOutput({}, 'relai_publish', {
+  action: 'commit',
+  work_id: 'work_output',
+  message: 'Validate output'
+}, {
+  ok: true,
+  workspace: 'repo',
+  work_id: 'work_output',
+  message: 'Validate output',
+  addAll: false,
+  paths: ['CHANGELOG.md'],
+  commit: { exitCode: 0 },
+  head: 'cc626cb78a2ea761cd5ca736c5dbabebda1831dd',
+  statusBefore: { branch: 'release/1.0.0' },
+  statusAfter: { branch: 'release/1.0.0' }
 }));
 
 await assert.doesNotReject(() => validateToolOutput({}, 'relai_publish', {
