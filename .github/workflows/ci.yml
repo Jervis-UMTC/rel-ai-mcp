@@ -102,6 +102,10 @@ jobs:
         working-directory: electron
       - name: Install Electron test binary
         run: node electron/node_modules/electron/install.js
+      - name: Install Linux desktop runtime test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends x11-xserver-utils
       - name: Build unpacked Linux application
         run: npm run electron:build:linux
       - name: Resolve current unpacked application

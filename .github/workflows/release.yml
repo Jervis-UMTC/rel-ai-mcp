@@ -246,6 +246,10 @@ jobs:
         run: node electron/node_modules/electron/install.js
       - name: Verify Electron test binary
         run: test -x electron/node_modules/electron/dist/electron
+      - name: Install Linux desktop runtime test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends x11-xserver-utils
       - name: Run Electron platform regression tests
         run: |
           node test/electron-platform-unit.mjs
