@@ -27,6 +27,8 @@ try {
   write('audit.jsonl.1', 17);
   write('output-spills/task/output.log', 19);
   write('repository-intelligence/repo/graph.db', 23);
+  write('browser/profiles/principal/default/profile-state.bin', 7);
+  const persistentBrowserProfileFile = path.join(stateDir, 'browser', 'profiles', 'principal', 'default', 'profile-state.bin');
   fs.writeFileSync(logPath, 'x'.repeat(29));
   fs.mkdirSync(connectionStateDir, { recursive: true });
   fs.writeFileSync(path.join(connectionStateDir, 'connection.json'), '{}');
@@ -75,6 +77,7 @@ try {
   assert.equal(fs.existsSync(stateDir), false);
   assert.equal(fs.existsSync(connectionStateDir), false);
   assert.equal(fs.existsSync(userDataDir), false);
+  assert.equal(fs.existsSync(persistentBrowserProfileFile), false, 'clear all data must remove persistent local browser profile state');
   assert.equal(fs.readFileSync(path.join(projectDir, 'keep.txt'), 'utf8'), 'project data');
 
   const unsafe = createDesktopLocalDataManager({

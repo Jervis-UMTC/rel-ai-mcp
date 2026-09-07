@@ -27,6 +27,8 @@ const invocationLabels = new Map([
   ['relai_exec', ['Running command…', 'Command finished']],
   ['relai_process', ['Managing process…', 'Process updated']],
   ['relai_ui', ['Testing local UI…', 'Local UI tested']],
+  ['relai_browser', ['Using local browser…', 'Local browser updated']],
+  ['relai_desktop', ['Using local desktop…', 'Desktop action finished']],
   ['relai_computer', ['Controlling computer…', 'Computer action finished']],
   ['relai_validate', ['Validating changes…', 'Validation finished']],
   ['relai_changes', ['Reviewing changes…', 'Changes reviewed']],

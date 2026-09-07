@@ -66,6 +66,7 @@ async function shutdownCoreRuntime(
     const [
       auditModule,
       analyticsModule,
+      browserRuntimeModule,
       processManagerModule,
       repositoryIntelligenceModule,
       taskHistoryModule,
@@ -74,6 +75,7 @@ async function shutdownCoreRuntime(
     ] = await Promise.all([
       import('../audit.js'),
       import('../localAnalytics.js'),
+      import('../browser/browserRuntime.ts'),
       import('../processManager.js'),
       import('../repository/intelligence/service.js'),
       import('../taskHistoryStore.ts'),
@@ -91,6 +93,7 @@ async function shutdownCoreRuntime(
       'taskHistory',
       'analytics',
       'managedProcesses',
+      'browserSessions',
       'uiSessions',
       'telemetry',
       'repositoryIntelligence'
@@ -100,6 +103,7 @@ async function shutdownCoreRuntime(
       taskHistoryModule.flushTaskHistoryPersistence(),
       analyticsModule.flushLocalAnalytics(),
       managedProcessesPromise,
+      browserRuntimeModule.stopAllBrowserSessions(),
       webAutomationModule.stopAllUiSessions(),
       telemetryModule.shutdownTelemetry(),
       repositoryIntelligencePromise
@@ -114,8 +118,8 @@ async function shutdownCoreRuntime(
       { attempted: 0, stopped: 0, orphaned: 1, error: settledError(settled[3]) }
     );
     const repositoryIntelligence = settledRecord(
-      settled[6],
-      { closed: false, error: settledError(settled[6]) }
+      settled[7],
+      { closed: false, error: settledError(settled[7]) }
     );
     const errors: Array<{ step: string; error: string }> = settled.flatMap((result, index) => result.status === 'rejected'
       ? [{ step: labels[index] ?? `step-${index}`, error: errorMessage(result.reason) }]

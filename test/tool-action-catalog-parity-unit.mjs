@@ -133,6 +133,24 @@ function sampleArgs(entry) {
     case 'relai_ui:stop': args.sessionId = 'ui_abcdefghijklmnopqrst'; break;
     case 'relai_ui:interact': Object.assign(args, { sessionId: 'ui_abcdefghijklmnopqrst', interaction: 'click', target: { by: 'text', value: 'Save' } }); break;
     case 'relai_ui:viewport': Object.assign(args, { sessionId: 'ui_abcdefghijklmnopqrst', width: 1280, height: 720 }); break;
+    case 'relai_browser:start': args.url = 'http://192.168.1.20/app'; break;
+    case 'relai_browser:status': break;
+    case 'relai_browser:tabs':
+    case 'relai_browser:open_tab':
+    case 'relai_browser:snapshot':
+    case 'relai_browser:screenshot':
+    case 'relai_browser:stop': args.sessionId = 'browser_abcdefghijklmnopqrst'; break;
+    case 'relai_browser:close_tab': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', tabId: 'tab_abcdefghijklmnopqrst' }); break;
+    case 'relai_browser:navigate': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', url: 'https://intranet.example.test/page' }); break;
+    case 'relai_browser:interact': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', interaction: 'click', target: { by: 'text', value: 'Save' } }); break;
+    case 'relai_browser:upload': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', path: 'artifact.pdf', target: { by: 'label', value: 'Upload' } }); break;
+    case 'relai_browser:download': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', path: 'downloads/report.pdf', interaction: 'click', target: { by: 'text', value: 'Download' } }); break;
+    case 'relai_desktop:open_path':
+    case 'relai_desktop:reveal_path': Object.assign(args, { workspace: 'repo', path: 'README.md' }); break;
+    case 'relai_desktop:open_uri': Object.assign(args, { workspace: 'repo', uri: 'https://example.com' }); break;
+    case 'relai_desktop:launch_application': Object.assign(args, { workspace: 'repo', application: 'notepad.exe' }); break;
+    case 'relai_desktop:clipboard_read': args.workspace = 'repo'; break;
+    case 'relai_desktop:clipboard_write': Object.assign(args, { workspace: 'repo', text: 'hello' }); break;
     case 'relai_computer:move':
     case 'relai_computer:click':
     case 'relai_computer:double_click':

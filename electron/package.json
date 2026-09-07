@@ -48,6 +48,7 @@
     "files": [
       "main.js",
       "desktop-host.js",
+      "desktop-os-operations.js",
       "preload.cjs",
       "launcher-utils.js",
       "secure-tunnel-runtime.js",

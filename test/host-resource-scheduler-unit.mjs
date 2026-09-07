@@ -72,10 +72,10 @@ async function verifyExecutionTimeoutExcludesQueueWait() {
     resourceClass: 'heavy',
     resourceOwner: 'repo-c',
     queueTimeoutMs: 1500,
-    timeout: 200
+    timeout: 1000
   });
   await waitFor(() => hostResourceStats().heavy.queued === 1, 'one-shot command to enter the host queue');
-  await sleep(250);
+  await sleep(1200);
   blockerA.release();
   const result = await command;
   blockerB.release();
@@ -83,8 +83,8 @@ async function verifyExecutionTimeoutExcludesQueueWait() {
   assert.equal(result.exitCode, 0);
   assert.equal(result.timedOut, false);
   assert.equal(result.queueTimedOut, undefined);
-  assert.ok(result.queueWaitMs >= 200, `expected a visible queue wait, got ${result.queueWaitMs}ms`);
-  assert.ok(performance.now() - started >= 200, 'the command must actually have waited longer than its execution timeout before admission');
+  assert.ok(result.queueWaitMs >= 1000, `expected queue wait to exceed the execution timeout, got ${result.queueWaitMs}ms`);
+  assert.ok(performance.now() - started >= 1000, 'the command must actually have waited longer than its execution timeout before admission');
   assert.equal(hostResourceStats().heavy.active, 0);
 }
 
@@ -107,6 +107,11 @@ async function verifyRepositoryQueryTimeoutExcludesQueueWait() {
   let blockerB;
   try {
     await repositoryIntelligence.ensure(workspace, config, { watch: false });
+    const warmSummary = await repositoryIntelligence.cachedSummary(workspace, config, {
+      queryTimeoutMs: 5000,
+      queryQueueTimeoutMs: 5000
+    });
+    assert.equal(warmSummary?.available, true, 'warm-up must prove the query worker is ready before queue timing is measured');
     blockerA = await acquireHostResource('heavy', 'ri-blocker-a');
     blockerB = await acquireHostResource('heavy', 'ri-blocker-b');
     const query = repositoryIntelligence.cachedSummary(workspace, config, {

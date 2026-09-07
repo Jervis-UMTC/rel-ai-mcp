@@ -212,7 +212,7 @@ function WorkspaceReadiness({ available, repository }) {
     ),
     h('dl', { className: 'workspace-readiness-facts' },
       h('div', { className: `workspace-readiness-fact ${repository.tone}` },
-        h('dt', null, h('i', { 'aria-hidden': 'true' }), 'Git'),
+        h('dt', null, h('i', { 'aria-hidden': 'true' }), repository.kindLabel),
         h('dd', null, h('strong', null, repository.label), h('small', null, repository.description))
       )
     )
@@ -253,7 +253,7 @@ function EmptyWorkspaceState({ onAdd }) {
   return h('section', { className: 'workspace-empty-state' },
     h('div', { className: 'workspace-empty-mark', 'aria-hidden': 'true' }, '+'),
     h('strong', null, 'Add your first project'),
-    h('p', null, 'Select a project folder and give it a short name. Rel.AI will find Git and any available checks automatically.'),
+    h('p', null, 'Select a local folder and give it a short name. Rel.AI detects Git features and available checks when they are present.'),
     h('button', { className: 'primary', type: 'button', onClick: onAdd }, 'Add project')
   );
 }

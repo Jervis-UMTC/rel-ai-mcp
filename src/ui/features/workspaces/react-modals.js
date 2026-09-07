@@ -368,7 +368,7 @@ function SourceFolders({ browse, emptySourceRef, manualMode, pathStatus, paths, 
         h('span', { className: 'ws-form-help', id: 'workspacePathsHelp' }, 'Enter one absolute source-folder path per line.')
       )
     ),
-    h('div', { className: 'ws-form-help' }, 'The first folder is the primary repository used for project-level Git and command actions.'),
+    h('div', { className: 'ws-form-help' }, 'The first folder is the primary local working folder. Rel.AI uses it for file and command actions; Git actions are available when it is a Git repository.'),
     sourceError ? h('div', { className: 'ws-form-conflict', id: 'workspaceSourceError', role: 'alert' }, sourceError) : null,
     h('div', { className: `ws-form-status${pathStatus.tone ? ` ${pathStatus.tone}` : ''}`, 'aria-live': 'polite' }, pathStatus.text)
   );

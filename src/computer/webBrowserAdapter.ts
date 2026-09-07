@@ -1,42 +1,27 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright-core';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import { taskError } from '../toolActivity.js';
 import {
-  DEFAULT_VIEWPORT,
-  MAX_SCREENSHOT_BYTES,
   MAX_SNAPSHOT_CHARS,
   boundText,
   clampInteger,
   isAllowedPageUrl,
   isAllowedResourceUrl,
   isAllowedSocketUrl,
-  normalizeWaitState,
   sanitizeUiUrl
 } from './webPolicy.ts';
+import {
+  performStructuredInteraction,
+  resolveChromiumRuntime,
+  safeTitle,
+  screenshotPage,
+  type StructuredInteractionArgs
+} from '../browser/playwrightPrimitives.ts';
 
 const MAX_LOG_ENTRIES = 300;
 
 type BrowserEntry = Record<string, unknown>;
 type Viewport = Readonly<{ width: number; height: number }>;
-
-type UiTarget = Readonly<{
-  by?: unknown;
-  value?: unknown;
-  name?: unknown;
-  exact?: unknown;
-  index?: unknown;
-}>;
-
-type BrowserInteractionArgs = Readonly<{
-  interaction?: unknown;
-  target?: UiTarget;
-  input?: unknown;
-  key?: unknown;
-  selectValue?: unknown;
-  state?: unknown;
-}>;
+type BrowserInteractionArgs = StructuredInteractionArgs;
 
 interface LaunchWebBrowserOptions {
   readonly protocol: 'http' | 'https';
@@ -64,7 +49,12 @@ interface WebBrowserSession {
 }
 
 async function launchWebBrowserSession(options: LaunchWebBrowserOptions): Promise<WebBrowserSession> {
-  const runtime = resolveChromiumRuntime();
+  const runtime = resolveChromiumRuntime({
+    overrideEnvironmentVariables: ['REL_AI_UI_CHROMIUM_PATH'],
+    invalidOverrideMessage: 'REL_AI_UI_CHROMIUM_PATH does not point to an available file.',
+    unavailableCode: 'UI_RUNTIME_UNAVAILABLE',
+    unavailableMessage: 'No supported local Chromium runtime was found. Install Chrome, Edge, or Chromium, or set REL_AI_UI_CHROMIUM_PATH.'
+  });
   const consoleEntries: BrowserEntry[] = [];
   const networkEntries: BrowserEntry[] = [];
   let browser: Browser | undefined;
@@ -103,54 +93,14 @@ async function launchWebBrowserSession(options: LaunchWebBrowserOptions): Promis
         return pageResult(page, { title: await safeTitle(page), snapshot: bounded.text, truncated: bounded.truncated });
       },
       interact: async (args: BrowserInteractionArgs, timeoutMs: number) => {
-        const interaction = String(args.interaction || '').trim();
-        const locator = targetLocator(page, args.target);
-        switch (interaction) {
-          case 'click':
-            await locator.click({ timeout: timeoutMs });
-            break;
-          case 'fill':
-            await locator.fill(String(args.input ?? ''), { timeout: timeoutMs });
-            break;
-          case 'press':
-            if (!String(args.key || '').trim()) throw new Error('interact press requires key.');
-            await locator.press(String(args.key), { timeout: timeoutMs });
-            break;
-          case 'select':
-            if (args.selectValue == null) throw new Error('interact select requires selectValue.');
-            await locator.selectOption(String(args.selectValue), { timeout: timeoutMs });
-            break;
-          case 'hover':
-            await locator.hover({ timeout: timeoutMs });
-            break;
-          case 'wait':
-            await locator.waitFor({ state: normalizeWaitState(args.state), timeout: timeoutMs });
-            break;
-          default:
-            throw new Error(`Unsupported UI interaction '${interaction || '(missing)'}.`);
-        }
+        const interaction = await performStructuredInteraction(page, args, timeoutMs, 'UI');
         assertCurrentPageAllowed(page, options.allowedPorts);
-        return pageResult(page, { interaction, target: publicTarget(args.target), title: await safeTitle(page) });
+        return pageResult(page, { ...interaction, title: await safeTitle(page) });
       },
-      screenshot: async (fullPage: boolean) => {
-        const buffer = await page.screenshot({ type: 'png', fullPage, animations: 'disabled' });
-        if (buffer.length > MAX_SCREENSHOT_BYTES) {
-          throw new Error(`UI screenshot is ${buffer.length} bytes; the limit is ${MAX_SCREENSHOT_BYTES} bytes. Use the current viewport instead of fullPage.`);
-        }
-        const viewport = page.viewportSize() || DEFAULT_VIEWPORT;
-        return pageResult(page, {
-          title: await safeTitle(page),
-          viewport,
-          image: {
-            mimeType: 'image/png',
-            data: buffer.toString('base64'),
-            bytes: buffer.length,
-            width: viewport.width,
-            height: viewport.height,
-            fullPage
-          }
-        });
-      },
+      screenshot: async (fullPage: boolean) => pageResult(page, {
+        title: await safeTitle(page),
+        ...(await screenshotPage(page, fullPage, 'UI screenshot'))
+      }),
       setViewport: async (viewport: Viewport) => {
         await page.setViewportSize(viewport);
         return pageResult(page, { viewport });
@@ -243,37 +193,6 @@ function installPageDiagnostics(page: Page, consoleEntries: BrowserEntry[], netw
   });
 }
 
-function targetLocator(page: Page, target: UiTarget | undefined): Locator {
-  if (!target || typeof target !== 'object' || Array.isArray(target)) throw new Error('interact requires target.');
-  const by = String(target.by || '').trim();
-  const value = String(target.value || '');
-  if (!value) throw new Error('target.value is required.');
-  const exact = target.exact === true;
-  let locator: Locator;
-  switch (by) {
-    case 'role': locator = page.getByRole(value as never, target.name ? { name: String(target.name), exact } : {}); break;
-    case 'text': locator = page.getByText(value, { exact }); break;
-    case 'label': locator = page.getByLabel(value, { exact }); break;
-    case 'placeholder': locator = page.getByPlaceholder(value, { exact }); break;
-    case 'testid': locator = page.getByTestId(value); break;
-    case 'css': locator = page.locator(value); break;
-    default: throw new Error(`Unsupported target.by '${by || '(missing)'}.`);
-  }
-  const index = Number(target.index);
-  if (Number.isInteger(index) && index >= 0) locator = locator.nth(index);
-  return locator;
-}
-
-function publicTarget(target: UiTarget | undefined = {}): Record<string, unknown> {
-  return Object.fromEntries(Object.entries({
-    by: target.by,
-    value: target.value,
-    name: target.name,
-    exact: target.exact === true ? true : undefined,
-    index: Number.isInteger(Number(target.index)) ? Number(target.index) : undefined
-  }).filter(([, value]) => value !== undefined && value !== ''));
-}
-
 function pageResult(page: Page, extra: Record<string, unknown> = {}): BrowserActionResult {
   return { url: sanitizeUiUrl(page.url()), ...extra };
 }
@@ -282,65 +201,6 @@ function assertCurrentPageAllowed(page: Page, allowedPorts: ReadonlySet<number>)
   if (!isAllowedPageUrl(page.url(), allowedPorts)) {
     throw taskError('UI_NAVIGATION_BLOCKED', 'The page navigated outside the allowed local UI boundary.');
   }
-}
-
-function resolveChromiumRuntime(): { executablePath: string; product: string } {
-  const override = String(process.env.REL_AI_UI_CHROMIUM_PATH || '').trim();
-  if (override) {
-    if (!isExecutableFile(override)) throw new Error('REL_AI_UI_CHROMIUM_PATH does not point to an available file.');
-    return { executablePath: override, product: 'configured Chromium' };
-  }
-  for (const candidate of chromiumCandidates()) {
-    if (isExecutableFile(candidate.executablePath)) return candidate;
-  }
-  throw taskError(
-    'UI_RUNTIME_UNAVAILABLE',
-    'No supported local Chromium runtime was found. Install Chrome, Edge, or Chromium, or set REL_AI_UI_CHROMIUM_PATH.'
-  );
-}
-
-function chromiumCandidates(): Array<{ executablePath: string; product: string }> {
-  const candidates: Array<{ executablePath: string; product: string }> = [];
-  if (process.platform === 'win32') {
-    const roots = [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter((value): value is string => Boolean(value));
-    for (const root of roots) {
-      candidates.push({ executablePath: path.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe'), product: 'Microsoft Edge' });
-      candidates.push({ executablePath: path.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'), product: 'Google Chrome' });
-      candidates.push({ executablePath: path.join(root, 'Chromium', 'Application', 'chrome.exe'), product: 'Chromium' });
-    }
-  } else if (process.platform === 'darwin') {
-    candidates.push(
-      { executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', product: 'Google Chrome' },
-      { executablePath: '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge', product: 'Microsoft Edge' },
-      { executablePath: '/Applications/Chromium.app/Contents/MacOS/Chromium', product: 'Chromium' }
-    );
-  } else {
-    for (const [name, product] of [
-      ['google-chrome', 'Google Chrome'],
-      ['google-chrome-stable', 'Google Chrome'],
-      ['microsoft-edge', 'Microsoft Edge'],
-      ['microsoft-edge-stable', 'Microsoft Edge'],
-      ['chromium', 'Chromium'],
-      ['chromium-browser', 'Chromium']
-    ] as const) {
-      const resolved = spawnSync('which', [name], { encoding: 'utf8', windowsHide: true });
-      const executablePath = String(resolved.stdout || '').trim().split(/\r?\n/, 1)[0];
-      if (executablePath) candidates.push({ executablePath, product });
-    }
-  }
-  try {
-    const bundled = chromium.executablePath();
-    if (bundled) candidates.push({ executablePath: bundled, product: 'Chromium' });
-  } catch {}
-  return candidates;
-}
-
-function isExecutableFile(file: string): boolean {
-  try { return fs.statSync(file).isFile(); } catch { return false; }
-}
-
-async function safeTitle(page: Page): Promise<string> {
-  try { return boundText(await page.title(), 1000).text; } catch { return ''; }
 }
 
 function pushEntry(entries: BrowserEntry[], entry: BrowserEntry): void {

@@ -118,7 +118,7 @@ function isTerminalTaskReference(session, toolName, args = {}) {
   if (!isTerminalTaskStatus(session?.status)) return false;
   const operation = String(toolName || '');
   if (TERMINAL_REFERENCE_OPERATIONS.has(operation)) return true;
-  return operation === OP.UI && String(args?.action || '').trim().toLowerCase() === 'stop';
+  return (operation === OP.UI || operation === OP.BROWSER) && String(args?.action || '').trim().toLowerCase() === 'stop';
 }
 
 function safeEqual(left, right) {

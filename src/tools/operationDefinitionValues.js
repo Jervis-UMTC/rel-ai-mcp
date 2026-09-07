@@ -99,11 +99,27 @@ const OPERATION_DEFINITION_VALUES = [
     behavior: {"taskScope":"optional"},
   },
   {
+    name: OP.BROWSER,
+    title: "Local Browser Session",
+    description: "Operate a browser running on the user's local machine for localhost, LAN/intranet/VPN, machine-local authenticated sessions, and authorized local upload/download workflows. This is not a public-web research tool.",
+    inputSchema: {"type":"object","properties":{"workspace":{"type":"string"},"action":{"type":"string","enum":["status","start","tabs","open_tab","close_tab","navigate","snapshot","interact","screenshot","upload","download","stop"]},"sessionId":{"type":"string","pattern":"^browser_[A-Za-z0-9_-]{20,160}$"},"tabId":{"type":"string","pattern":"^tab_[A-Za-z0-9_-]{20,160}$"},"url":{"type":"string","minLength":1,"maxLength":4000},"profile":{"type":"string","enum":["ephemeral","persistent"]},"headless":{"type":"boolean"},"ignoreHTTPSErrors":{"type":"boolean"},"width":{"type":"number","minimum":320,"maximum":3840},"height":{"type":"number","minimum":240,"maximum":2160},"timeoutMs":{"type":"number","minimum":100,"maximum":30000},"interaction":{"type":"string","enum":["click","fill","press","select","hover","wait"]},"target":{"type":"object","properties":{"by":{"type":"string","enum":["role","text","label","placeholder","testid","css"]},"value":{"type":"string","minLength":1,"maxLength":4000},"name":{"type":"string","maxLength":1000},"exact":{"type":"boolean"},"index":{"type":"number","minimum":0,"maximum":1000}},"required":["by","value"],"additionalProperties":false},"input":{"type":"string","maxLength":1048576},"key":{"type":"string","maxLength":100},"selectValue":{"type":"string","maxLength":10000},"state":{"type":"string","enum":["visible","hidden","attached","detached"]},"fullPage":{"type":"boolean"},"path":{"type":"string","minLength":1,"maxLength":1000}},"required":["workspace","action"],"additionalProperties":false},
+    handlerName: 'browser',
+    behavior: {"audit":"exec","taskScope":"optional"},
+  },
+  {
     name: OP.UI,
     title: "Local UI Test Session",
     description: "Operate a bounded local Chromium test session for a configured workspace.",
     inputSchema: {"type":"object","properties":{"workspace":{"type":"string"},"action":{"type":"string","enum":["start","navigate","snapshot","interact","screenshot","console","network","viewport","reload","stop"]},"sessionId":{"type":"string","pattern":"^ui_[A-Za-z0-9_-]{20,160}$"},"port":{"type":"number","minimum":1,"maximum":65535},"host":{"type":"string","enum":["localhost","127.0.0.1","::1","[::1]"]},"protocol":{"type":"string","enum":["http","https"]},"route":{"type":"string","minLength":1,"maxLength":4000},"allowedPorts":{"type":"array","items":{"type":"number","minimum":1,"maximum":65535},"maxItems":10},"headless":{"type":"boolean"},"width":{"type":"number","minimum":320,"maximum":3840},"height":{"type":"number","minimum":240,"maximum":2160},"timeoutMs":{"type":"number","minimum":100,"maximum":30000},"interaction":{"type":"string","enum":["click","fill","press","select","hover","wait"]},"target":{"type":"object","properties":{"by":{"type":"string","enum":["role","text","label","placeholder","testid","css"]},"value":{"type":"string","minLength":1,"maxLength":4000},"name":{"type":"string","maxLength":1000},"exact":{"type":"boolean"},"index":{"type":"number","minimum":0,"maximum":1000}},"required":["by","value"],"additionalProperties":false},"input":{"type":"string","maxLength":1048576},"key":{"type":"string","maxLength":100},"selectValue":{"type":"string","maxLength":10000},"state":{"type":"string","enum":["visible","hidden","attached","detached"]},"fullPage":{"type":"boolean"},"maxEntries":{"type":"number","minimum":1,"maximum":200},"clear":{"type":"boolean"}},"required":["workspace","action"],"additionalProperties":false},
     handlerName: 'ui',
+    behavior: {"audit":"exec","taskScope":"optional"},
+  },
+  {
+    name: OP.DESKTOP,
+    title: "Structured Desktop Operation",
+    description: "Perform one explicit structured desktop/OS operation without simulating keyboard or pointer input. Open or reveal an authorized workspace path, open a supported external URI, launch a supported application, or explicitly read/write bounded clipboard text. Use relai_computer only when structured desktop behavior is unavailable or application UI interaction is actually required.",
+    inputSchema: {"type":"object","properties":{"workspace":{"type":"string"},"action":{"type":"string","enum":["open_path","reveal_path","open_uri","launch_application","clipboard_read","clipboard_write"]},"path":{"type":"string","minLength":1,"maxLength":1000},"uri":{"type":"string","minLength":1,"maxLength":4000},"application":{"type":"string","minLength":1,"maxLength":200},"text":{"type":"string","maxLength":65536}},"required":["workspace","action"],"additionalProperties":false},
+    handlerName: 'desktop',
     behavior: {"audit":"exec","taskScope":"optional"},
   },
   {

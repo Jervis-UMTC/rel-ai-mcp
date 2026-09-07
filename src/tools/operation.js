@@ -24,6 +24,8 @@ function describeToolOperation(name, args = {}) {
     case OP.PROCESS_STOP: return `Stopping managed process ${args.processId || ''}`.trim();
     case OP.PROCESS_LIST: return workspace ? `Listing managed processes in ${workspace}` : 'Listing managed processes';
     case OP.UI: return `Testing local UI (${String(args.action || 'session')})${suffix}`;
+    case OP.BROWSER: return `Using local browser (${String(args.action || 'session')})${suffix}`;
+    case OP.DESKTOP: return `Running structured desktop action ${String(args.action || 'operation')}${suffix}`;
     case OP.SEARCH_SEMANTIC: return `Semantically searching for ${String(args.query || '').slice(0, 60) || 'a concept'}${suffix}`;
     case OP.VALIDATE_DIAGNOSTICS: return `Running structured diagnostics${suffix}`;
     case OP.EDIT: {

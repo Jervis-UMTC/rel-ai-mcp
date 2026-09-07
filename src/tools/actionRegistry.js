@@ -38,6 +38,16 @@ const INSPECT_FIELDS = Object.freeze({
   architecture: contract({ omit: ['symbol', 'query', 'paths', 'maxDepth', 'path', 'line', 'column'] })
 });
 
+const DESKTOP_FIELDS = Object.freeze(['path', 'uri', 'application', 'text']);
+const DESKTOP_OMIT = Object.freeze({
+  open_path: DESKTOP_FIELDS.filter(field => field !== 'path'),
+  reveal_path: DESKTOP_FIELDS.filter(field => field !== 'path'),
+  open_uri: DESKTOP_FIELDS.filter(field => field !== 'uri'),
+  launch_application: DESKTOP_FIELDS.filter(field => field !== 'application'),
+  clipboard_read: DESKTOP_FIELDS,
+  clipboard_write: DESKTOP_FIELDS.filter(field => field !== 'text')
+});
+
 const COMPUTER_FIELDS = Object.freeze(['displayId', 'x', 'y', 'toX', 'toY', 'direction', 'distance', 'text', 'key', 'keys']);
 const COMPUTER_OMIT = Object.freeze({
   status: COMPUTER_FIELDS,
@@ -52,6 +62,29 @@ const COMPUTER_OMIT = Object.freeze({
   type: COMPUTER_FIELDS.filter(field => field !== 'text'),
   key: COMPUTER_FIELDS.filter(field => field !== 'key'),
   hotkey: COMPUTER_FIELDS.filter(field => field !== 'keys')
+});
+
+const BROWSER_FIELDS = Object.freeze([
+  'sessionId', 'tabId', 'url', 'profile', 'headless', 'ignoreHTTPSErrors', 'width', 'height', 'timeoutMs',
+  'interaction', 'target', 'input', 'key', 'selectValue', 'state', 'fullPage', 'path'
+]);
+function browserOmit(...allowed) {
+  const keep = new Set(allowed);
+  return BROWSER_FIELDS.filter(field => !keep.has(field));
+}
+const BROWSER_OMIT = Object.freeze({
+  status: browserOmit('sessionId'),
+  start: browserOmit('url', 'profile', 'headless', 'ignoreHTTPSErrors', 'width', 'height', 'timeoutMs'),
+  tabs: browserOmit('sessionId'),
+  open_tab: browserOmit('sessionId', 'url', 'timeoutMs'),
+  close_tab: browserOmit('sessionId', 'tabId'),
+  navigate: browserOmit('sessionId', 'tabId', 'url', 'timeoutMs'),
+  snapshot: browserOmit('sessionId', 'tabId', 'timeoutMs'),
+  interact: browserOmit('sessionId', 'tabId', 'timeoutMs', 'interaction', 'target', 'input', 'key', 'selectValue', 'state'),
+  screenshot: browserOmit('sessionId', 'tabId', 'fullPage'),
+  upload: browserOmit('sessionId', 'tabId', 'timeoutMs', 'target', 'path'),
+  download: browserOmit('sessionId', 'tabId', 'timeoutMs', 'interaction', 'target', 'path'),
+  stop: browserOmit('sessionId')
 });
 
 const UI_OMIT = Object.freeze({
@@ -88,6 +121,20 @@ const PUBLIC_BINDINGS_BY_OPERATION = Object.freeze({
   [OP.PROCESS_WRITE]: [expose('relai_process', 'write', { capability: PROCESS, behavior: { taskScope: 'optional' } })],
   [OP.PROCESS_STOP]: [expose('relai_process', 'stop', { capability: PROCESS })],
   [OP.PROCESS_LIST]: [expose('relai_process', 'list', { capability: READ })],
+  [OP.BROWSER]: [
+    expose('relai_browser', 'status', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ omit: BROWSER_OMIT.status }) }),
+    expose('relai_browser', 'start', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['url'], omit: BROWSER_OMIT.start }) }),
+    expose('relai_browser', 'tabs', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId'], omit: BROWSER_OMIT.tabs }) }),
+    expose('relai_browser', 'open_tab', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId'], omit: BROWSER_OMIT.open_tab }) }),
+    expose('relai_browser', 'close_tab', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId', 'tabId'], omit: BROWSER_OMIT.close_tab }) }),
+    expose('relai_browser', 'navigate', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId', 'url'], omit: BROWSER_OMIT.navigate }) }),
+    expose('relai_browser', 'snapshot', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId'], omit: BROWSER_OMIT.snapshot }) }),
+    expose('relai_browser', 'interact', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId', 'interaction', 'target'], omit: BROWSER_OMIT.interact }) }),
+    expose('relai_browser', 'screenshot', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId'], omit: BROWSER_OMIT.screenshot }) }),
+    expose('relai_browser', 'upload', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId', 'path', 'target'], omit: BROWSER_OMIT.upload }) }),
+    expose('relai_browser', 'download', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId', 'path', 'interaction', 'target'], omit: BROWSER_OMIT.download }) }),
+    expose('relai_browser', 'stop', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId'], omit: BROWSER_OMIT.stop }) })
+  ],
   [OP.UI]: [
     expose('relai_ui', 'start', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['port'], omit: UI_OMIT.start }) }),
     expose('relai_ui', 'navigate', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId', 'route'], omit: UI_OMIT.navigate }) }),
@@ -99,6 +146,14 @@ const PUBLIC_BINDINGS_BY_OPERATION = Object.freeze({
     expose('relai_ui', 'viewport', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId', 'width', 'height'], omit: UI_OMIT.viewport }) }),
     expose('relai_ui', 'reload', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId'], omit: UI_OMIT.reload }) }),
     expose('relai_ui', 'stop', { capability: PROCESS, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['sessionId'], omit: UI_OMIT.stop }) })
+  ],
+  [OP.DESKTOP]: [
+    expose('relai_desktop', 'open_path', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['path'], omit: DESKTOP_OMIT.open_path }) }),
+    expose('relai_desktop', 'reveal_path', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['path'], omit: DESKTOP_OMIT.reveal_path }) }),
+    expose('relai_desktop', 'open_uri', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['uri'], omit: DESKTOP_OMIT.open_uri }) }),
+    expose('relai_desktop', 'launch_application', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['application'], omit: DESKTOP_OMIT.launch_application }) }),
+    expose('relai_desktop', 'clipboard_read', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ omit: DESKTOP_OMIT.clipboard_read }) }),
+    expose('relai_desktop', 'clipboard_write', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['text'], omit: DESKTOP_OMIT.clipboard_write }) })
   ],
   [OP.COMPUTER]: [
     expose('relai_computer', 'status', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ omit: COMPUTER_OMIT.status }) }),

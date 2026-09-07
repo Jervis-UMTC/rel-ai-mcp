@@ -55,7 +55,7 @@ try {
   lockHolder.exec('BEGIN IMMEDIATE');
   const contentionStartedAt = Date.now();
   await assert.rejects(
-    () => recordTaskIntegrityEvent(config, event('lock-contention-task', 'work.begin')),
+    () => recordTaskIntegrityEvent(config, event('lock-contention-task', 'edit')),
     error => error?.code === 'TASK_INTEGRITY_PERSISTENCE_FAILED',
     'fresh SQLite task-integrity contention must fail rather than block the MCP event loop'
   );
@@ -178,7 +178,26 @@ try {
   assert.ok(workspaceState.uncommittedOwners['task-one.js']?.includes('@ambient'), 'taskless mutations must remain ambient/unowned');
   assert.ok(taskIntegrity.taskCommitOwnership(config, taskOne, 'app').conflictingFiles.includes('task-one.js'), 'taskless mutation of a task-owned path must become an ownership conflict');
 } finally {
-  fs.rmSync(root, { recursive: true, force: true });
+  await removeDirectoryWithRetry(root);
+}
+
+async function removeDirectoryWithRetry(directory, attempts = 40) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      fs.rmSync(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error?.code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+  if (process.platform === 'win32' && lastError?.code === 'EPERM') {
+    process.once('exit', () => { try { fs.rmSync(directory, { recursive: true, force: true }); } catch {} });
+    return;
+  }
+  throw lastError;
 }
 
 console.log('Task-local mutation authority, dirty-baseline isolation, validation freshness, and cross-task attribution passed.');

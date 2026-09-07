@@ -16,6 +16,8 @@ const OPERATION_IDS = Object.freeze({
   PROCESS_STOP: 'process.stop',
   PROCESS_LIST: 'process.list',
   UI: 'ui',
+  BROWSER: 'browser',
+  DESKTOP: 'desktop',
   COMPUTER: 'computer',
   VALIDATE_CHECKS: 'validate.checks',
   VALIDATE_DIAGNOSTICS: 'validate.diagnostics',

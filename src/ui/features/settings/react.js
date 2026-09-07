@@ -656,7 +656,7 @@ function ComputerControlSettings() {
   const enabled = data?.settings?.enabled === true;
   const available = data?.status?.available === true;
   const help = available
-    ? 'Allow ChatGPT connected through Rel.AI to view and control this computer. Operating-system permissions and privilege boundaries still apply.'
+    ? 'Allow ChatGPT connected through Rel.AI to perform local desktop actions when a task needs them. Rel.AI uses direct file and app actions where possible and full pointer or keyboard control only when necessary. Operating-system permissions and privilege boundaries still apply.'
     : `Desktop automation is unavailable on this installation${data?.status?.message ? `: ${data.status.message}` : '.'}`;
   const update = async value => {
     setBusy(true);

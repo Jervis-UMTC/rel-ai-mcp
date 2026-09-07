@@ -27,6 +27,8 @@ const files = [
   'connector-read-result-unit.mjs',
   'repeat-call-guard-unit.mjs',
   'desktop-lifecycle-unit.mjs',
+  'desktop-manager-unit.mjs',
+  'electron-desktop-os-operations-unit.mjs',
   'desktop-local-data-unit.mjs',
   'desktop-settings-unit.mjs',
   'dashboard-session-unit.mjs',

@@ -10,6 +10,7 @@ const contracts = [
   ['../src/http/dashboardSessions.ts', { clearDashboardSessions: 'function', createDashboardBootstrap: 'function' }],
   ['../src/durableState.ts', { readJsonFile: 'function', writeJsonAtomic: 'function' }],
   ['../src/desktopUxContracts.js', { deriveConnectionState: 'function', ERROR_CODES: 'object' }],
+  ['../src/desktopManager.ts', { configureDesktopNativeBridge: 'function', runDesktopAction: 'function' }],
   ['../src/diagnostics.js', { sanitizeDiagnosticValue: 'function' }],
   ['../src/httpServer.ts', { startHttpServer: 'function' }],
   ['../src/process.js', { terminateProcessTree: 'function' }],

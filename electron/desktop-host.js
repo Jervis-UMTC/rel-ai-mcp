@@ -5,6 +5,7 @@ import { createAppUpdater } from './app-updater.js';
 import { createDashboardWindowManager } from './dashboard-window.js';
 import { createDesktopLifecycleManager } from './desktop-lifecycle.js';
 import { createDesktopLocalDataManager } from './desktop-local-data.js';
+import { createDesktopOsOperations } from './desktop-os-operations.js';
 import { createDesktopNotifications } from './desktop-notifications.js';
 import { createDesktopPowerIntegration } from './desktop-power.js';
 import { createDesktopTray } from './desktop-tray.js';
@@ -128,6 +129,7 @@ async function createDesktopHost(options = {}) {
     onLog: (message, logOptions) => runtimeLogs.append(message, logOptions),
     errorCodes: ERROR_CODES
   });
+  const desktopOsOperations = createDesktopOsOperations({ shell, clipboard, platform: process.platform });
   const dashboardWindowManager = createDashboardWindowManager({
     BrowserWindow,
     shell,
@@ -161,7 +163,8 @@ async function createDesktopHost(options = {}) {
     nativeHandlers: {
       pickFolder: () => dashboardWindowManager.pickFolder(),
       openFolder: payload => dashboardWindowManager.openFolder(payload.path),
-      clearRuntimeLogs: () => runtimeLogs.clear()
+      clearRuntimeLogs: () => runtimeLogs.clear(),
+      desktopOperation: payload => desktopOsOperations.run(payload)
     },
     onLog: (message, logOptions) => publicConnectionLog(logOptions.source || 'local-service', message, logOptions),
     onExit: ({ code }) => {

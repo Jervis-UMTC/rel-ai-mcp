@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DESKTOP_NAV_ITEMS, MOBILE_MORE_NAV_ITEMS, MOBILE_NAV_ITEMS, MOBILE_PRIMARY_NAV_ITEMS, SETTINGS_NAV_ITEMS } from '../src/ui/navigation-catalog.js';
 import { activityFilterTransition, mergeActivityEntries } from '../src/ui/features/activity/model.js';
+import { repositorySummary } from '../src/ui/features/workspaces/model.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
@@ -14,6 +15,9 @@ const router = read('src/ui/router.js');
 const settingsReact = read('src/ui/features/settings/react.js');
 const diagnosticsReact = read('src/ui/features/settings/diagnostics-react.js');
 const homeReact = read('src/ui/features/home/react.js');
+const activityReact = read('src/ui/features/activity/react.js');
+const workspacesReact = read('src/ui/features/workspaces/react.js');
+const workspaceModalsReact = read('src/ui/features/workspaces/react-modals.js');
 const modal = read('src/ui/components/modal.js');
 const drawer = read('src/ui/components/drawer.js');
 
@@ -51,6 +55,16 @@ assert.doesNotMatch(settingsReact.match(/function ConnectionPage[\s\S]*?function
 assert.match(diagnosticsReact, /clientCapabilityViews/);
 assert.match(diagnosticsReact, /Tasks extension advertised: \$\{supported\}/, 'Troubleshooting must show the observed MCP Tasks capability without stale internal field names');
 assert.match(homeReact, /className: 'buttonlike secondary compact-button', href: routeMetadata\('workspaces'\)\.href/, 'Inline empty-state navigation must have a non-color link affordance');
+assert.deepEqual(repositorySummary({ exists: true, isGit: false }), {
+  kindLabel: 'Folder',
+  label: 'Local folder',
+  description: 'File and command actions are available. Git actions are unavailable.',
+  tone: 'neutral'
+}, 'ordinary authorized folders must not be presented as broken repositories');
+assert.equal(repositorySummary({ exists: true, isGit: true, branch: 'main' }).kindLabel, 'Repository');
+assert.match(workspacesReact, /repository\.kindLabel/, 'workspace cards must label Folder vs Repository from canonical workspace state');
+assert.match(workspaceModalsReact, /primary local working folder/, 'workspace setup must describe generic local folders before Git-specific capabilities');
+assert.match(activityReact, /readableSection\('File location', activityFileLocation\(entry\)\)/, 'Activity details must expose successful local file destinations without requiring Technical details');
 assert.match(modal, /openModalOverlay\(\{/, 'shared modals must render through the React overlay store');
 assert.match(drawer, /openDrawerOverlay\(\{/, 'shared drawers must render through the React overlay store');
 assert.doesNotMatch(modal, /innerHTML|insertAdjacentHTML/, 'shared modals must not render content through imperative HTML injection');

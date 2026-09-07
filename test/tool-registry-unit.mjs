@@ -16,7 +16,7 @@ import {
 const config = { workspaces: {} };
 const requiredTools = [
   'relai_work', 'relai_snapshot', 'relai_read', 'relai_search', 'relai_inspect', 'relai_edit',
-  'relai_exec', 'relai_process', 'relai_ui', 'relai_computer', 'relai_validate', 'relai_changes', 'relai_publish'
+  'relai_exec', 'relai_process', 'relai_ui', 'relai_browser', 'relai_desktop', 'relai_computer', 'relai_validate', 'relai_changes', 'relai_publish'
 ];
 const removedDirectNames = [
   'relai_begin_work', 'relai_repo_snapshot', 'relai_code_inspect', 'relai_process_start',
@@ -83,6 +83,7 @@ for (const schema of schemas) {
   assert.deepEqual(publicSchema.outputSchema.required, ['ok']);
 }
 const importUnsafeRootKeywords = ['oneOf', 'anyOf', 'allOf', 'if', 'then', 'else', 'not', 'propertyNames'];
+const capabilityRoutingDescriptions = new Set(['relai_read', 'relai_edit', 'relai_ui', 'relai_browser', 'relai_desktop', 'relai_computer']);
 for (const schema of publicSchemas) {
   for (const keyword of importUnsafeRootKeywords) {
     assert.equal(schema.inputSchema[keyword], undefined, `${schema.name} discovery must not use root ${keyword}`);
@@ -93,7 +94,9 @@ for (const schema of publicSchemas) {
   assert.equal(schema._meta?.ui, undefined, `${schema.name} must stay iframe-free`);
   assert.equal(schema._meta?.['openai/outputTemplate'], undefined, `${schema.name} must not attach a ChatGPT output template`);
   assert.ok(String(schema.description || '').trim().length > 0, `${schema.name} must have a concise connector description`);
-  assert.doesNotMatch(schema.description || '', /\b(?:use when|use for|use to|do not|prefer|should|must)\b/i, `${schema.name} connector description must stay declarative instead of prescribing model workflow`);
+  if (!capabilityRoutingDescriptions.has(schema.name)) {
+    assert.doesNotMatch(schema.description || '', /\b(?:use when|use for|use to|do not|prefer|should|must)\b/i, `${schema.name} connector description must stay declarative unless it owns host/local capability routing`);
+  }
 }
 const publicWorkSchema = publicSchemas.find(item => item.name === 'relai_work')?.inputSchema;
 for (const field of ['workspace', 'title', 'objective', 'bootstrap', 'instructionPath', 'summary', 'reason', 'work_id']) {

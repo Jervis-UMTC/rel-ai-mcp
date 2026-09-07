@@ -6,12 +6,15 @@ import { projectServiceActivityEvent, projectServiceActivitySnapshot } from './s
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error('Rel.AI service process requires an Electron utility-process parent port.');
 
-const [httpModule, toolActivity, dashboardSessions, coreDesktopOperations] = await Promise.all([
+const [httpModule, toolActivity, dashboardSessions, coreDesktopOperations, desktopManager] = await Promise.all([
   importResourceModule('src/httpServer.ts'),
   importResourceModule('src/toolActivity.js'),
   importResourceModule('src/http/dashboardSessions.ts'),
-  importResourceModule('src/core/desktop-operations.ts')
+  importResourceModule('src/core/desktop-operations.ts'),
+  importResourceModule('src/desktopManager.ts')
 ]);
+
+desktopManager.configureDesktopNativeBridge(payload => callNative('desktopOperation', payload));
 
 let httpServer = null;
 let activeToken = '';

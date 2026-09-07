@@ -173,6 +173,25 @@ try {
   resetToolActivity();
   if (previousConfig == null) delete process.env.REL_AI_MCP_CONFIG;
   else process.env.REL_AI_MCP_CONFIG = previousConfig;
-  fs.rmSync(root, { recursive: true, force: true });
+  await removeDirectoryWithRetry(root);
 }
 process.exit(0);
+
+async function removeDirectoryWithRetry(directory, attempts = 40) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      fs.rmSync(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error?.code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+  if (process.platform === 'win32' && lastError?.code === 'EPERM') {
+    process.once('exit', () => { try { fs.rmSync(directory, { recursive: true, force: true }); } catch {} });
+    return;
+  }
+  throw lastError;
+}

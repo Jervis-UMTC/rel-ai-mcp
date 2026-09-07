@@ -132,6 +132,8 @@ Rel.AI targets MCP ${MCP_PROTOCOL_VERSION}. Every request carries its own protoc
 
 ## Workflow
 
+Prefer the AI host's own capabilities for public-web research, cloud/SaaS connectors, image generation, ordinary writing, and files already uploaded to the host. Use Rel.AI when the task requires access to the user's local machine. Within Rel.AI, prefer structured workspace/file or desktop operations first; use \`relai_browser\` for localhost, LAN/intranet, VPN-only, machine-local authenticated, or local upload/download browser workflows; use \`relai_computer\` only when structured operations and browser automation are insufficient. \`relai_ui\` remains the bounded localhost QA/debug surface.
+
 Use Rel.AI tools directly against an authorized workspace. Start \`relai_work\` with action \`begin\` only when durable task identity, ownership, recovery, task-scoped review, or task-scoped publication is useful. Supplying \`work_id\` attributes compatible operations to that durable session; omitting it leaves supported operations workspace- or resource-scoped, and Rel.AI never guesses an omitted task. Use \`relai_snapshot\`, \`relai_search\`, \`relai_inspect\`, and \`relai_read\` only as needed. Use \`relai_process\` for persistent commands and \`relai_validate\` for checks, diagnostics, or local HTTP probes.
 
 Use \`relai_edit\` as the single file mutation tool. Destructive operations may return \`input_required\`; retry with the accepted response and integrity-protected requestState. Native asynchronous work is returned only when the current request advertises \`io.modelcontextprotocol/tasks\`, then polled with \`tasks/get\` and controlled with \`tasks/update\` or \`tasks/cancel\`.

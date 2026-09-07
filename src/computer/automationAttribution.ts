@@ -42,17 +42,21 @@ function assertAutomationAttribution(
   expected: AutomationAttribution,
   workspace: AutomationWorkspace,
   args: AutomationArgs = {},
-  context: AutomationContext = {}
+  context: AutomationContext = {},
+  options: Readonly<{ resource?: 'ui' | 'browser'; ignoreTask?: boolean }> = {}
 ): void {
+  const browser = options.resource === 'browser';
+  const codePrefix = browser ? 'BROWSER_SESSION' : 'UI_SESSION';
+  const label = browser ? 'Local browser session' : 'UI test session';
   if (expected.workspaceId !== workspace.alias) {
-    throw taskError('UI_SESSION_WORKSPACE_MISMATCH', 'UI test session belongs to a different workspace.');
+    throw taskError(`${codePrefix}_WORKSPACE_MISMATCH`, `${label} belongs to a different workspace.`);
   }
   if (expected.principalFingerprint !== principalFingerprint(context.principal)) {
-    throw taskError('UI_SESSION_PRINCIPAL_MISMATCH', 'UI test session belongs to a different authenticated client.');
+    throw taskError(`${codePrefix}_PRINCIPAL_MISMATCH`, `${label} belongs to a different authenticated client.`);
   }
   const taskId = taskIdFor(args, context);
-  if (taskId && expected.taskId && taskId !== expected.taskId) {
-    throw taskError('UI_SESSION_TASK_MISMATCH', 'The supplied work_id does not match this UI session attribution.');
+  if (options.ignoreTask !== true && taskId && expected.taskId && taskId !== expected.taskId) {
+    throw taskError(`${codePrefix}_TASK_MISMATCH`, `The supplied work_id does not match this ${browser ? 'local browser' : 'UI'} session attribution.`);
   }
 }
 

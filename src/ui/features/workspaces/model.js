@@ -79,13 +79,14 @@ export function branchSummary(operational = {}) {
 
 export function repositorySummary(operational = {}) {
   if (operational.exists === false) {
-    return { label: 'Folder missing', description: 'Rel.AI cannot find this project folder.', tone: 'bad' };
+    return { kindLabel: 'Folder', label: 'Folder missing', description: 'Rel.AI cannot find this local folder.', tone: 'bad' };
   }
   if (!operational.isGit) {
-    return { label: 'Git not set up', description: 'You can still work with files, but Git actions are unavailable.', tone: 'neutral' };
+    return { kindLabel: 'Folder', label: 'Local folder', description: 'File and command actions are available. Git actions are unavailable.', tone: 'neutral' };
   }
   const changed = Number(operational.changedFileCount || 0);
   return {
+    kindLabel: 'Repository',
     label: branchSummary(operational),
     description: operational.dirty ? `${changed} changed file${changed === 1 ? '' : 's'}` : 'No uncommitted changes',
     tone: operational.dirty ? 'warn' : 'good'

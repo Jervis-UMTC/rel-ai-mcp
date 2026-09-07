@@ -15,6 +15,8 @@ import { relaiExec } from '../bridge/exec.js';
 import { startTask, taskBootstrapFromSnapshot } from './task.js';
 import { startManagedProcess, readManagedProcess, writeManagedProcess, stopManagedProcess, listManagedProcesses } from '../processManager.js';
 import { runUiAction } from '../webAutomationManager.js';
+import { runLocalBrowserAction } from '../browser/localBrowserManager.ts';
+import { runDesktopAction } from '../desktopManager.ts';
 import { runComputerAction } from '../computerManager.js';
 import { relaiSemanticSearch } from '../bridge/semanticSearch.js';
 import { repositoryIntelligence } from '../repository/intelligence/service.js';
@@ -117,6 +119,8 @@ const HANDLERS = Object.freeze({
   processStop: (config, args, context) => stopManagedProcess(config, args, context),
   processList: (config, args, context) => listManagedProcesses(config, args, context),
   ui: inWorkspace((workspace, config, args, context) => runUiAction(workspace, config, args, context)),
+  browser: inWorkspace((workspace, config, args, context) => runLocalBrowserAction(workspace, config, args, context)),
+  desktop: inWorkspace((workspace, config, args, context) => runDesktopAction(workspace, config, args, context)),
   computer: inWorkspace((workspace, config, args, context) => runComputerAction(workspace, config, args, context)),
   semanticSearch: inWorkspace((workspace, config, args, context) => relaiSemanticSearch(workspace, config, withWorkflowTaskContext(config, workspace, args, context), context)),
   diagnosticsRun: inWorkspace((workspace, config, args, context) => relaiDiagnosticsRun(workspace, config, args, context)),

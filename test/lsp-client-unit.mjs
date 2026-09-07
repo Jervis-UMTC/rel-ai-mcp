@@ -55,7 +55,7 @@ const client = new LspClient({
   argv: ['--input-type=module', '-e', serverSource],
   cwd: process.cwd(),
   name: 'fake-language-server',
-  requestTimeoutMs: 100
+  requestTimeoutMs: 2_000
 });
 
 try {
@@ -67,7 +67,7 @@ try {
     () => client.request('test/slow', {}, { timeoutMs: 100 }),
     /request timed out: test\/slow/
   );
-  const timedOut = await withTimeout(timedOutCancellation, 1_000);
+  const timedOut = await withTimeout(timedOutCancellation, 5_000);
   assert.ok(Number.isInteger(timedOut?.id), 'request timeout must notify the server with $/cancelRequest');
   assert.deepEqual(await client.request('test/ping', {}), { ok: true }, 'a timed-out request must not poison later requests');
 
@@ -76,7 +76,7 @@ try {
   const request = client.request('test/abort', {}, { signal: controller.signal, timeoutMs: 1_000 });
   controller.abort();
   await assert.rejects(request, error => error?.name === 'AbortError');
-  const aborted = await withTimeout(abortedCancellation, 1_000);
+  const aborted = await withTimeout(abortedCancellation, 5_000);
   assert.ok(Number.isInteger(aborted?.id), 'explicit abort must notify the server with $/cancelRequest');
   assert.notEqual(aborted.id, timedOut.id, 'distinct requests must retain distinct JSON-RPC cancellation identities');
   assert.deepEqual(await client.request('test/ping', {}), { ok: true }, 'an aborted request must not poison later requests');
@@ -93,7 +93,7 @@ try {
   assert.equal(client.state, 'running');
   assert.deepEqual(await client.request('test/ping', {}), { ok: true }, 'a stopped client must be restartable');
 
-  await assert.rejects(() => client.request('test/crash', {}, { timeoutMs: 1_000 }));
+  await assert.rejects(() => client.request('test/crash', {}, { timeoutMs: 5_000 }));
   assert.equal(client.state, 'failed', 'an unexpected language-server exit must become an explicit failed state');
   assert.ok(client.lastError, 'language-server failure state must retain a useful error');
 

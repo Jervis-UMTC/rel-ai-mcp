@@ -182,6 +182,14 @@ assert.equal(approvalRequirement('relai_publish', { action: 'commit', work_id: '
 assert.equal(approvalRequirement('relai_publish', { action: 'commit', message: 'Taskless explicit commit', paths: ['src/selected.js'] }), null, 'taskless explicit local commits must execute without dashboard approval');
 assert.equal(approvalRequirement('relai_publish', { action: 'commit', work_id: 'work_contract', message: 'Contract commit', addAll: true }), null, 'explicit addAll local commits must not require dashboard approval');
 assert.equal(approvalRequirement('relai_publish', { action: 'commit', message: 'Sensitive commit', paths: ['secret.txt'], sensitiveAuthorization: { operation: 'commit', paths: ['secret.txt'], reason: 'User explicitly requested this local commit.' } }), null, 'sensitiveAuthorization is the explicit local commit authorization and must not trigger a second approval layer');
+for (const entry of catalog.filter(item => item.publicTool === 'relai_browser')) {
+  assert.equal(entry.capability, 'process:manage', `relai_browser:${entry.action} must use structured process/browser authorization rather than raw computer control`);
+  assert.equal(entry.behavior.taskScope, 'optional', `relai_browser:${entry.action} must allow principal/workspace/session authority without synthetic durable work`);
+  assert.equal(approvalRequirement('relai_browser', sampleArgs(entry)), null, `relai_browser:${entry.action} must use principal authorization without a duplicate MCP approval flow`);
+}
+for (const entry of catalog.filter(item => item.publicTool === 'relai_desktop')) {
+  assert.equal(approvalRequirement('relai_desktop', sampleArgs(entry)), null, `relai_desktop:${entry.action} must use principal authorization without a duplicate MCP approval flow`);
+}
 for (const entry of catalog.filter(item => item.publicTool === 'relai_computer')) {
   assert.equal(approvalRequirement('relai_computer', sampleArgs(entry)), null, `relai_computer:${entry.action} must never enter the MCP approval flow`);
 }
@@ -217,6 +225,24 @@ function sampleArgs(entry) {
     case 'relai_ui:stop': args.sessionId = 'ui_abcdefghijklmnopqrst'; break;
     case 'relai_ui:interact': Object.assign(args, { sessionId: 'ui_abcdefghijklmnopqrst', interaction: 'click', target: { by: 'text', value: 'Save' } }); break;
     case 'relai_ui:viewport': Object.assign(args, { sessionId: 'ui_abcdefghijklmnopqrst', width: 1280, height: 720 }); break;
+    case 'relai_browser:start': args.url = 'http://192.168.1.20/app'; break;
+    case 'relai_browser:status': break;
+    case 'relai_browser:tabs':
+    case 'relai_browser:open_tab':
+    case 'relai_browser:snapshot':
+    case 'relai_browser:screenshot':
+    case 'relai_browser:stop': args.sessionId = 'browser_abcdefghijklmnopqrst'; break;
+    case 'relai_browser:close_tab': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', tabId: 'tab_abcdefghijklmnopqrst' }); break;
+    case 'relai_browser:navigate': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', url: 'https://intranet.example.test/page' }); break;
+    case 'relai_browser:interact': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', interaction: 'click', target: { by: 'text', value: 'Save' } }); break;
+    case 'relai_browser:upload': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', path: 'artifact.pdf', target: { by: 'label', value: 'Upload' } }); break;
+    case 'relai_browser:download': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', path: 'downloads/report.pdf', interaction: 'click', target: { by: 'text', value: 'Download' } }); break;
+    case 'relai_desktop:open_path':
+    case 'relai_desktop:reveal_path': Object.assign(args, { workspace: 'fixture', path: 'README.md' }); break;
+    case 'relai_desktop:open_uri': Object.assign(args, { workspace: 'fixture', uri: 'https://example.com' }); break;
+    case 'relai_desktop:launch_application': Object.assign(args, { workspace: 'fixture', application: 'notepad.exe' }); break;
+    case 'relai_desktop:clipboard_read': args.workspace = 'fixture'; break;
+    case 'relai_desktop:clipboard_write': Object.assign(args, { workspace: 'fixture', text: 'hello' }); break;
     case 'relai_computer:move':
     case 'relai_computer:click':
     case 'relai_computer:double_click':

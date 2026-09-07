@@ -209,6 +209,7 @@ assert.match(settingsReact, /Keep computer awake/);
 assert.match(settingsReact, /display can still turn off normally/i);
 assert.match(settingsReact, /Keep Rel\.AI running when I close the window/, 'App settings must expose explicit close-window behavior');
 assert.match(settingsReact, /Reduced background work/, 'App settings must expose one coarse background-work control');
+assert.match(settingsReact, /direct file and app actions where possible and full pointer or keyboard control only when necessary/, 'Computer Control help must explain the local-control hierarchy without exposing internal routing jargon');
 assert.match(main, /canHideOnClose:[\s\S]{0,180}keepRunningOnClose/, 'dashboard close behavior must honor the persisted user preference');
 assert.match(main, /setKeepAwakeEnabled\(lifecycleStatus\.keepAwake === true\)/, 'saved keep-awake preference must activate before normal desktop work starts');
 assert.match(main, /reducedBackgroundWork:\s*lifecycleStatus\.reducedBackgroundWork === true/, 'saved reduced-background-work preference must reach the service before normal desktop work starts');

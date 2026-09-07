@@ -260,6 +260,24 @@ function requiredArgs(entry) {
     case 'relai_ui:network':
     case 'relai_ui:reload':
     case 'relai_ui:stop': return { sessionId: 'ui_abcdefghijklmnopqrst' };
+    case 'relai_browser:start': return { url: 'http://192.168.1.20/app' };
+    case 'relai_browser:status': return {};
+    case 'relai_browser:tabs':
+    case 'relai_browser:open_tab':
+    case 'relai_browser:snapshot':
+    case 'relai_browser:screenshot':
+    case 'relai_browser:stop': return { sessionId: 'browser_abcdefghijklmnopqrst' };
+    case 'relai_browser:close_tab': return { sessionId: 'browser_abcdefghijklmnopqrst', tabId: 'tab_abcdefghijklmnopqrst' };
+    case 'relai_browser:navigate': return { sessionId: 'browser_abcdefghijklmnopqrst', url: 'https://intranet.example.test/page' };
+    case 'relai_browser:interact': return { sessionId: 'browser_abcdefghijklmnopqrst', interaction: 'click', target: { by: 'text', value: 'Save' } };
+    case 'relai_browser:upload': return { sessionId: 'browser_abcdefghijklmnopqrst', path: 'artifact.pdf', target: { by: 'label', value: 'Upload' } };
+    case 'relai_browser:download': return { sessionId: 'browser_abcdefghijklmnopqrst', path: 'downloads/report.pdf', interaction: 'click', target: { by: 'text', value: 'Download' } };
+    case 'relai_desktop:open_path':
+    case 'relai_desktop:reveal_path': return { workspace: 'repo', path: 'README.md' };
+    case 'relai_desktop:open_uri': return { workspace: 'repo', uri: 'https://example.com' };
+    case 'relai_desktop:launch_application': return { workspace: 'repo', application: 'notepad.exe' };
+    case 'relai_desktop:clipboard_read': return { workspace: 'repo' };
+    case 'relai_desktop:clipboard_write': return { workspace: 'repo', text: 'hello' };
     case 'relai_computer:move':
     case 'relai_computer:click':
     case 'relai_computer:double_click':
