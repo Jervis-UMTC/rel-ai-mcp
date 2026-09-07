@@ -211,6 +211,23 @@ try {
     /profile path is not a directory/i
   );
 
+  const redirectedPrincipal = { clientId: 'browser-io-test', subject: 'redirected-user', authMode: 'test' };
+  const redirectedPath = browserProfileDirectory({ stateDir }, principalFingerprint(redirectedPrincipal));
+  const redirectedPrincipalDirectory = path.dirname(redirectedPath);
+  const redirectedTarget = path.join(outside, 'redirected-profile');
+  fs.mkdirSync(redirectedTarget, { recursive: true });
+  fs.symlinkSync(redirectedTarget, redirectedPrincipalDirectory, process.platform === 'win32' ? 'junction' : 'dir');
+  const redirectedRuntime = createBrowserRuntime({ launch: fake.launch, getProfileConfig: () => ({ stateDir }) });
+  await assert.rejects(
+    () => redirectedRuntime.start(workspace, {
+      url: 'http://127.0.0.1:3000/',
+      profile: 'persistent',
+      work_id: 'work_profile_redirected'
+    }, { taskId: 'work_profile_redirected', principal: redirectedPrincipal }),
+    /symbolic link|profile path/i
+  );
+  assert.equal(fs.existsSync(path.join(redirectedTarget, 'default')), false, 'persistent profile creation must not follow a redirected principal directory');
+
   const cleared = await clearPersistentBrowserProfiles({ stateDir });
   assert.equal(cleared.cleared, true);
   assert.equal(fs.existsSync(persistentBrowserProfileRoot({ stateDir })), false);

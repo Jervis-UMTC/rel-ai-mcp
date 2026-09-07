@@ -1,3 +1,12 @@
+function registerBrowserSurfaceIpc({ ipc, channels, getBrowserState, setBrowserSurfaceBounds, setBrowserControl, selectBrowserTab, closeBrowserTab, stopActiveBrowserSession }) {
+  ipc.handle(channels.DESKTOP_BROWSER_GET_STATE, 'Embedded browser state', () => getBrowserState());
+  ipc.handle(channels.DESKTOP_BROWSER_SET_BOUNDS, 'Embedded browser surface', (_event, bounds) => setBrowserSurfaceBounds(normalizeBrowserBounds(bounds)));
+  ipc.handle(channels.DESKTOP_BROWSER_SET_CONTROL, 'Embedded browser control', (_event, owner) => setBrowserControl(normalizeBrowserControl(owner)));
+  ipc.handle(channels.DESKTOP_BROWSER_SELECT_TAB, 'Embedded browser tab selection', (_event, nativePageId) => selectBrowserTab(normalizeBrowserPageId(nativePageId)));
+  ipc.handle(channels.DESKTOP_BROWSER_CLOSE_TAB, 'Embedded browser tab close', (_event, nativePageId) => closeBrowserTab(normalizeBrowserPageId(nativePageId)));
+  ipc.handle(channels.DESKTOP_BROWSER_STOP, 'Embedded browser stop', () => stopActiveBrowserSession());
+}
+
 function registerAnalyticsIpc({ ipc, channels, getLocalUsage }) {
   ipc.handle(channels.DESKTOP_ANALYTICS_LOCAL, 'Local analytics', (_event, month) => getLocalUsage(normalizeAnalyticsMonth(month)));
 }
@@ -46,10 +55,31 @@ function registerLocalDataIpc({ ipc, channels, getLocalDataUsage, clearTemporary
   ipc.handle(channels.DESKTOP_LOCAL_DATA_OPEN_FOLDER, 'Local data folder', () => openLocalDataFolder());
 }
 
+function normalizeBrowserBounds(bounds) {
+  if (!bounds || typeof bounds !== 'object' || Array.isArray(bounds) || typeof bounds.visible !== 'boolean') throw new Error('Embedded browser bounds must specify visible as a boolean.');
+  if (!bounds.visible) return { visible: false };
+  const values = Object.fromEntries(['x', 'y', 'width', 'height'].map(key => [key, Number(bounds[key])]));
+  if (!Object.values(values).every(Number.isFinite)) throw new Error('Embedded browser bounds require finite x, y, width, and height values.');
+  if (values.width < 1 || values.height < 1 || values.width > 16384 || values.height > 16384 || values.x < 0 || values.y < 0 || values.x > 16384 || values.y > 16384) throw new Error('Embedded browser bounds are outside the supported desktop range.');
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, Math.round(value)]));
+}
+
+function normalizeBrowserControl(owner) {
+  const value = String(owner || '').trim();
+  if (value !== 'ai' && value !== 'user') throw new Error('Embedded browser control owner must be ai or user.');
+  return value;
+}
+
+function normalizeBrowserPageId(value) {
+  const nativePageId = String(value || '').trim();
+  if (!/^embedded_page_[A-Za-z0-9_-]{16,160}$/.test(nativePageId)) throw new Error('Embedded browser tab identifier is invalid.');
+  return nativePageId;
+}
+
 function normalizeAnalyticsMonth(month) {
   const value = String(month || '').trim();
   if (value && !/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw new Error('Analytics month must use YYYY-MM.');
   return value;
 }
 
-export { registerAnalyticsIpc, registerDesktopSettingsIpc, registerDiagnosticsIpc, registerLocalDataIpc, registerUpdaterIpc };
+export { registerAnalyticsIpc, registerBrowserSurfaceIpc, registerDesktopSettingsIpc, registerDiagnosticsIpc, registerLocalDataIpc, registerUpdaterIpc };

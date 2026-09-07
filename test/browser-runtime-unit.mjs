@@ -6,6 +6,21 @@ const context = { taskId: 'work_browser_unit' };
 const fake = createFakeBrowserHarness();
 const runtime = createBrowserRuntime({ launch: fake.launch });
 
+const concurrentFake = createFakeBrowserHarness();
+let releaseConcurrentLaunch;
+concurrentFake.state.launchBarrier = new Promise(resolve => { releaseConcurrentLaunch = resolve; });
+const concurrentRuntime = createBrowserRuntime({ launch: concurrentFake.launch });
+const concurrentContext = { taskId: 'work_browser_concurrent' };
+const concurrentStarts = [
+  concurrentRuntime.start(workspace, { url: 'http://127.0.0.1:3000/concurrent-a', work_id: concurrentContext.taskId }, concurrentContext),
+  concurrentRuntime.start(workspace, { url: 'http://127.0.0.1:3000/concurrent-b', work_id: concurrentContext.taskId }, concurrentContext)
+];
+releaseConcurrentLaunch();
+const concurrentResults = await Promise.allSettled(concurrentStarts);
+assert.equal(concurrentResults.filter(result => result.status === 'fulfilled').length, 1, 'concurrent starts for one work session must create exactly one browser session');
+assert.equal(concurrentResults.filter(result => result.status === 'rejected' && result.reason?.code === 'BROWSER_SESSION_ALREADY_ACTIVE').length, 1, 'the racing start must be rejected by the one-browser-per-work-session contract');
+await concurrentRuntime.shutdown();
+
 assert.equal(runtime.activeSessionCount(), 0);
 assert.equal((await runtime.status(workspace, {}, context)).activeSessionCount, 0);
 assert.equal(normalizeBrowserUrl('http://127.0.0.1:3000/path'), 'http://127.0.0.1:3000/path');
@@ -162,6 +177,7 @@ function createFakeBrowserHarness() {
   const state = {
     closeCount: 0,
     failNextLaunch: false,
+    launchBarrier: null,
     timeoutInteraction: false,
     pendingSnapshot: false,
     navigateCount: 0,
@@ -169,6 +185,7 @@ function createFakeBrowserHarness() {
   };
 
   async function launch() {
+    if (state.launchBarrier) await state.launchBarrier;
     if (state.failNextLaunch) {
       state.failNextLaunch = false;
       throw new Error('simulated launch failure');

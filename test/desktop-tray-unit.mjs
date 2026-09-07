@@ -69,11 +69,23 @@ assert.equal(tray.update(), true, 'a visible updater percentage change must refr
 assert.equal(buildCount, 3);
 assert.ok(currentMenu.some(item => item.label === 'Downloading update… 13%'));
 
+updateStatus = { state: 'downloaded', availableVersion: '0.28.0', installMode: 'restart', integrityVerified: true };
+assert.equal(tray.update(), true);
+assert.ok(currentMenu.some(item => item.label === 'Install update v0.28.0'), 'Windows updates should describe the in-app install flow instead of a pre-emptive restart');
 updateStatus = { state: 'downloaded', availableVersion: '0.28.0', installMode: 'open_dmg', integrityVerified: true };
 assert.equal(tray.update(), true);
 assert.ok(currentMenu.some(item => item.label === 'Open update DMG v0.28.0'), 'macOS manual installs must not be labeled as automatic restarts');
 
-status = { ...status, localMcpUrl: 'http://127.0.0.1:4444/mcp' };
+updateStatus = { state: 'installing', availableVersion: '0.28.0' };
+assert.equal(tray.update(), true);
+for (const label of ['Copy local MCP address', 'Stop Rel.AI', 'Troubleshooting', 'Settings', 'Quit Rel.AI MCP']) {
+  assert.equal(currentMenu.find(item => item.label === label)?.enabled, false, `${label} must be disabled while the update owns the application lifecycle`);
+}
+assert.equal(currentMenu.find(item => item.label === 'Installing update…')?.enabled, false);
+assert.notEqual(currentMenu.find(item => item.label === 'Open Dashboard')?.enabled, false, 'the dashboard must remain reachable so the user can see update progress');
+
+updateStatus = { state: 'downloaded', availableVersion: '0.28.0', installMode: 'restart', integrityVerified: true };
+status = { ...status, localMcpUrl: 'http://127.0.0.1:4444/mcp' }; 
 assert.equal(tray.update(), true, 'menu actions must refresh when their captured desktop state changes');
 const copyItem = currentMenu.find(item => item.label === 'Copy local MCP address');
 copyItem.click();

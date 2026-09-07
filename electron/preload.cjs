@@ -19,6 +19,15 @@ if (surface === 'dashboard') {
     minimizeWindow: () => ipcRenderer.invoke('desktop:window:minimize'),
     toggleMaximizeWindow: () => ipcRenderer.invoke('desktop:window:toggle-maximize'),
     closeWindow: () => ipcRenderer.invoke('desktop:window:close'),
+    browser: {
+      getState: () => ipcRenderer.invoke('desktop:browser:get-state'),
+      setBounds: bounds => ipcRenderer.invoke('desktop:browser:set-bounds', bounds),
+      setControl: owner => ipcRenderer.invoke('desktop:browser:set-control', owner),
+      selectTab: nativePageId => ipcRenderer.invoke('desktop:browser:select-tab', nativePageId),
+      closeTab: nativePageId => ipcRenderer.invoke('desktop:browser:close-tab', nativePageId),
+      stop: () => ipcRenderer.invoke('desktop:browser:stop'),
+      onState: callback => subscribe('desktop:browser-state', callback, 'Browser-state')
+    },
     copyText: text => ipcRenderer.invoke('url:copy', text),
     openSettings: () => ipcRenderer.invoke('desktop:open-settings'),
     getSettings: () => ipcRenderer.invoke('desktop:settings:get'),

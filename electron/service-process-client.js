@@ -88,6 +88,12 @@ function createServiceProcessClient(options = {}) {
     sendContext(patch);
   }
 
+  function sendNativeEvent(event) {
+    if (!child?.pid) return false;
+    child.postMessage({ type: 'native-event', event });
+    return true;
+  }
+
   async function dispose(options = {}) {
     const owned = child;
     if (!owned) return;
@@ -223,7 +229,10 @@ function createServiceProcessClient(options = {}) {
     } catch (error) {
       if (utility === child) utility.postMessage({
         type: 'native-response', id: message.id, ok: false,
-        error: { message: error instanceof Error ? error.message : String(error || 'Native desktop request failed.') }
+        error: {
+          message: error instanceof Error ? error.message : String(error || 'Native desktop request failed.'),
+          ...(error?.code ? { code: String(error.code) } : {})
+        }
       });
     }
   }
@@ -284,6 +293,7 @@ function createServiceProcessClient(options = {}) {
     readTaskCodeDiff,
     getTaskCodeWorkspacePath,
     updateContext,
+    sendNativeEvent,
     isListening,
     port,
     activitySource

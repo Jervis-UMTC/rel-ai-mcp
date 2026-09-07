@@ -17,6 +17,7 @@ function createDashboardWindowManager(deps) {
     platform = process.platform,
     iconPath = '',
     canHideOnClose = () => true,
+    canUserClose = () => true,
     isQuitting = () => false,
     onError = () => {},
     onLoadError = onError
@@ -112,6 +113,11 @@ function createDashboardWindowManager(deps) {
       void persistBounds();
       if (isQuitting()) return;
       event.preventDefault();
+      if (!canUserClose()) {
+        dashboardWindow.show();
+        dashboardWindow.focus();
+        return;
+      }
       if (!canHideOnClose()) {
         app.quit();
         return;

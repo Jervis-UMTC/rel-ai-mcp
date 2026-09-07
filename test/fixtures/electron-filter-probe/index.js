@@ -337,6 +337,9 @@ app.whenReady().then(async () => {
       const rangeButton = document.querySelector('[data-usage-range-option="7d"]');
       rangeButton?.click();
       await delay(80);
+      const rangeRouteUpdated = location.hash.includes('range=7d');
+      location.hash = '#usage?range=30d';
+      await delay(80);
       const result = {
         overviewVisible: Boolean(document.querySelector('.usage-overview')),
         localAggregate: /Analytics are stored on this computer/.test(document.querySelector('[data-usage-page]')?.textContent || ''),
@@ -345,10 +348,80 @@ app.whenReady().then(async () => {
         rangeLabels: [...document.querySelectorAll('[data-usage-range-option]')].map(button => button.textContent.trim()),
         rangePressedCount: document.querySelectorAll('[data-usage-range-option][aria-pressed="true"]').length,
         rangeSelectHidden: document.querySelector('[data-usage-range]')?.hidden === true,
-        rangeRouteUpdated: location.hash.includes('range=7d')
+        rangeRouteUpdated,
+        sameRouteRangeSynced: document.querySelector('[data-usage-range]')?.value === '30d'
+          && document.querySelector('[data-usage-range-option="30d"]')?.getAttribute('aria-pressed') === 'true'
       };
       delete window.relaiDesktop;
       return result;
+    })()`);
+
+    const browserTabs = await win.webContents.executeJavaScript(`(async () => {
+      const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+      let state = {
+        ok: true,
+        available: true,
+        active: true,
+        activeSessionCount: 1,
+        control: 'ai',
+        nativeSessionId: 'embedded_browser_acceptance1234567890',
+        nativePageId: 'embedded_page_first1234567890123456',
+        pageCount: 2,
+        url: 'https://first.example.test/',
+        title: 'First tab',
+        loading: false,
+        visible: true,
+        tabs: [
+          { nativePageId: 'embedded_page_first1234567890123456', active: true, url: 'https://first.example.test/', title: 'First tab', loading: false, createdAt: '2026-09-07T00:00:00.000Z' },
+          { nativePageId: 'embedded_page_second123456789012345', active: false, url: 'https://second.example.test/', title: 'Second tab', loading: false, createdAt: '2026-09-07T00:00:01.000Z' }
+        ]
+      };
+      const calls = [];
+      const activeState = nativePageId => {
+        const tabs = state.tabs.map(tab => ({ ...tab, active: tab.nativePageId === nativePageId }));
+        const active = tabs.find(tab => tab.active) || null;
+        state = { ...state, nativePageId, tabs, pageCount: tabs.length, url: active?.url || '', title: active?.title || '', loading: active?.loading === true };
+        return state;
+      };
+      window.relaiDesktop = {
+        browser: {
+          getState: async () => state,
+          onState: () => () => {},
+          setBounds: async bounds => ({ ...state, visible: bounds?.visible === true }),
+          setControl: async owner => (state = { ...state, control: owner }),
+          selectTab: async nativePageId => { calls.push(['select', nativePageId]); return activeState(nativePageId); },
+          closeTab: async nativePageId => {
+            calls.push(['close', nativePageId]);
+            const remaining = state.tabs.filter(tab => tab.nativePageId !== nativePageId);
+            state = { ...state, tabs: remaining, pageCount: remaining.length };
+            const nextId = state.nativePageId === nativePageId ? (remaining[0]?.nativePageId || '') : state.nativePageId;
+            return activeState(nextId);
+          },
+          stop: async () => (state = { ...state, active: false })
+        }
+      };
+      location.hash = '#browser';
+      const started = Date.now();
+      while (document.querySelectorAll('.browser-tab-item').length !== 2 && Date.now() - started < 4000) await delay(50);
+      const before = {
+        count: document.querySelectorAll('.browser-tab-item').length,
+        activeCount: document.querySelectorAll('.browser-tab-item.active').length,
+        labels: [...document.querySelectorAll('.browser-tab-select')].map(button => button.textContent.trim()),
+        closeLabels: [...document.querySelectorAll('.browser-tab-close')].map(button => button.getAttribute('aria-label')),
+        listLabel: document.querySelector('.browser-tab-list')?.getAttribute('aria-label') || ''
+      };
+      document.querySelectorAll('.browser-tab-select')[1]?.click();
+      await delay(50);
+      const selectedSecond = document.querySelectorAll('.browser-tab-item')[1]?.classList.contains('active') === true;
+      document.querySelectorAll('.browser-tab-close')[1]?.click();
+      await delay(50);
+      const afterClose = {
+        count: document.querySelectorAll('.browser-tab-item').length,
+        activeCount: document.querySelectorAll('.browser-tab-item.active').length,
+        title: document.querySelector('.browser-page-title')?.textContent.trim() || ''
+      };
+      delete window.relaiDesktop;
+      return { before, selectedSecond, afterClose, calls };
     })()`);
 
     const responsive = [];
@@ -412,7 +485,7 @@ app.whenReady().then(async () => {
       debuggerAttached = false;
     }
 
-    fs.writeFileSync(outputPath, JSON.stringify({ shared, activityApplied, taskChip, escapeFocus, mobileDrawer, diagnostics, tools, settings, workspaces, connection, usage, responsive, zoom200At420, forcedColors, failures }, null, 2));
+    fs.writeFileSync(outputPath, JSON.stringify({ shared, activityApplied, taskChip, escapeFocus, mobileDrawer, diagnostics, tools, settings, workspaces, connection, usage, browserTabs, responsive, zoom200At420, forcedColors, failures }, null, 2));
   } catch (error) {
     fs.writeFileSync(outputPath, JSON.stringify({ error: error?.stack || String(error), failures }, null, 2));
     process.exitCode = 1;

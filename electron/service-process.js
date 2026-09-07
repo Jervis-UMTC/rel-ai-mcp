@@ -6,15 +6,17 @@ import { projectServiceActivityEvent, projectServiceActivitySnapshot } from './s
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error('Rel.AI service process requires an Electron utility-process parent port.');
 
-const [httpModule, toolActivity, dashboardSessions, coreDesktopOperations, desktopManager] = await Promise.all([
+const [httpModule, toolActivity, dashboardSessions, coreDesktopOperations, desktopManager, browserDriver] = await Promise.all([
   importResourceModule('src/httpServer.ts'),
   importResourceModule('src/toolActivity.js'),
   importResourceModule('src/http/dashboardSessions.ts'),
   importResourceModule('src/core/desktop-operations.ts'),
-  importResourceModule('src/desktopManager.ts')
+  importResourceModule('src/desktopManager.ts'),
+  importResourceModule('src/browser/browserDriver.ts')
 ]);
 
 desktopManager.configureDesktopNativeBridge(payload => callNative('desktopOperation', payload));
+browserDriver.configureBrowserNativeBridge(payload => callNative('browserOperation', payload));
 
 let httpServer = null;
 let activeToken = '';
@@ -44,6 +46,10 @@ parentPort.on('message', event => {
   }
   if (message.type === 'context') {
     updateDesktopContext(message.context);
+    return;
+  }
+  if (message.type === 'native-event') {
+    browserDriver.dispatchBrowserNativeEvent(message.event || {});
     return;
   }
   if (message.type === 'native-response') settleNativeRequest(message);
@@ -245,7 +251,11 @@ function settleNativeRequest(message) {
   pendingNativeRequests.delete(String(message.id || ''));
   clearTimeout(entry.timer);
   if (message.ok) entry.resolve(message.result);
-  else entry.reject(new Error(String(message.error?.message || 'Native desktop request failed.')));
+  else {
+    const error = new Error(String(message.error?.message || 'Native desktop request failed.'));
+    if (message.error?.code) error.code = String(message.error.code);
+    entry.reject(error);
+  }
 }
 
 function publishActivitySnapshot() {

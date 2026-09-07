@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createAppUpdater } from './app-updater.js';
+import { createBrowserSurfaceHost } from './browser-surface-host.js';
 import { createDashboardWindowManager } from './dashboard-window.js';
 import { createDesktopLifecycleManager } from './desktop-lifecycle.js';
 import { createDesktopLocalDataManager } from './desktop-local-data.js';
@@ -40,6 +41,7 @@ async function createDesktopHost(options = {}) {
   const {
     app,
     BrowserWindow,
+    WebContentsView,
     ipcMain,
     Tray,
     Menu,
@@ -52,6 +54,7 @@ async function createDesktopHost(options = {}) {
     dialog,
     screen,
     protocol,
+    session,
     safeStorage,
     utilityProcess,
     autoUpdater
@@ -76,11 +79,14 @@ async function createDesktopHost(options = {}) {
     : path.join(electronRoot, 'build', 'icon.png');
 
   let serviceRuntime = null;
+  let serviceProcessClient = null;
   let desktopTray = null;
   let tunnelRecoverySupervisor = null;
   let appUpdater = null;
   let updateSupportPolicy = null;
   let isQuitting = false;
+  let allowUpdaterQuit = false;
+  let updateInstallPrepared = false;
   let lastServiceContextKey = '';
   let startPromise = null;
   let eventsBound = false;
@@ -138,6 +144,7 @@ async function createDesktopHost(options = {}) {
     screen,
     iconPath,
     canHideOnClose: () => desktopTray?.isAvailable() === true && desktopLifecycle.getStatus().keepRunningOnClose !== false,
+    canUserClose: () => allowUpdaterQuit || appUpdater?.getStatus()?.state !== 'installing',
     getConnection: buildDashboardConnection,
     isQuitting: () => isQuitting,
     onError: error => setStatus({ error: formatError(error), errorCode: ERROR_CODES.UNKNOWN }),
@@ -145,6 +152,14 @@ async function createDesktopHost(options = {}) {
       setStatus({ error: formatError(error), errorCode: ERROR_CODES.DASHBOARD_UNAVAILABLE });
       recoveryWindowManager.show();
     }
+  });
+  const browserSurfaceHost = createBrowserSurfaceHost({
+    WebContentsView,
+    session,
+    getDashboardWindow: dashboardWindowManager.getWindow,
+    openDashboard: route => showDashboardWindow(route),
+    onEvent: event => serviceProcessClient?.sendNativeEvent(event),
+    onError: error => runtimeLogs.append(formatError(error), { level: 'warning', source: 'embedded-browser' })
   });
   const taskbarCompletionBadge = createTaskbarCompletionBadge({
     app,
@@ -155,7 +170,7 @@ async function createDesktopHost(options = {}) {
       || null,
     isApplicationOpen: () => BrowserWindow.getAllWindows().some(win => !win.isDestroyed() && win.isVisible() && win.isFocused())
   });
-  const serviceProcessClient = createServiceProcessClient({
+  serviceProcessClient = createServiceProcessClient({
     utilityProcess,
     modulePath: path.join(electronRoot, 'service-process.js'),
     cwd: path.dirname(electronRoot),
@@ -164,7 +179,8 @@ async function createDesktopHost(options = {}) {
       pickFolder: () => dashboardWindowManager.pickFolder(),
       openFolder: payload => dashboardWindowManager.openFolder(payload.path),
       clearRuntimeLogs: () => runtimeLogs.clear(),
-      desktopOperation: payload => desktopOsOperations.run(payload)
+      desktopOperation: payload => desktopOsOperations.run(payload),
+      browserOperation: payload => browserSurfaceHost.run(payload)
     },
     onLog: (message, logOptions) => publicConnectionLog(logOptions.source || 'local-service', message, logOptions),
     onExit: ({ code }) => {
@@ -262,6 +278,7 @@ async function createDesktopHost(options = {}) {
     },
     stopActivity: () => desktopPower.stop(),
     async closeWindows() {
+      await browserSurfaceHost.closeAll();
       await dashboardWindowManager.close();
       recoveryWindowManager.close();
       setupWindowManager.close({ returnToFallback: false });
@@ -278,7 +295,9 @@ async function createDesktopHost(options = {}) {
     getTaskActivity: desktopPower.getStatus,
     onStatusChange: pushUpdateStatus,
     onLog: (message, logOptions) => runtimeLogs.append(message, logOptions),
-    onBeforeInstall: () => shutdownCoordinator.prepare('update_install'),
+    onBeforeInstall: prepareApplicationUpdate,
+    onInstallCommit: commitApplicationUpdate,
+    onInstallFailed: recoverApplicationUpdate,
     openUpdateFile: file => shell.openPath(file),
     shouldAutoDownload: () => desktopLifecycle.getStatus().autoDownloadUpdates === true,
     errorCodes: ERROR_CODES
@@ -303,6 +322,12 @@ async function createDesktopHost(options = {}) {
     minimizeDashboardWindow: dashboardWindowManager.minimize,
     toggleDashboardMaximize: dashboardWindowManager.toggleMaximize,
     requestDashboardClose: dashboardWindowManager.requestClose,
+    getBrowserState: browserSurfaceHost.getState,
+    setBrowserSurfaceBounds: browserSurfaceHost.setBounds,
+    setBrowserControl: browserSurfaceHost.setControl,
+    selectBrowserTab: browserSurfaceHost.selectTab,
+    closeBrowserTab: browserSurfaceHost.closeTab,
+    stopActiveBrowserSession: browserSurfaceHost.stopActiveSession,
     getRecoveryConfig,
     setTunnelApiKey: tunnelCredentials.setApiKey,
     openRecoverySetup,
@@ -408,7 +433,7 @@ async function createDesktopHost(options = {}) {
       focusActiveWindow();
     });
     app.on('before-quit', event => {
-      if (shutdownCoordinator.isPrepared()) return;
+      if (allowUpdaterQuit || shutdownCoordinator.isPrepared()) return;
       event.preventDefault();
       isQuitting = true;
       void quitApplication();
@@ -582,7 +607,42 @@ async function createDesktopHost(options = {}) {
     return combineUpdateActionResult(await appUpdater?.installUpdate());
   }
 
+  async function prepareApplicationUpdate() {
+    updateInstallPrepared = false;
+    const taskBlock = taskActivityBlockReason(desktopPower.getStatus(), 'installing the update');
+    if (taskBlock) throw new Error(taskBlock);
+    const stopped = await stopServer({ silent: true, preserveDashboard: true });
+    if (stopped?.cleanup?.clean === false) {
+      throw new Error('Rel.AI could not stop its local runtime cleanly for the update.');
+    }
+    await runtimeLogs.flush();
+    updateInstallPrepared = true;
+  }
+
+  async function commitApplicationUpdate() {
+    if (!updateInstallPrepared) throw new Error('Rel.AI update preparation did not complete.');
+    isQuitting = true;
+    allowUpdaterQuit = true;
+  }
+
+  async function recoverApplicationUpdate() {
+    allowUpdaterQuit = false;
+    isQuitting = false;
+    updateInstallPrepared = false;
+    if (!serviceRuntime.isListening()) await startServer();
+    if (dashboardWindowManager.getWindow()) {
+      await showDashboardWindow('', { forceReload: true });
+    }
+  }
+
   function updateRuntimeAccess() {
+    if (appUpdater?.getStatus()?.state === 'installing') {
+      return {
+        blocked: true,
+        errorCode: ERROR_CODES.UPDATE_BUSY,
+        message: 'Rel.AI is installing an update. New local work is paused until the app restarts.'
+      };
+    }
     const policy = updateSupportPolicy?.getStatus();
     if (policy?.requiresUpdate !== true) return { blocked: false, errorCode: '', message: '' };
     const minimum = policy.minimumSupportedVersion
@@ -768,6 +828,7 @@ async function createDesktopHost(options = {}) {
   }
 
   async function quitApplication() {
+    allowUpdaterQuit = false;
     isQuitting = true;
     await shutdownCoordinator.prepare('quit');
     app.exit(0);
@@ -793,6 +854,7 @@ function requireDesktopDependencies(options) {
   const required = [
     'app',
     'BrowserWindow',
+    'WebContentsView',
     'ipcMain',
     'Tray',
     'Menu',
@@ -805,6 +867,7 @@ function requireDesktopDependencies(options) {
     'dialog',
     'screen',
     'protocol',
+    'session',
     'safeStorage',
     'utilityProcess',
     'autoUpdater',

@@ -2,6 +2,7 @@ const CANONICAL_PATHS = new Set([
   'home',
   'tasks',
   'code',
+  'browser',
   'workspaces',
   'activity',
   'processes',

@@ -49,6 +49,7 @@
       "main.js",
       "desktop-host.js",
       "desktop-os-operations.js",
+      "browser-surface-host.js",
       "preload.cjs",
       "launcher-utils.js",
       "secure-tunnel-runtime.js",

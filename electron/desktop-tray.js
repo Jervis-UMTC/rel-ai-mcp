@@ -40,6 +40,7 @@ function createDesktopTray(deps) {
   function update() {
     if (!tray) return false;
     const status = getStatus();
+    const updateInstalling = getUpdateStatus()?.state === 'installing';
     const menu = Menu.buildFromTemplate([
       { label: status.serverRunning ? 'Rel.AI: running' : 'Rel.AI: stopped', enabled: false },
       { label: `Connection: ${status.tunnelStatus || 'stopped'}`, enabled: false },
@@ -47,21 +48,22 @@ function createDesktopTray(deps) {
       { label: 'Open Dashboard', click: () => void openDashboard().catch(onError) },
       {
         label: 'Copy local MCP address',
-        enabled: Boolean(status.localMcpUrl),
+        enabled: Boolean(status.localMcpUrl) && !updateInstalling,
         click: () => { if (status.localMcpUrl) clipboard.writeText(status.localMcpUrl); }
       },
       {
         label: status.serverRunning ? 'Stop Rel.AI' : 'Start Rel.AI',
+        enabled: !updateInstalling,
         click: () => status.serverRunning
           ? void Promise.resolve(stopServer()).catch(onError)
           : void startServer().catch(onError)
       },
       { type: 'separator' },
       updateMenuItem(),
-      { label: 'Troubleshooting', click: () => void openDiagnostics().catch(onError) },
-      { label: 'Settings', click: () => void openSettings().catch(onError) },
+      { label: 'Troubleshooting', enabled: !updateInstalling, click: () => void openDiagnostics().catch(onError) },
+      { label: 'Settings', enabled: !updateInstalling, click: () => void openSettings().catch(onError) },
       { type: 'separator' },
-      { label: 'Quit Rel.AI MCP', click: quit }
+      { label: 'Quit Rel.AI MCP', enabled: !updateInstalling, click: quit }
     ]);
     tray.setContextMenu(menu);
     return true;
@@ -74,7 +76,7 @@ function createDesktopTray(deps) {
     if (status.state === 'downloading') return { label: `Downloading update… ${Math.round(status.progress?.percent || 0)}%`, enabled: false };
     if (status.state === 'installing') return { label: 'Installing update…', enabled: false };
     if (status.state === 'downloaded') {
-      const label = status.installMode === 'open_dmg' ? `Open update DMG${version}` : `Restart to install${version}`;
+      const label = status.installMode === 'open_dmg' ? `Open update DMG${version}` : `Install update${version}`;
       return { label, click: () => runUpdateAction(installUpdate) };
     }
     if (status.state === 'available') return { label: `Download update${version}`, click: () => runUpdateAction(downloadUpdate) };

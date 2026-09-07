@@ -16,7 +16,7 @@ import {
   uploadAuthorizedBrowserFile,
   type BrowserLocalIoWorkspace
 } from './browserLocalIo.ts';
-import { launchLocalBrowserDriver, type BrowserPageDriver, type LocalBrowserDriver } from './playwrightBrowserDriver.ts';
+import { launchBrowserDriver, type BrowserPageDriver, type LocalBrowserDriver } from './browserDriver.ts';
 import { normalizeBrowserProfileMode, preparePersistentBrowserProfile, type BrowserProfileMode } from './browserProfile.ts';
 import type { StructuredInteractionArgs } from './playwrightPrimitives.ts';
 
@@ -61,7 +61,7 @@ type BrowserSessionRecord = {
 };
 
 type BrowserRuntimeDependencies = Readonly<{
-  launch?: typeof launchLocalBrowserDriver;
+  launch?: typeof launchBrowserDriver;
   getProfileConfig?: () => Record<string, unknown>;
 }>;
 
@@ -84,10 +84,12 @@ interface BrowserRuntime {
 }
 
 function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): BrowserRuntime {
-  const launch = dependencies.launch || launchLocalBrowserDriver;
+  const launch = dependencies.launch || launchBrowserDriver;
   const getProfileConfig = dependencies.getProfileConfig || (() => readConfig({ allowMissing: true }));
   const sessions = new Map<string, BrowserSessionRecord>();
   const activeProfiles = new Map<string, string>();
+  const pendingStarts = new Set<Readonly<{ attribution: AutomationAttribution; profileKey: string }>>();
+  const pendingProfiles = new Set<string>();
   const pendingCloses = new Set<Promise<void>>();
 
   async function status(
@@ -123,51 +125,61 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     options: BrowserOperationOptions = {}
   ): Promise<Record<string, unknown>> {
     throwIfAborted(options.signal);
-    const taskId = taskIdFor(args, context);
+    const attribution = createAutomationAttribution(workspace, args, context);
+    const taskId = attribution.taskId;
     const existing = taskId ? [...sessions.values()].find(record =>
       record.attribution.taskId === taskId && attributionMatches(record.attribution, workspace, context)
     ) : null;
-    if (existing) {
-      throw taskError('BROWSER_SESSION_ALREADY_ACTIVE', `Work session already has an active local browser session: ${existing.sessionId}. Stop it before starting another.`);
+    const pendingForTask = taskId ? [...pendingStarts].some(pending =>
+      pending.attribution.taskId === taskId && attributionMatches(pending.attribution, workspace, context)
+    ) : false;
+    if (existing || pendingForTask) {
+      const detail = existing ? `: ${existing.sessionId}` : '';
+      throw taskError('BROWSER_SESSION_ALREADY_ACTIVE', `Work session already has an active or starting local browser session${detail}. Stop it before starting another.`);
     }
-    if (sessions.size >= MAX_ACTIVE_BROWSER_SESSIONS) {
+    if (sessions.size + pendingStarts.size >= MAX_ACTIVE_BROWSER_SESSIONS) {
       throw taskError('BROWSER_SESSION_LIMIT', `Rel.AI supports at most ${MAX_ACTIVE_BROWSER_SESSIONS} concurrent local browser sessions.`);
     }
 
     const viewport = normalizeViewport(args.width, args.height);
     const sessionId = `browser_${crypto.randomBytes(24).toString('base64url')}`;
     const createdAt = new Date().toISOString();
-    const attribution = createAutomationAttribution(workspace, args, context);
     const profileMode = normalizeBrowserProfileMode(args.profile);
     const profileDirectory = profileMode === 'persistent'
       ? preparePersistentBrowserProfile(getProfileConfig(), attribution.principalFingerprint)
       : '';
     const profileKey = normalizeProfileKey(profileDirectory);
-    if (profileKey && activeProfiles.has(profileKey)) {
+    if (profileKey && (activeProfiles.has(profileKey) || pendingProfiles.has(profileKey))) {
       throw taskError('BROWSER_PROFILE_ALREADY_ACTIVE', 'Persistent Rel.AI browser profile is already active in another local browser session.');
     }
-    const driver = await withAbortResource(launch({
-      headless: args.headless !== false,
-      viewport,
-      ignoreHTTPSErrors: args.ignoreHTTPSErrors === true,
-      ...(profileDirectory ? { profileDirectory } : {})
-    }), options.signal, driver => driver.close());
-    const record: BrowserSessionRecord = {
-      sessionId,
-      attribution,
-      driver,
-      tabs: new Map(),
-      activeTabId: '',
-      createdAt,
-      browserProduct: driver.browserProduct,
-      profileMode,
-      profileKey
-    };
-    sessions.set(sessionId, record);
-    if (profileKey) activeProfiles.set(profileKey, sessionId);
-    driver.onDisconnected(() => removeSession(record));
 
+    const pendingStart = Object.freeze({ attribution, profileKey });
+    pendingStarts.add(pendingStart);
+    if (profileKey) pendingProfiles.add(profileKey);
+    let driver: LocalBrowserDriver | null = null;
+    let record: BrowserSessionRecord | null = null;
     try {
+      driver = await withAbortResource(launch({
+        headless: args.headless !== false,
+        viewport,
+        ignoreHTTPSErrors: args.ignoreHTTPSErrors === true,
+        ...(profileDirectory ? { profileDirectory } : {})
+      }), options.signal, launchedDriver => launchedDriver.close());
+      record = {
+        sessionId,
+        attribution,
+        driver,
+        tabs: new Map(),
+        activeTabId: '',
+        createdAt,
+        browserProduct: driver.browserProduct,
+        profileMode,
+        profileKey
+      };
+      sessions.set(sessionId, record);
+      if (profileKey) activeProfiles.set(profileKey, sessionId);
+      driver.onDisconnected(() => removeSession(record!));
+
       const tab = await createTab(record, options.signal);
       const initial = args.url
         ? await navigateTab(tab, normalizeBrowserUrl(args.url), timeoutFor(args.timeoutMs), options.signal)
@@ -182,9 +194,12 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
         ...initial
       });
     } catch (error) {
-      removeSession(record);
-      await driver.close().catch(() => {});
+      if (record) removeSession(record);
+      if (driver) await driver.close().catch(() => {});
       throw error;
+    } finally {
+      pendingStarts.delete(pendingStart);
+      if (profileKey) pendingProfiles.delete(profileKey);
     }
   }
 

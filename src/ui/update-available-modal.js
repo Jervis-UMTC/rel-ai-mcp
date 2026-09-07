@@ -76,6 +76,34 @@ function availableUpdateModalView(status = {}) {
   };
 }
 
+function installingUpdateModalView(status = {}) {
+  if (String(status.state || '') !== 'installing') return null;
+  const version = cleanVersion(status.availableVersion);
+  return {
+    key: `installing:${version || 'update'}`,
+    state: 'installing',
+    blocking: true,
+    allowLater: false,
+    title: 'Updating Rel.AI',
+    description: version ? `Installing Rel.AI MCP v${version}…` : 'Installing the Rel.AI MCP update…',
+    detail: 'Rel.AI is temporarily paused while it prepares the verified update. The app will restart automatically for the final swap.'
+  };
+}
+
+function installFailureModalView(status = {}) {
+  if (String(status.state || '') !== 'downloaded' || !status.error) return null;
+  const version = cleanVersion(status.availableVersion);
+  return {
+    key: `install-failed:${version || 'update'}`,
+    state: 'downloaded',
+    blocking: false,
+    allowLater: true,
+    title: 'Update could not install',
+    description: String(status.error),
+    detail: 'The downloaded update is still verified and ready. Your current Rel.AI version was not replaced.'
+  };
+}
+
 
 function initUpdateAvailableModal(options = {}) {
   const bridge = options.bridge || window.relaiDesktop;
@@ -89,6 +117,16 @@ function initUpdateAvailableModal(options = {}) {
 
   function consider(status) {
     latestStatus = status || latestStatus;
+    const installingView = installingUpdateModalView(latestStatus);
+    if (installingView) {
+      showOrUpdateModal(installingView, latestStatus);
+      return;
+    }
+    const failedInstallView = installFailureModalView(latestStatus);
+    if (failedInstallView) {
+      showOrUpdateModal(failedInstallView, latestStatus);
+      return;
+    }
     const policyView = supportPolicyModalView(latestStatus?.supportPolicy);
     if (policyView) {
       if (updateActionInProgress(latestStatus)) {
@@ -149,13 +187,15 @@ function initUpdateAvailableModal(options = {}) {
 
   async function runSupportUpdateAction(method) {
     if (!method || typeof bridge?.[method] !== 'function') return;
-    closeModal();
+    const keepModalOpen = method === 'installUpdate';
+    if (!keepModalOpen) closeModal();
     try {
       const result = await bridge[method]();
-      if (result?.ok === false) throw new Error(result.error || 'The update action failed.');
       if (result?.status) latestStatus = { ...latestStatus, ...result.status };
       consider(latestStatus);
+      if (result?.ok === false && !keepModalOpen) throw new Error(result.error || 'The update action failed.');
     } catch (error) {
+      if (keepModalOpen) closeActiveModal();
       toast(messageOf(error), { variant: 'error' });
     }
   }
@@ -173,7 +213,7 @@ function supportUpdateAction(status = {}) {
   if (state === 'available') return { kind: 'button', method: 'downloadUpdate', label: `Download v${cleanVersion(status.availableVersion) || 'update'}`, disabled: false, busy: false };
   if (state === 'downloaded') return {
     kind: 'button', method: 'installUpdate',
-    label: status.installMode === 'open_dmg' ? 'Open DMG' : 'Restart and install',
+    label: status.installMode === 'open_dmg' ? 'Open DMG' : 'Install update',
     disabled: false, busy: false
   };
   if (state === 'checking') return { kind: 'button', method: '', label: 'Checking for update…', disabled: true, busy: true };
@@ -187,6 +227,13 @@ function UpdateNoticeContent({ view, status, onLater, onAction }) {
   const detail = view.detail || (view.blocking
     ? 'You can still use the dashboard and update controls, but Rel.AI cannot work with ChatGPT until a supported version is installed.'
     : 'You can update now or continue. Rel.AI will show this notice again on a later launch until you update.');
+  if (view.state === 'installing') {
+    return h('div', { className: 'update-installing-modal', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true', 'aria-busy': 'true' },
+      h('div', { className: 'loading-mark', 'aria-hidden': 'true' }),
+      h('p', null, view.description),
+      h('p', { className: 'muted' }, detail)
+    );
+  }
   const primary = action.kind === 'link'
     ? h('a', { className: 'buttonlike primary', href: RELEASES_URL, target: '_blank', rel: 'noreferrer' }, action.label)
     : h('button', {
@@ -225,4 +272,4 @@ function messageOf(error) {
   return error instanceof Error ? error.message : String(error || 'Application update action failed.');
 }
 
-export { availableUpdateModalView, initUpdateAvailableModal, supportPolicyModalView };
+export { availableUpdateModalView, initUpdateAvailableModal, installingUpdateModalView, supportPolicyModalView };

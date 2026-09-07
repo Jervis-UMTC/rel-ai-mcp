@@ -52,7 +52,7 @@ function createDesktopLifecycleManager(options = {}) {
       firstLaunch: !previous.version,
       updated,
       connectorRefreshRequired,
-      recoveredAfterUncleanShutdown: previous.running === true,
+      recoveredAfterUncleanShutdown: previous.running === true && !updated,
       launchCount: Math.max(0, Number(previous.launchCount || 0)) + 1,
       launchedAt: now(),
       lastCleanExitAt: cleanText(previous.lastCleanExitAt, 80),

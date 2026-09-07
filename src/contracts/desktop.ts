@@ -23,6 +23,31 @@ export interface DesktopStatusDto {
 }
 
 export interface DesktopWindowStateDto { maximized?: boolean; minimized?: boolean; [key: string]: unknown }
+export interface DesktopBrowserTabDto {
+  nativePageId: string;
+  active: boolean;
+  url: string;
+  title: string;
+  loading: boolean;
+  createdAt: string;
+}
+export interface DesktopBrowserStateDto {
+  ok?: boolean;
+  available?: boolean;
+  active?: boolean;
+  activeSessionCount?: number;
+  control?: 'ai' | 'user';
+  nativeSessionId?: string;
+  nativePageId?: string;
+  pageCount?: number;
+  tabs?: readonly DesktopBrowserTabDto[];
+  url?: string;
+  title?: string;
+  loading?: boolean;
+  visible?: boolean;
+  [key: string]: unknown;
+}
+export interface DesktopBrowserSurfaceBoundsDto { visible: boolean; x?: number; y?: number; width?: number; height?: number }
 export interface DesktopIpcInputSpec { mode: DesktopIpcInputMode; windows: readonly DesktopSurface[]; failure: 'reject' | 'ignore' }
 
 export interface DesktopIpcRequestMap {
@@ -47,6 +72,12 @@ export interface DesktopIpcRequestMap {
   'desktop:window:minimize': [];
   'desktop:window:toggle-maximize': [];
   'desktop:window:close': [];
+  'desktop:browser:get-state': [];
+  'desktop:browser:set-bounds': [bounds: DesktopBrowserSurfaceBoundsDto];
+  'desktop:browser:set-control': [owner: 'ai' | 'user'];
+  'desktop:browser:select-tab': [nativePageId: string];
+  'desktop:browser:close-tab': [nativePageId: string];
+  'desktop:browser:stop': [];
   'desktop:open-settings': [];
   'desktop:reload-dashboard': [routeHash?: string];
   'desktop:analytics:local': [month?: string];
@@ -87,6 +118,12 @@ export interface DesktopIpcResponseMap {
   'desktop:window:toggle-maximize': DesktopWindowStateDto;
   'desktop:window:minimize': Record<string, unknown>;
   'desktop:window:close': Record<string, unknown>;
+  'desktop:browser:get-state': DesktopBrowserStateDto;
+  'desktop:browser:set-bounds': DesktopBrowserStateDto;
+  'desktop:browser:set-control': DesktopBrowserStateDto;
+  'desktop:browser:select-tab': DesktopBrowserStateDto;
+  'desktop:browser:close-tab': DesktopBrowserStateDto;
+  'desktop:browser:stop': Record<string, unknown>;
   'desktop:settings:get': Record<string, unknown>;
   'desktop:settings:save': Record<string, unknown>;
   'desktop:lifecycle:get': Record<string, unknown>;
@@ -99,6 +136,7 @@ export interface DesktopIpcEventMap {
   'server:status': DesktopStatusDto;
   'server:log': Record<string, unknown> | string;
   'desktop:window-state': DesktopWindowStateDto;
+  'desktop:browser-state': DesktopBrowserStateDto;
   'desktop:update-status': Record<string, unknown>;
 }
 
@@ -124,6 +162,12 @@ export const DESKTOP_IPC = Object.freeze({
   DESKTOP_WINDOW_MINIMIZE: 'desktop:window:minimize',
   DESKTOP_WINDOW_TOGGLE_MAXIMIZE: 'desktop:window:toggle-maximize',
   DESKTOP_WINDOW_CLOSE: 'desktop:window:close',
+  DESKTOP_BROWSER_GET_STATE: 'desktop:browser:get-state',
+  DESKTOP_BROWSER_SET_BOUNDS: 'desktop:browser:set-bounds',
+  DESKTOP_BROWSER_SET_CONTROL: 'desktop:browser:set-control',
+  DESKTOP_BROWSER_SELECT_TAB: 'desktop:browser:select-tab',
+  DESKTOP_BROWSER_CLOSE_TAB: 'desktop:browser:close-tab',
+  DESKTOP_BROWSER_STOP: 'desktop:browser:stop',
   DESKTOP_OPEN_SETTINGS: 'desktop:open-settings',
   DESKTOP_RELOAD_DASHBOARD: 'desktop:reload-dashboard',
   DESKTOP_ANALYTICS_LOCAL: 'desktop:analytics:local',
@@ -156,6 +200,7 @@ export const DESKTOP_IPC = Object.freeze({
   SERVER_STATUS: 'server:status',
   SERVER_LOG: 'server:log',
   DESKTOP_WINDOW_STATE: 'desktop:window-state',
+  DESKTOP_BROWSER_STATE: 'desktop:browser-state',
   DESKTOP_UPDATE_STATUS: 'desktop:update-status'
 } as const);
 
@@ -188,6 +233,12 @@ export const DESKTOP_IPC_INPUT_CONTRACT = Object.freeze({
   [DESKTOP_IPC.DESKTOP_WINDOW_MINIMIZE]: input('handle', ['dashboard'], 'reject'),
   [DESKTOP_IPC.DESKTOP_WINDOW_TOGGLE_MAXIMIZE]: input('handle', ['dashboard'], 'reject'),
   [DESKTOP_IPC.DESKTOP_WINDOW_CLOSE]: input('handle', ['dashboard'], 'reject'),
+  [DESKTOP_IPC.DESKTOP_BROWSER_GET_STATE]: input('handle', ['dashboard'], 'reject'),
+  [DESKTOP_IPC.DESKTOP_BROWSER_SET_BOUNDS]: input('handle', ['dashboard'], 'reject'),
+  [DESKTOP_IPC.DESKTOP_BROWSER_SET_CONTROL]: input('handle', ['dashboard'], 'reject'),
+  [DESKTOP_IPC.DESKTOP_BROWSER_SELECT_TAB]: input('handle', ['dashboard'], 'reject'),
+  [DESKTOP_IPC.DESKTOP_BROWSER_CLOSE_TAB]: input('handle', ['dashboard'], 'reject'),
+  [DESKTOP_IPC.DESKTOP_BROWSER_STOP]: input('handle', ['dashboard'], 'reject'),
   [DESKTOP_IPC.DESKTOP_OPEN_SETTINGS]: input('handle', ['dashboard'], 'reject'),
   [DESKTOP_IPC.DESKTOP_RELOAD_DASHBOARD]: input('handle', ['dashboard'], 'reject'),
   [DESKTOP_IPC.DESKTOP_ANALYTICS_LOCAL]: input('handle', ['dashboard'], 'reject'),

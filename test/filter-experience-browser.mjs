@@ -134,6 +134,19 @@ try {
   assert.equal(result.usage.rangePressedCount, 1);
   assert.equal(result.usage.rangeSelectHidden, true);
   assert.equal(result.usage.rangeRouteUpdated, true);
+  assert.equal(result.usage.sameRouteRangeSynced, true, 'Usage controls must follow same-route hash changes and browser history.');
+  assert.deepEqual(result.browserTabs.before, {
+    count: 2,
+    activeCount: 1,
+    labels: ['First tab', 'Second tab'],
+    closeLabels: ['Close First tab', 'Close Second tab'],
+    listLabel: 'Open browser tabs'
+  });
+  assert.equal(result.browserTabs.selectedSecond, true, 'Selecting a browser tab must update the visible active-tab state.');
+  assert.deepEqual(result.browserTabs.afterClose, { count: 1, activeCount: 1, title: 'First tab' });
+  assert.equal(result.browserTabs.calls.length, 2);
+  assert.equal(result.browserTabs.calls[0][0], 'select');
+  assert.equal(result.browserTabs.calls[1][0], 'close');
   assert.deepEqual(result.responsive.map(item => item.requestedWidth), [980, 760, 520, 420]);
   for (const viewport of result.responsive) {
     assert.ok(Math.abs(viewport.width - viewport.requestedWidth) <= 2, `requested ${viewport.requestedWidth}px but rendered ${viewport.width}px`);

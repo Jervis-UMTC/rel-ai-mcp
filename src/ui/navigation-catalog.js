@@ -6,6 +6,7 @@ export const WORK_NAV_ITEMS = Object.freeze([
   route('home', 'Overview', 'home', 'Connection status, projects, and recent tasks.', 'Work'),
   route('tasks', 'Tasks', 'tasks', 'See active and completed Rel.AI tasks.', 'Work'),
   route('code', 'Changes', 'code', 'Review current and committed file changes for a Rel.AI task.', 'Work'),
+  route('browser', 'Browser', 'browser', 'View and take over the live local browser session used by Rel.AI.', 'Work'),
   route('workspaces', 'Projects', 'workspaces', 'Choose which project folders Rel.AI can use.', 'Work'),
   route('activity', 'Activity', 'activity', 'See Rel.AI actions and their results.', 'Work')
 ]);
@@ -31,6 +32,7 @@ export const MOBILE_PRIMARY_NAV_ITEMS = Object.freeze([
 ].filter(Boolean));
 export const MOBILE_MORE_NAV_ITEMS = Object.freeze([
   WORK_NAV_ITEMS.find(item => item.id === 'code'),
+  WORK_NAV_ITEMS.find(item => item.id === 'browser'),
   ...APPLICATION_NAV_ITEMS
 ].filter(Boolean));
 export const MOBILE_NAV_ITEMS = Object.freeze([...DESKTOP_NAV_ITEMS]);

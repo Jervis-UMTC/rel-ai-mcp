@@ -269,6 +269,22 @@ try {
     height: 610
   }, 'a stale debounced bounds write must not overwrite the final close-time window state');
 
+  let updateCloseAllowed = false;
+  const updateLockedManager = createDashboardWindowManager({
+    ...dependencies,
+    canUserClose: () => updateCloseAllowed
+  });
+  const updateLockedWindow = await updateLockedManager.open();
+  updateLockedWindow.focused = false;
+  assert.deepEqual(updateLockedManager.requestClose(), { ok: true });
+  assert.equal(updateLockedWindow.hidden, false, 'update preparation must keep the dashboard visible when the user tries to close it');
+  assert.equal(updateLockedWindow.focused, true, 'a blocked update-time close must return focus to the update UI');
+  assert.equal(updateLockedWindow.destroyed, false, 'user close must not terminate the dashboard during update preparation');
+  updateCloseAllowed = true;
+  assert.deepEqual(updateLockedManager.requestClose(), { ok: true });
+  assert.equal(updateLockedWindow.hidden, true, 'the updater-controlled final handoff may close the normal dashboard path');
+  await updateLockedManager.close();
+
   const linuxManager = createDashboardWindowManager({ ...dependencies, platform: 'linux', canHideOnClose: () => true });
   const linuxWindow = await linuxManager.open();
   assert.deepEqual(linuxManager.requestClose(), { ok: true });

@@ -84,12 +84,13 @@ await second.markCleanShutdown();
 const statePath = path.join(stateDir, 'desktop-lifecycle.json');
 const previousState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
 const { connectorRevision: _legacyConnectorRevision, ...legacyState } = previousState;
-fs.writeFileSync(statePath, `${JSON.stringify({ ...legacyState, version: '0.20.7', running: false }, null, 2)}\n`);
+fs.writeFileSync(statePath, `${JSON.stringify({ ...legacyState, version: '0.20.7', running: true }, null, 2)}\n`);
 const updated = createDesktopLifecycleManager({ app, platform: 'win32', env: {}, now, connectorRevision: 'surface-b', onLog: (message, options) => logs.push({ message, options }) });
 const updatedStatus = await updated.start();
 assert.equal(updatedStatus.updated, true);
 assert.equal(updatedStatus.previousVersion, '0.20.7');
 assert.equal(updatedStatus.connectorRefreshRequired, true, 'the first upgrade from lifecycle state without a connector revision must request a refresh');
+assert.equal(updatedStatus.recoveredAfterUncleanShutdown, false, 'a version-changing updater restart must not be reported as an unexpected crash');
 await updated.markCleanShutdown();
 
 const changedSurface = createDesktopLifecycleManager({ app, platform: 'win32', env: {}, now, connectorRevision: 'surface-c', onLog: (message, options) => logs.push({ message, options }) });

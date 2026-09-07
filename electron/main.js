@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  WebContentsView,
   ipcMain,
   Tray,
   Menu,
@@ -13,6 +14,7 @@ import {
   dialog,
   screen,
   protocol,
+  session,
   safeStorage,
   utilityProcess
 } from 'electron';
@@ -25,6 +27,7 @@ const { autoUpdater } = electronUpdater;
 const desktop = await createDesktopHost({
   app,
   BrowserWindow,
+  WebContentsView,
   ipcMain,
   Tray,
   Menu,
@@ -37,6 +40,7 @@ const desktop = await createDesktopHost({
   dialog,
   screen,
   protocol,
+  session,
   safeStorage,
   utilityProcess,
   autoUpdater,

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { availableUpdateModalView, supportPolicyModalView } from '../src/ui/update-available-modal.js';
+import { availableUpdateModalView, installingUpdateModalView, supportPolicyModalView } from '../src/ui/update-available-modal.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'src', 'ui', 'update-available-modal.js'), 'utf8');
@@ -30,6 +30,11 @@ assert.equal(available.allowLater, true);
 assert.equal(available.blocking, false);
 assert.match(available.description, /v0\.27\.5/);
 assert.match(available.detail, /later launch/i);
+const installing = installingUpdateModalView({ state: 'installing', availableVersion: '0.27.5' });
+assert.equal(installing.blocking, true);
+assert.equal(installing.allowLater, false);
+assert.match(installing.title, /Updating Rel\.AI/i);
+assert.match(installing.detail, /temporarily paused/i);
 
 assert.doesNotMatch(source, /Ignore this version/, 'routine updates must not add permanent per-version ignore state');
 assert.doesNotMatch(source, /getNotificationPreferences|setNotificationPreferences/, 'update modals must not depend on notification preferences');
@@ -40,6 +45,8 @@ const actionsStart = source.indexOf("h('div', { className: 'modal-actions' }");
 const laterAction = source.indexOf("'Later'", actionsStart);
 const primaryAction = source.indexOf('\n      primary', actionsStart);
 assert.ok(actionsStart >= 0 && laterAction > actionsStart && primaryAction > laterAction, 'Later must remain before the primary update action');
-assert.match(source, /closeModal\(\);[\s\S]*bridge\[method\]\(\)/, 'update actions must close the modal before starting the action');
+assert.match(source, /keepModalOpen = method === 'installUpdate'/, 'installing must keep the blocking update modal visible while preparation runs');
+assert.match(source, /role: 'status'[\s\S]*'aria-live': 'polite'[\s\S]*'aria-busy': 'true'/, 'install progress must be announced accessibly');
+assert.match(source, /install-failed:/, 'failed update preparation must keep a retryable in-app recovery modal');
 
 console.log('Update available and support-policy modal interaction tests passed.');

@@ -1,6 +1,6 @@
 import { MAX_CLIPBOARD_TEXT_BYTES, createContractIpcRegistrar, logIpcFailure } from './ipc-security.js';
 import { importResourceModule } from './resource-path.js';
-import { registerAnalyticsIpc, registerDesktopSettingsIpc, registerDiagnosticsIpc, registerLocalDataIpc, registerUpdaterIpc } from './ipc-handlers-dashboard.js';
+import { registerAnalyticsIpc, registerBrowserSurfaceIpc, registerDesktopSettingsIpc, registerDiagnosticsIpc, registerLocalDataIpc, registerUpdaterIpc } from './ipc-handlers-dashboard.js';
 import { registerCodeWorkspaceIpc } from './ipc-handlers-code.js';
 
 const { DESKTOP_IPC, DESKTOP_IPC_INPUT_CONTRACT } = await importResourceModule('src/contracts/desktop.ts');
@@ -60,6 +60,16 @@ function registerIpcHandlers(deps) {
     requestDashboardClose: deps.requestDashboardClose,
     openSettingsWindow: deps.openSettingsWindow,
     openDashboardWindow: deps.openDashboardWindow
+  });
+  registerBrowserSurfaceIpc({
+    ipc,
+    channels: DESKTOP_IPC,
+    getBrowserState: deps.getBrowserState,
+    setBrowserSurfaceBounds: deps.setBrowserSurfaceBounds,
+    setBrowserControl: deps.setBrowserControl,
+    selectBrowserTab: deps.selectBrowserTab,
+    closeBrowserTab: deps.closeBrowserTab,
+    stopActiveBrowserSession: deps.stopActiveBrowserSession
   });
   registerAnalyticsIpc({ ipc, channels: DESKTOP_IPC, getLocalUsage: deps.getLocalUsage });
   registerDesktopSettingsIpc({

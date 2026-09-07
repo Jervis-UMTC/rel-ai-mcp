@@ -7,6 +7,7 @@
 @import "../features/system/styles.css";
 @import "../features/sessions/styles.css";
 @import "../features/code/styles.css";
+@import "../features/browser/styles.css";
 @import "../features/activity/styles.css";
 @import "../features/workspaces/styles.css";
 @import "../features/tools/styles.css";
@@ -406,6 +407,8 @@
   .dashboard-state-card p { @apply mx-auto mt-2 max-w-xl text-[12px]; color: var(--ui-text-secondary); }
   .dashboard-state-actions { @apply mt-5 flex justify-center gap-2; }
   .loading-mark { @apply mx-auto size-8 rounded-full border-[3px]; border-color: var(--ui-border-default); border-top-color: var(--ui-action-primary); animation: spin .8s linear infinite; }
+  .update-installing-modal { @apply grid gap-3 py-1 text-center; }
+  .update-installing-modal .loading-mark { @apply mb-1; }
   .skeleton-grid { @apply mt-6 grid gap-3; grid-template-columns: repeat(3,minmax(0,1fr)); }
   .skeleton-block { @apply h-20 rounded-xl; background: linear-gradient(90deg,var(--ui-surface-secondary),var(--ui-surface-raised),var(--ui-surface-secondary)); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
   .empty { @apply rounded-lg px-4 py-6 text-center text-[12px]; color: var(--ui-text-secondary); background: color-mix(in srgb, var(--ui-surface-secondary) 70%, transparent); }

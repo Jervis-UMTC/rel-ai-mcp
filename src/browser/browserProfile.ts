@@ -28,7 +28,17 @@ function browserProfileDirectory(config: Record<string, unknown>, principalFinge
 function preparePersistentBrowserProfile(config: Record<string, unknown>, principalFingerprint: string): string {
   const directory = browserProfileDirectory(config, principalFingerprint);
   const root = persistentBrowserProfileRoot(config);
+  const rootExisting = safeLstat(root);
+  if (rootExisting?.isSymbolicLink()) throw new Error('Persistent browser profile root must not be a symbolic link.');
+  if (rootExisting && !rootExisting.isDirectory()) throw new Error('Persistent browser profile root is not a directory.');
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+
+  const principalDirectory = path.dirname(directory);
+  const principalExisting = safeLstat(principalDirectory);
+  if (principalExisting?.isSymbolicLink()) throw new Error('Persistent browser profile principal path must not be a symbolic link.');
+  if (principalExisting && !principalExisting.isDirectory()) throw new Error('Persistent browser profile principal path is not a directory.');
+  fs.mkdirSync(principalDirectory, { recursive: true, mode: 0o700 });
+
   const existing = safeLstat(directory);
   if (existing?.isSymbolicLink()) throw new Error('Persistent browser profile path must not be a symbolic link.');
   if (existing && !existing.isDirectory()) throw new Error('Persistent browser profile path is not a directory.');

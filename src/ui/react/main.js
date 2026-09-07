@@ -82,6 +82,7 @@ registerReactSection('activity', createLazyRoute(() => import('../features/activ
 registerReactSection('tasks', createLazyRoute(() => import('../features/sessions/react.js'), 'createSessionsRoute', useDashboardSlices));
 registerReactSection('workspaces', createLazyRoute(() => import('../features/workspaces/react.js'), 'createWorkspacesRoute', useDashboardSlices));
 registerReactSection('code', createLazyRoute(() => import('../features/code/react.js'), 'createCodeRoute', useDashboardSlices));
+registerReactSection('browser', createLazyRoute(() => import('../features/browser/react.js'), 'createBrowserRoute'));
 registerReactSection('processes', createLazyRoute(() => import('../features/processes/react.js'), 'createProcessesRoute', useDashboardSlices));
 registerReactSection('tools', createLazyRoute(() => import('../features/tools/react.js'), 'createToolsRoute'));
 registerReactSection('usage', createLazyRoute(() => import('../features/usage/react.js'), 'createUsageRoute', useDashboardSlices));

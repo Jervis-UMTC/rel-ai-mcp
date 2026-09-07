@@ -97,6 +97,19 @@ export function createUsageRoute(useDashboardSlices) {
       return () => window.clearTimeout(timer);
     }, [taskRevision]);
 
+    useEffect(() => {
+      const syncFromRoute = () => {
+        const next = getRouteParams();
+        const nextRange = next.get('range');
+        setRange(ANALYTICS_RANGES.some(([key]) => key === nextRange) ? nextRange : '24h');
+        setStart(next.get('start') || defaults.start);
+        setEnd(next.get('end') || defaults.end);
+        setWorkspace(getWorkspaceFilter());
+      };
+      window.addEventListener('hashchange', syncFromRoute);
+      return () => window.removeEventListener('hashchange', syncFromRoute);
+    }, [defaults]);
+
     const changeWorkspace = value => {
       setWorkspace(value);
       replaceRouteParams({ workspace: value || null, device: null });

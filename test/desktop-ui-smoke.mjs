@@ -196,7 +196,12 @@ assert.match(windowSecurity, /will-download/);
 
 assert.match(appUpdater, /autoDownload = false/);
 assert.match(appUpdater, /autoInstallOnAppQuit = false/);
-assert.match(appUpdater, /quitAndInstall\(false, true\)/);
+assert.match(appUpdater, /disableDifferentialDownload = false/);
+assert.match(appUpdater, /quitAndInstall\(true, true\)/);
+assert.match(appUpdater, /onBeforeInstall/);
+assert.match(appUpdater, /onInstallCommit/);
+assert.match(appUpdater, /onInstallFailed/);
+assert.match(appUpdater, /handleInstallPreparationError/);
 assert.match(appUpdater, /integrityVerified/);
 assert.match(appUpdaterEvents, /does not match expected version/);
 assert.match(desktopLifecycle, /openAtLogin/);
@@ -211,6 +216,7 @@ assert.match(settingsReact, /Keep Rel\.AI running when I close the window/, 'App
 assert.match(settingsReact, /Reduced background work/, 'App settings must expose one coarse background-work control');
 assert.match(settingsReact, /direct file and app actions where possible and full pointer or keyboard control only when necessary/, 'Computer Control help must explain the local-control hierarchy without exposing internal routing jargon');
 assert.match(main, /canHideOnClose:[\s\S]{0,180}keepRunningOnClose/, 'dashboard close behavior must honor the persisted user preference');
+assert.match(main, /canUserClose:[\s\S]{0,180}allowUpdaterQuit[\s\S]{0,180}installing/, 'the dashboard must reject user close while the updater owns the application lifecycle');
 assert.match(main, /setKeepAwakeEnabled\(lifecycleStatus\.keepAwake === true\)/, 'saved keep-awake preference must activate before normal desktop work starts');
 assert.match(main, /reducedBackgroundWork:\s*lifecycleStatus\.reducedBackgroundWork === true/, 'saved reduced-background-work preference must reach the service before normal desktop work starts');
 assert.match(appUpdater, /shouldAutoDownload/, 'updater must support an explicit user-controlled automatic download policy');
