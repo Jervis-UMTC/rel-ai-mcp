@@ -458,7 +458,7 @@ function PreferencesPage() {
       h('div', { className: 'settings-field' },
         h('span', null, 'Theme'),
         h(ThemeSwitch, { theme, onChange: value => { setTheme(value); setThemePreference(value); } }),
-        h('p', { className: 'settings-help' }, 'Theme applies to the dashboard. Setup and recovery windows follow your system appearance.')
+        h('p', { className: 'settings-help' }, 'Theme applies to the dashboard and Rel.AI Pulse. Setup and recovery windows follow your system appearance.')
       )
     ),
     h(DesktopNotificationsSettings)
@@ -622,6 +622,12 @@ function StartupSettings({ initial }) {
       enabledLabel: 'Keep running on close', disabledLabel: 'Quit on close',
       help: 'Keeps the local ChatGPT connection available in the system tray. Turn this off if closing the dashboard should quit Rel.AI completely.',
       onChange: value => void update('keepRunningOnClose', value)
+    }),
+    h(ToggleRow, {
+      label: 'Show Rel.AI Pulse', checked: state.pulseEnabled !== false, disabled: busy === 'pulseEnabled', busy: busy === 'pulseEnabled',
+      enabledLabel: 'Pulse on', disabledLabel: 'Pulse off',
+      help: 'Shows a small local status card while Rel.AI is running. It highlights local work and action-required states; approvals still happen in ChatGPT.',
+      onChange: value => void update('pulseEnabled', value)
     }),
     h(ToggleRow, {
       label: 'Keep computer awake', checked: state.keepAwake === true, disabled: busy === 'keepAwake', busy: busy === 'keepAwake',

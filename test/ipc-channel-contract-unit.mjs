@@ -5,7 +5,7 @@ import { DESKTOP_IPC, DESKTOP_IPC_CHANNELS, DESKTOP_IPC_INPUT_CONTRACT } from '.
 
 const inventory = DESKTOP_IPC_INPUT_CONTRACT;
 
-const windows = { wizard: { id: 'wizard' }, fallback: { id: 'fallback' }, dashboard: { id: 'dashboard' }, other: { id: 'other' } };
+const windows = { wizard: { id: 'wizard' }, fallback: { id: 'fallback' }, dashboard: { id: 'dashboard' }, pulse: { id: 'pulse' }, other: { id: 'other' } };
 const handles = new Map();
 const listeners = new Map();
 const calls = [];
@@ -23,6 +23,8 @@ registerIpcHandlers({
   closeWizard: value => calls.push(['closeWizard', value]),
   getFallbackWindow: () => windows.fallback,
   getDashboardWindow: () => windows.dashboard,
+  getPulseWindow: () => windows.pulse,
+  setPulseExpanded: value => { calls.push(['pulseExpanded', value]); return value; },
   getRecoveryConfig: () => ({ ok: true, tunnelId: 'tunnel_12345678', tunnelApiKeyConfigured: true, port: 3333 }),
   setTunnelApiKey: value => calls.push(['tunnelKey', value]),
   saveLauncherConfig: value => calls.push(['save', value]),
@@ -43,6 +45,12 @@ registerIpcHandlers({
   toggleDashboardMaximize: () => ({ maximized: true }),
   requestDashboardClose: () => ({ ok: true }),
   openSettingsWindow: () => ({ ok: true }),
+  getBrowserState: () => ({ sessionId: '', pages: [] }),
+  setBrowserSurfaceBounds: value => ({ ok: true, value }),
+  setBrowserControl: value => ({ ok: true, value }),
+  selectBrowserTab: value => ({ ok: true, value }),
+  closeBrowserTab: value => ({ ok: true, value }),
+  stopActiveBrowserSession: () => ({ ok: true }),
   getLocalUsage: month => ({ ok: true, month, source: 'local' }),
   getDesktopSettings: () => ({ ok: true }),
   saveDesktopSettings: value => ({ ok: true, value }),
@@ -118,6 +126,10 @@ function argsFor(channel) {
     case 'desktop:analytics:local': return ['2026-08'];
     case 'desktop:settings:save': return [{ port: 3333, tunnelId: 'tunnel_12345678' }];
     case 'desktop:reload-dashboard': return ['#tasks'];
+    case 'desktop:browser:set-bounds': return [{ visible: false }];
+    case 'desktop:browser:set-control': return ['user'];
+    case 'desktop:browser:select-tab':
+    case 'desktop:browser:close-tab': return ['embedded_page_1234567890abcdef'];
     case 'desktop:logout': return [{ clearData: false }];
     case 'desktop:app-preferences:set': return [{ keepRunningOnClose: true }];
     case 'desktop:startup:set':
@@ -130,6 +142,7 @@ function argsFor(channel) {
     case 'desktop:code:diff': return [{ taskId: 'task-1', path: 'src/index.js' }];
     case 'desktop:code:open-ide': return [{ taskId: 'task-1', editorId: 'system' }];
     case 'window:fit-content': return [{ width: 500, height: 600 }];
+    case 'pulse:set-expanded': return [true];
     default: return [];
   }
 }

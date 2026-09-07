@@ -16,6 +16,7 @@ import { registerIpcHandlers } from './ipc-handlers.js';
 import { hasExistingConfig } from './launcher-utils.js';
 import { installLocalProtocol, localRendererUrl, registerLocalScheme } from './local-protocol.js';
 import { createRecoveryWindowManager } from './recovery-window.js';
+import { createPulseWindowManager } from './pulse-window.js';
 import { importResourceModule } from './resource-path.js';
 import { createRuntimeLogBuffer } from './runtime-log-buffer.js';
 import { createSecureTunnelRuntime } from './secure-tunnel-runtime.js';
@@ -124,6 +125,16 @@ async function createDesktopHost(options = {}) {
     isQuitting: () => isQuitting,
     recoveryWindowManager
   });
+  const pulseWindowManager = createPulseWindowManager({
+    BrowserWindow,
+    screen,
+    iconPath,
+    preloadPath,
+    rendererUrl: localRendererUrl('pulse.html'),
+    installProtocol: sessionProtocol => installLocalProtocol(sessionProtocol, rendererRoot),
+    isQuitting: () => isQuitting,
+    onSecurityError: error => runtimeLogs.append(error.message, { level: 'warning', source: 'electron-security' })
+  });
   const secureTunnelRuntime = createSecureTunnelRuntime({
     stopProcess: terminateProcessTree,
     makeEnvironment: makeTunnelProcessEnvironment,
@@ -166,7 +177,8 @@ async function createDesktopHost(options = {}) {
     nativeImage,
     platform: process.platform,
     getWindow: () => dashboardWindowManager.getWindow()
-      || BrowserWindow.getAllWindows().find(win => !win.isDestroyed())
+      || recoveryWindowManager.getWindow()
+      || setupWindowManager.getWindow()
       || null,
     isApplicationOpen: () => BrowserWindow.getAllWindows().some(win => !win.isDestroyed() && win.isVisible() && win.isFocused())
   });
@@ -278,6 +290,7 @@ async function createDesktopHost(options = {}) {
     },
     stopActivity: () => desktopPower.stop(),
     async closeWindows() {
+      pulseWindowManager.stop();
       await browserSurfaceHost.closeAll();
       await dashboardWindowManager.close();
       recoveryWindowManager.close();
@@ -318,6 +331,8 @@ async function createDesktopHost(options = {}) {
     closeWizard: setupWindowManager.close,
     getFallbackWindow: recoveryWindowManager.getWindow,
     getDashboardWindow: dashboardWindowManager.getWindow,
+    getPulseWindow: pulseWindowManager.getWindow,
+    setPulseExpanded: pulseWindowManager.setExpanded,
     getDashboardWindowState: dashboardWindowManager.getState,
     minimizeDashboardWindow: dashboardWindowManager.minimize,
     toggleDashboardMaximize: dashboardWindowManager.toggleMaximize,
@@ -403,6 +418,10 @@ async function createDesktopHost(options = {}) {
       desktopLifecycle.start()
     ]);
     desktopPower.setKeepAwakeEnabled(lifecycleStatus.keepAwake === true);
+    pulseWindowManager.setEnabled(lifecycleStatus.pulseEnabled !== false);
+    pulseWindowManager.setThemePreference(lifecycleStatus.themePreference);
+    pulseWindowManager.start();
+    pulseWindowManager.update(currentStatus);
     serviceProcessClient.updateContext({ reducedBackgroundWork: lifecycleStatus.reducedBackgroundWork === true });
     desktopTray.setup();
     if (hasExistingConfig()) void launchConfiguredDesktop({ background: lifecycleStatus.openedAtLogin });
@@ -487,6 +506,12 @@ async function createDesktopHost(options = {}) {
     if (Object.hasOwn(patch, 'reducedBackgroundWork')) {
       serviceProcessClient.updateContext({ reducedBackgroundWork: result.status?.reducedBackgroundWork === true });
     }
+    if (Object.hasOwn(patch, 'pulseEnabled')) {
+      pulseWindowManager.setEnabled(result.status?.pulseEnabled !== false);
+    }
+    if (Object.hasOwn(patch, 'themePreference')) {
+      pulseWindowManager.setThemePreference(result.status?.themePreference);
+    }
     if (patch.autoDownloadUpdates === true && appUpdater?.getStatus()?.state === 'available') {
       void downloadApplicationUpdate();
     }
@@ -541,6 +566,7 @@ async function createDesktopHost(options = {}) {
 
   function setTaskActivityStatus(taskActivity) {
     currentStatus = normalizeDesktopStatus({ ...currentStatus, taskActivity });
+    pulseWindowManager.update(currentStatus);
     recoveryWindowManager.sendStatus(currentStatus);
   }
 
@@ -666,6 +692,7 @@ async function createDesktopHost(options = {}) {
   function setStatus(next, statusOptions = {}) {
     const previous = currentStatus;
     currentStatus = normalizeDesktopStatus({ ...currentStatus, ...next });
+    pulseWindowManager.update(currentStatus);
     desktopNotifications.handleDesktopStatusChange(previous, currentStatus);
     runtimeLogs.recordStatusTransition(previous, currentStatus);
     syncServiceContext();
@@ -675,6 +702,7 @@ async function createDesktopHost(options = {}) {
   function replaceCurrentStatus(next, statusOptions = {}) {
     const previous = currentStatus;
     currentStatus = normalizeDesktopStatus(next);
+    pulseWindowManager.update(currentStatus);
     if (!statusOptions.silent) desktopNotifications.handleDesktopStatusChange(previous, currentStatus);
     runtimeLogs.recordStatusTransition(previous, currentStatus);
     syncServiceContext();

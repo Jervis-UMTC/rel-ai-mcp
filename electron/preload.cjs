@@ -66,6 +66,12 @@ if (surface === 'dashboard') {
     onWindowState: callback => subscribe('desktop:window-state', callback, 'Window-state'),
     onUpdateStatus: callback => subscribe('desktop:update-status', callback, 'Update-status')
   });
+} else if (surface === 'pulse') {
+  contextBridge.exposeInMainWorld('relaiPulse', {
+    openDashboard: routeHash => ipcRenderer.invoke('url:open-dashboard', routeHash),
+    setExpanded: expanded => ipcRenderer.invoke('pulse:set-expanded', expanded === true),
+    onState: callback => subscribe('pulse:update', callback, 'Pulse-state')
+  });
 } else {
   contextBridge.exposeInMainWorld('electronAPI', {
     wizardDone: config => ipcRenderer.invoke('wizard:done', config),

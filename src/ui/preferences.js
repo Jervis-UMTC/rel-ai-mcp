@@ -35,6 +35,12 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = resolveTheme(normalized);
 }
 
+function syncDesktopTheme(theme) {
+  const setter = window.relaiDesktop?.setAppPreferences;
+  if (typeof setter !== 'function') return;
+  void Promise.resolve(setter({ themePreference: normalizeTheme(theme) })).catch(() => {});
+}
+
 function bindSystemTheme() {
   if (!window.matchMedia) return;
   if (mediaQuery && mediaListener) mediaQuery.removeEventListener?.('change', mediaListener);
@@ -55,6 +61,7 @@ export function setThemePreference(theme) {
   const normalized = normalizeTheme(theme);
   writeStored(THEME_KEY, normalized);
   applyTheme(normalized);
+  syncDesktopTheme(normalized);
 }
 
 function markPreferencesReady() {
@@ -64,6 +71,7 @@ function markPreferencesReady() {
 export function initUiPreferences() {
   const preferences = getUiPreferences();
   applyTheme(preferences.theme);
+  syncDesktopTheme(preferences.theme);
   bindSystemTheme();
   window.requestAnimationFrame(markPreferencesReady);
   return preferences;

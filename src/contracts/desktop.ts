@@ -2,7 +2,7 @@ import type { TaskActivityDto } from './tasks.ts';
 import type { ConnectionStateDto } from './connection.ts';
 import type { DiagnosticReportDto } from './diagnostics.ts';
 
-export type DesktopSurface = 'wizard' | 'fallback' | 'dashboard';
+export type DesktopSurface = 'wizard' | 'fallback' | 'dashboard' | 'pulse';
 export type DesktopIpcInputMode = 'handle' | 'on';
 
 export interface DesktopStatusDto {
@@ -56,7 +56,7 @@ export interface DesktopIpcRequestMap {
   'wizard:open-openai-setup': [destination: string];
   'recovery:get-config': [];
   'recovery:open-setup': [];
-  'url:open-dashboard': [];
+  'url:open-dashboard': [routeHash?: string];
   'notifications:get-enabled': [];
   'notifications:set-enabled': [enabled: boolean];
   'server:start': [];
@@ -138,6 +138,7 @@ export interface DesktopIpcEventMap {
   'desktop:window-state': DesktopWindowStateDto;
   'desktop:browser-state': DesktopBrowserStateDto;
   'desktop:update-status': Record<string, unknown>;
+  'pulse:update': Record<string, unknown>;
 }
 
 export const DESKTOP_IPC = Object.freeze({
@@ -201,7 +202,9 @@ export const DESKTOP_IPC = Object.freeze({
   SERVER_LOG: 'server:log',
   DESKTOP_WINDOW_STATE: 'desktop:window-state',
   DESKTOP_BROWSER_STATE: 'desktop:browser-state',
-  DESKTOP_UPDATE_STATUS: 'desktop:update-status'
+  DESKTOP_UPDATE_STATUS: 'desktop:update-status',
+  PULSE_SET_EXPANDED: 'pulse:set-expanded',
+  PULSE_UPDATE: 'pulse:update'
 } as const);
 
 export type DesktopIpcChannel = typeof DESKTOP_IPC[keyof typeof DESKTOP_IPC];
@@ -217,7 +220,8 @@ export const DESKTOP_IPC_INPUT_CONTRACT = Object.freeze({
   [DESKTOP_IPC.WIZARD_OPEN_OPENAI_SETUP]: input('handle', ['wizard'], 'reject'),
   [DESKTOP_IPC.RECOVERY_GET_CONFIG]: input('handle', ['wizard'], 'reject'),
   [DESKTOP_IPC.RECOVERY_OPEN_SETUP]: input('handle', ['fallback'], 'reject'),
-  [DESKTOP_IPC.URL_OPEN_DASHBOARD]: input('handle', ['fallback'], 'reject'),
+  [DESKTOP_IPC.URL_OPEN_DASHBOARD]: input('handle', ['fallback', 'pulse'], 'reject'),
+  [DESKTOP_IPC.PULSE_SET_EXPANDED]: input('handle', ['pulse'], 'reject'),
   [DESKTOP_IPC.NOTIFICATIONS_GET_ENABLED]: input('handle', ['fallback'], 'reject'),
   [DESKTOP_IPC.NOTIFICATIONS_SET_ENABLED]: input('handle', ['fallback'], 'reject'),
   [DESKTOP_IPC.SERVER_START]: input('handle', ['fallback'], 'reject'),

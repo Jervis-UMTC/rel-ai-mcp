@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<title>Rel.AI Pulse</title>
+<link rel="stylesheet" href="color-tokens.css">
+<link rel="stylesheet" href="pulse.css">
+</head>
+<body class="pulse-page">
+<main class="pulse-shell" id="pulseShell" data-tone="idle" data-expanded="false">
+  <header class="pulse-bar">
+    <div class="pulse-mark" aria-hidden="true"><img src="relai-logo.png" alt="" role="presentation"></div>
+
+    <div class="pulse-compact-copy" aria-live="polite">
+      <span class="pulse-state-dot" aria-hidden="true"></span>
+      <span class="pulse-state-label" id="pulseState">Working</span>
+      <span class="pulse-separator" aria-hidden="true">·</span>
+      <span class="pulse-compact-title" id="pulseCompactTitle">Starting…</span>
+    </div>
+
+    <div class="pulse-expanded-brand" aria-hidden="true">Rel.AI</div>
+    <div class="pulse-expanded-state" aria-hidden="true">
+      <span class="pulse-state-dot" aria-hidden="true"></span>
+      <span id="pulseExpandedState">Working</span>
+    </div>
+
+    <button class="pulse-toggle" id="pulseToggle" type="button" aria-expanded="false" aria-controls="pulseIsland" aria-label="Show activity details">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 5 5 5-5 5"></path></svg>
+    </button>
+  </header>
+
+  <section class="pulse-island" id="pulseIsland" aria-hidden="true">
+    <div class="pulse-primary">
+      <h1 class="pulse-title" id="pulseTitle">Starting…</h1>
+      <p class="pulse-summary" id="pulseSummary"></p>
+
+      <div class="pulse-progress" id="pulseProgress" hidden>
+        <div class="pulse-progress-track" aria-hidden="true"><span id="pulseProgressFill"></span></div>
+        <div class="pulse-progress-caption">
+          <span id="pulseProgressLabel"></span>
+          <span id="pulseProgressValue"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pulse-context">
+      <div class="pulse-context-row" id="pulseWorkspaceRow" hidden>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5.5h5l1.4 1.7h6.6v7.3H3.5z"></path></svg>
+        <div><span class="pulse-context-label">Workspace</span><strong id="pulseWorkspace"></strong></div>
+      </div>
+      <div class="pulse-context-row" id="pulseTasksRow" hidden>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="10" r="3.2"></circle><circle cx="13.5" cy="10" r="2.3"></circle></svg>
+        <div><span class="pulse-context-label">Other activity</span><strong id="pulseTasks"></strong></div>
+      </div>
+    </div>
+
+    <footer class="pulse-footer">
+      <button class="pulse-open" id="pulseOpen" type="button" tabindex="-1">
+        <span id="pulseOpenLabel">Open in Rel.AI</span>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 5 5 5-5 5"></path></svg>
+      </button>
+    </footer>
+  </section>
+</main>
+<script src="pulse.js"></script>
+</body>
+</html>

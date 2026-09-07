@@ -18,7 +18,8 @@ function registerIpcHandlers(deps) {
     windowGetters: {
       wizard: deps.getWizardWindow,
       fallback: deps.getFallbackWindow,
-      dashboard: deps.getDashboardWindow
+      dashboard: deps.getDashboardWindow,
+      pulse: deps.getPulseWindow
     }
   });
 
@@ -40,6 +41,7 @@ function registerIpcHandlers(deps) {
     getNotificationsEnabled: deps.getNotificationsEnabled,
     setNotificationsEnabled: deps.setNotificationsEnabled
   });
+  registerPulseIpc({ ipc, channels: DESKTOP_IPC, setPulseExpanded: deps.setPulseExpanded });
   registerServiceIpc({
     ipc,
     channels: DESKTOP_IPC,
@@ -150,9 +152,16 @@ function registerSetupIpc({ ipc, channels, shell, closeWizard, getRecoveryConfig
 
 function registerRecoveryIpc({ ipc, channels, openRecoverySetup, openDashboardWindow, getNotificationsEnabled, setNotificationsEnabled }) {
   ipc.handle(channels.RECOVERY_OPEN_SETUP, 'Connection recovery', () => openRecoverySetup());
-  ipc.handle(channels.URL_OPEN_DASHBOARD, 'Dashboard opening', () => openDashboardWindow());
+  ipc.handle(channels.URL_OPEN_DASHBOARD, 'Dashboard opening', (_event, routeHash = '') => openDashboardWindow(routeHash));
   ipc.handle(channels.NOTIFICATIONS_GET_ENABLED, 'Notification preferences', () => ({ ok: true, enabled: getNotificationsEnabled() }));
   ipc.handle(channels.NOTIFICATIONS_SET_ENABLED, 'Notification preferences', (_event, enabled) => ({ ok: true, enabled: setNotificationsEnabled(enabled) }));
+}
+
+function registerPulseIpc({ ipc, channels, setPulseExpanded }) {
+  ipc.handle(channels.PULSE_SET_EXPANDED, 'Pulse sizing', (_event, expanded) => {
+    if (typeof expanded !== 'boolean') throw new Error('Pulse expansion state must be a boolean.');
+    return { ok: true, expanded: setPulseExpanded(expanded) };
+  });
 }
 
 function registerServiceIpc({ ipc, channels, startServer, stopServer, restartConnection, relaunchApplication, logoutApplication, quitApplication }) {
