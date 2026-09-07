@@ -570,7 +570,7 @@ async function _handleSingleEdit(workspace: PlannerWorkspace, config: PlannerCon
 async function planEdit(workspace: PlannerWorkspace, config: PlannerConfig, args: PlannerArgs, context: PlannerContext = {}): Promise<PlannerResult> {
   assertSupportedEditForm(args);
   if (args.file && typeof args.file === 'object' && !Array.isArray(args.file)) {
-    const result = await importNativeArtifact(workspace, config, args);
+    const result = await importNativeArtifact(workspace, config, args, { signal: context.signal });
     return attachPost(result, await runPostActions(workspace, config, args, result.changedFiles));
   }
   if (args.semantic && typeof args.semantic === 'object') {
