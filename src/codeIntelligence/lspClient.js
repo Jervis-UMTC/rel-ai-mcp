@@ -62,8 +62,12 @@ class LspClient {
     child.stderr.on('data', chunk => {
       this.stderr = (this.stderr + chunk.toString('utf8')).slice(-MAX_STDERR_BYTES);
     });
-    child.once('error', error => this.failConnection(error));
+    child.once('error', error => {
+      if (this.child !== child || this.lifecycleId !== lifecycleId) return;
+      this.failConnection(error);
+    });
     child.once('exit', (code, signal) => {
+      if (this.child !== child || this.lifecycleId !== lifecycleId) return;
       if (this.state === 'stopping' || this.state === 'stopped') return;
       const suffix = signal ? ` signal ${signal}` : ` code ${code ?? 'unknown'}`;
       this.failConnection(new Error(`${this.name} exited with${suffix}.`));
