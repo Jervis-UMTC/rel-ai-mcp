@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import semver from 'semver';
 import { VERSION_JSON_FILES } from './release-surfaces.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,10 +32,6 @@ function expect(condition, message) {
 
 function expectEqual(actual, expected, label) {
   if (actual !== expected) fail(`${label}: expected ${expected}, got ${actual}`);
-}
-
-function validSemver(version) {
-  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(String(version || ''));
 }
 
 function firstChangelogEntry(changelog) {
@@ -93,7 +90,7 @@ function normalizeArch(value) {
 
 const packageJson = readJson('package.json');
 const version = packageJson.version;
-expect(validSemver(version), `package.json version must be semver-like x.y.z, got ${version}`);
+expect(semver.valid(version) === version, `package.json version must be semver-like x.y.z, got ${version}`);
 
 for (const relativePath of VERSION_JSON_FILES) assertJsonVersion(relativePath, version);
 assertTunnelClient();

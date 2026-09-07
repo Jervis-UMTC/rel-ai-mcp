@@ -21,7 +21,7 @@ function createPulseWindowManager(options = {}) {
     onSecurityError = () => {}
   } = options;
   if (!BrowserWindow) throw new TypeError('Pulse requires Electron BrowserWindow.');
-  if (!screen || typeof screen.getPrimaryDisplay !== 'function') throw new TypeError('Pulse requires Electron screen.');
+  if (!screen) throw new TypeError('Pulse requires Electron screen.');
 
   let window = null;
   let rendererReady = false;
@@ -29,12 +29,16 @@ function createPulseWindowManager(options = {}) {
   let started = false;
   let themePreference = 'system';
   let expanded = false;
+  let customAnchor = null;
+  let lastAppliedBounds = null;
   let currentStatus = {};
   let currentModel = projectPulseStatus(currentStatus);
   const wayland = platform === 'linux' && String(env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland';
 
   function start() {
     if (started) return false;
+    // Electron's screen proxy cannot be inspected until app.whenReady().
+    if (typeof screen.getPrimaryDisplay !== 'function') throw new TypeError('Pulse requires Electron screen.');
     started = true;
     screen.on?.('display-added', reposition);
     screen.on?.('display-removed', reposition);
@@ -125,6 +129,7 @@ function createPulseWindowManager(options = {}) {
       event.preventDefault();
       window?.hide();
     });
+    window.on('move', rememberPosition);
     window.on('closed', () => {
       window = null;
       rendererReady = false;
@@ -139,12 +144,20 @@ function createPulseWindowManager(options = {}) {
 
   function applyGeometry() {
     if (!window || window.isDestroyed()) return;
-    const bounds = pulseBounds(screen, { expanded });
+    const bounds = pulseBounds(screen, { expanded, anchor: customAnchor });
+    lastAppliedBounds = bounds;
     if (wayland) {
       window.setSize?.(bounds.width, bounds.height, false);
       return;
     }
     window.setBounds?.(bounds, false);
+  }
+
+  function rememberPosition() {
+    if (wayland || !window || window.isDestroyed() || typeof window.getBounds !== 'function') return;
+    const bounds = window.getBounds();
+    if (sameBounds(bounds, lastAppliedBounds)) return;
+    customAnchor = { right: bounds.x + bounds.width, top: bounds.y };
   }
 
   function hide() {
@@ -177,13 +190,39 @@ function pulseBounds(screen, options = {}) {
   const expanded = options.expanded === true;
   const width = expanded ? PULSE_EXPANDED_WIDTH : PULSE_WIDTH;
   const height = expanded ? PULSE_EXPANDED_HEIGHT : PULSE_HEIGHT;
-  const workArea = screen.getPrimaryDisplay()?.workArea || { x: 0, y: 0, width: width + (PULSE_MARGIN * 2), height: height + (PULSE_MARGIN * 2) };
+  const anchor = options.anchor && Number.isFinite(options.anchor.right) && Number.isFinite(options.anchor.top)
+    ? options.anchor
+    : null;
+  const display = anchor && typeof screen.getDisplayNearestPoint === 'function'
+    ? screen.getDisplayNearestPoint({ x: anchor.right - 1, y: anchor.top })
+    : screen.getPrimaryDisplay();
+  const workArea = display?.workArea || { x: 0, y: 0, width: width + (PULSE_MARGIN * 2), height: height + (PULSE_MARGIN * 2) };
+  if (anchor) {
+    return {
+      x: Math.round(clamp(anchor.right - width, workArea.x, workArea.x + workArea.width - width)),
+      y: Math.round(clamp(anchor.top, workArea.y, workArea.y + workArea.height - height)),
+      width,
+      height
+    };
+  }
   return {
     x: Math.round(workArea.x + Math.max(PULSE_MARGIN, workArea.width - width - PULSE_MARGIN)),
     y: Math.round(workArea.y + PULSE_MARGIN),
     width,
     height
   };
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+function sameBounds(left, right) {
+  return Boolean(left && right
+    && left.x === right.x
+    && left.y === right.y
+    && left.width === right.width
+    && left.height === right.height);
 }
 
 export { PULSE_EXPANDED_HEIGHT, PULSE_EXPANDED_WIDTH, PULSE_HEIGHT, PULSE_WIDTH, createPulseWindowManager, pulseBounds };

@@ -1,3 +1,5 @@
+import pRetry from 'p-retry';
+
 const DEFAULT_RETRY_DELAYS_MS = Object.freeze([1000, 2000, 5000, 10000, 30000]);
 const TERMINAL_TUNNEL_CODES = new Set([
   'tunnel_authentication_failed',
@@ -19,7 +21,9 @@ function createTunnelRecoverySupervisor({
 
   const delays = normalizeRetryDelays(retryDelaysMs);
   let retryTimer = null;
-  let inFlight = null;
+  let releaseRetryDelay = null;
+  let recoveryPromise = null;
+  let attemptInFlight = false;
   let attempt = 0;
   let nextRetryAt = null;
   let recoveryGeneration = 0;
@@ -36,58 +40,102 @@ function createTunnelRecoverySupervisor({
         reset(true);
         return snapshot();
       }
-      schedule(status.error || 'The Secure MCP Tunnel stopped unexpectedly.');
+      scheduleInitial(status.error || 'The Secure MCP Tunnel stopped unexpectedly.');
       return snapshot();
     }
-    if (tunnelStatus === 'stopped' && !inFlight) reset();
+    if (tunnelStatus === 'stopped' && !attemptInFlight) reset(true);
     return snapshot();
   }
 
-  function schedule(lastError = '') {
-    if (retryTimer || inFlight) return snapshot();
+  function scheduleInitial(lastError = '') {
+    if (retryTimer || attemptInFlight) return snapshot();
     const runGeneration = recoveryGeneration;
-    attempt += 1;
-    const delayMs = delays[Math.min(attempt - 1, delays.length - 1)];
-    nextRetryAt = now() + delayMs;
-    onSchedule({ attempt, delayMs, nextRetryAt, lastError: String(lastError || '') });
-    retryTimer = setTimer(() => {
-      retryTimer = null;
-      nextRetryAt = null;
-      if (runGeneration !== recoveryGeneration) return;
-      void runAttempt(runGeneration);
-    }, delayMs);
+    scheduleDelay(lastError).then(shouldRun => {
+      if (!shouldRun || runGeneration !== recoveryGeneration) return;
+      void runRecovery(runGeneration);
+    });
     return snapshot();
   }
 
   function retryNow() {
     clearScheduledRetry();
     attempt = 0;
-    return runAttempt();
+    if (attemptInFlight && recoveryPromise) return recoveryPromise;
+    const runGeneration = recoveryGeneration;
+    return runRecovery(runGeneration);
   }
 
-  async function runAttempt(runGeneration = recoveryGeneration) {
-    if (inFlight) return inFlight;
-    const pending = Promise.resolve()
-      .then(restartConnection)
-      .catch(error => ({
-        serverRunning: true,
-        tunnelStatus: 'failed',
-        errorCode: String(error?.code || 'secure_tunnel_failed'),
-        error: error instanceof Error ? error.message : String(error || 'Secure MCP Tunnel retry failed.')
-      }));
-    inFlight = pending;
-    const status = await pending;
-    if (inFlight === pending) inFlight = null;
-    if (runGeneration !== recoveryGeneration) return status;
+  function runRecovery(runGeneration = recoveryGeneration) {
+    if (recoveryPromise && runGeneration === recoveryGeneration) return recoveryPromise;
 
-    const tunnelStatus = String(status?.tunnelStatus || status?.state || '');
-    const errorCode = String(status?.errorCode || '');
-    if (tunnelStatus === 'running' || isTerminalTunnelCode(errorCode) || status?.serverRunning === false) {
-      reset();
+    const pending = pRetry(async () => {
+      if (runGeneration !== recoveryGeneration) return cancelledStatus();
+      attemptInFlight = true;
+      let status;
+      try {
+        status = await restartConnection();
+      } catch (error) {
+        status = {
+          serverRunning: true,
+          tunnelStatus: 'failed',
+          errorCode: String(error?.code || 'secure_tunnel_failed'),
+          error: error instanceof Error ? error.message : String(error || 'Secure MCP Tunnel retry failed.')
+        };
+      } finally {
+        attemptInFlight = false;
+      }
+
+      if (runGeneration !== recoveryGeneration) return status;
+      const tunnelStatus = String(status?.tunnelStatus || status?.state || '');
+      const errorCode = String(status?.errorCode || '');
+      if (tunnelStatus === 'running' || isTerminalTunnelCode(errorCode) || status?.serverRunning === false) return status;
+      throw new RetryableTunnelStatus(status);
+    }, {
+      retries: Infinity,
+      minTimeout: 0,
+      maxTimeout: 0,
+      factor: 1,
+      shouldRetry: ({ error }) => error instanceof RetryableTunnelStatus && runGeneration === recoveryGeneration,
+      onFailedAttempt: async ({ error }) => {
+        if (!(error instanceof RetryableTunnelStatus) || runGeneration !== recoveryGeneration) return;
+        await scheduleDelay(error.status?.error || 'The Secure MCP Tunnel is still unavailable.');
+      }
+    }).then(status => {
+      if (runGeneration === recoveryGeneration) reset();
       return status;
-    }
-    schedule(status?.error || 'The Secure MCP Tunnel is still unavailable.');
-    return status;
+    }).catch(error => {
+      if (runGeneration !== recoveryGeneration) {
+        return error instanceof RetryableTunnelStatus ? error.status : cancelledStatus();
+      }
+      throw error;
+    }).finally(() => {
+      if (recoveryPromise === pending) recoveryPromise = null;
+    });
+
+    recoveryPromise = pending;
+    return pending;
+  }
+
+  function scheduleDelay(lastError = '') {
+    clearScheduledRetry();
+    attempt += 1;
+    const delayMs = delays[Math.min(attempt - 1, delays.length - 1)];
+    nextRetryAt = now() + delayMs;
+    onSchedule({ attempt, delayMs, nextRetryAt, lastError: String(lastError || '') });
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        retryTimer = null;
+        releaseRetryDelay = null;
+        nextRetryAt = null;
+        resolve(value);
+      };
+      releaseRetryDelay = () => finish(false);
+      retryTimer = setTimer(() => finish(true), delayMs);
+      retryTimer?.unref?.();
+    });
   }
 
   function cancel() {
@@ -103,10 +151,12 @@ function createTunnelRecoverySupervisor({
   }
 
   function clearScheduledRetry() {
-    if (!retryTimer) return;
-    clearTimer(retryTimer);
+    if (retryTimer) clearTimer(retryTimer);
     retryTimer = null;
     nextRetryAt = null;
+    const release = releaseRetryDelay;
+    releaseRetryDelay = null;
+    release?.();
   }
 
   function snapshot() {
@@ -114,11 +164,22 @@ function createTunnelRecoverySupervisor({
       attempt,
       nextRetryAt,
       scheduled: Boolean(retryTimer),
-      inFlight: Boolean(inFlight)
+      inFlight: attemptInFlight
     });
   }
 
   return Object.freeze({ observe, retryNow, cancel, snapshot });
+}
+
+class RetryableTunnelStatus extends Error {
+  constructor(status) {
+    super(String(status?.error || 'Secure MCP Tunnel is still unavailable.'));
+    this.status = status;
+  }
+}
+
+function cancelledStatus() {
+  return { serverRunning: true, tunnelStatus: 'cancelled', errorCode: '', error: '' };
 }
 
 function normalizeRetryDelays(values) {

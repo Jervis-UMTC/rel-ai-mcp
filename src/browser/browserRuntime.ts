@@ -161,8 +161,10 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     try {
       driver = await withAbortResource(launch({
         headless: args.headless !== false,
+        headlessExplicit: args.headless != null,
         viewport,
         ignoreHTTPSErrors: args.ignoreHTTPSErrors === true,
+        ...(options.signal ? { signal: options.signal } : {}),
         ...(profileDirectory ? { profileDirectory } : {})
       }), options.signal, launchedDriver => launchedDriver.close());
       record = {
@@ -183,7 +185,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
       const tab = await createTab(record, options.signal);
       const initial = args.url
         ? await navigateTab(tab, normalizeBrowserUrl(args.url), timeoutFor(args.timeoutMs), options.signal)
-        : await withAbort(tab.page.describe(), options.signal);
+        : await withAbort(tab.page.describe(options.signal), options.signal);
       return sessionResult(record, 'start', {
         tabId: tab.tabId,
         viewport,
@@ -223,7 +225,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     try {
       const result = args.url
         ? await navigateTab(tab, normalizeBrowserUrl(args.url), timeoutFor(args.timeoutMs), options.signal)
-        : await withAbort(tab.page.describe(), options.signal);
+        : await withAbort(tab.page.describe(options.signal), options.signal);
       return sessionResult(record, 'open_tab', { tabId: tab.tabId, ...result });
     } catch (error) {
       record.tabs.delete(tab.tabId);
@@ -266,7 +268,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     options: BrowserOperationOptions = {}
   ): Promise<Record<string, unknown>> {
     return withTab(workspace, args, context, 'snapshot', options, (record, tab) =>
-      withAbort(tab.page.snapshot(timeoutFor(args.timeoutMs)), options.signal).then(result => sessionResult(record, 'snapshot', { tabId: tab.tabId, ...result })));
+      withAbort(tab.page.snapshot(timeoutFor(args.timeoutMs), options.signal), options.signal).then(result => sessionResult(record, 'snapshot', { tabId: tab.tabId, ...result })));
   }
 
   async function interact(
@@ -276,7 +278,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     options: BrowserOperationOptions = {}
   ): Promise<Record<string, unknown>> {
     return withTab(workspace, args, context, 'interact', options, (record, tab) =>
-      withAbort(tab.page.interact(args, timeoutFor(args.timeoutMs)), options.signal).then(result => sessionResult(record, 'interact', { tabId: tab.tabId, ...result })));
+      withAbort(tab.page.interact(args, timeoutFor(args.timeoutMs), options.signal), options.signal).then(result => sessionResult(record, 'interact', { tabId: tab.tabId, ...result })));
   }
 
   async function screenshot(
@@ -286,7 +288,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     options: BrowserOperationOptions = {}
   ): Promise<Record<string, unknown>> {
     return withTab(workspace, args, context, 'screenshot', options, (record, tab) =>
-      withAbort(tab.page.screenshot(args.fullPage === true), options.signal).then(result => sessionResult(record, 'screenshot', { tabId: tab.tabId, ...result })));
+      withAbort(tab.page.screenshot(args.fullPage === true, options.signal), options.signal).then(result => sessionResult(record, 'screenshot', { tabId: tab.tabId, ...result })));
   }
 
   async function upload(
@@ -349,7 +351,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
 
   async function createTab(record: BrowserSessionRecord, signal?: AbortSignal): Promise<BrowserTabRecord> {
     throwIfAborted(signal);
-    const page = await withAbortResource(record.driver.createPage(), signal, page => page.close());
+    const page = await withAbortResource(record.driver.createPage(signal), signal, page => page.close());
     const tab: BrowserTabRecord = {
       tabId: `tab_${crypto.randomBytes(24).toString('base64url')}`,
       page,
@@ -448,7 +450,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
 }
 
 async function navigateTab(tab: BrowserTabRecord, url: string, timeoutMs: number, signal?: AbortSignal): Promise<Record<string, unknown>> {
-  return withAbort(tab.page.navigate(url, timeoutMs), signal);
+  return withAbort(tab.page.navigate(url, timeoutMs, signal), signal);
 }
 
 function sessionResult(record: BrowserSessionRecord, action: string, extra: Record<string, unknown> = {}): Record<string, unknown> {

@@ -25,6 +25,9 @@ assert.equal(normalizeRouteKey('activity?status=active'), 'activity?status=activ
 assert.equal(normalizeRouteKey('activity?status=other'), 'activity?status=other');
 assert.equal(normalizeRouteKey('tasks?workspace=app&task=task-123'), 'tasks?workspace=app&task=task-123', 'task deep links must preserve the selected task');
 assert.equal(normalizeRouteKey('code?task=task-123&file=src/app.js'), 'code?task=task-123&file=src%2Fapp.js', 'Changes deep links must preserve the selected changed file');
+const longFilePath = `src/${'nested/'.repeat(20)}${'a'.repeat(30)}.js`;
+const normalizedLongFileRoute = normalizeRouteKey(`code?task=task-123&file=${encodeURIComponent(longFilePath)}`);
+assert.equal(new URLSearchParams(normalizedLongFileRoute.split('?')[1]).get('file'), longFilePath, 'Changes deep links must preserve valid file paths longer than 160 characters');
 assert.equal(normalizeRouteKey('activity?token=secret&search=hello'), 'activity?search=hello');
 assert.equal(normalizeRouteKey('workspaces?focus=1'), 'workspaces');
 assert.equal(normalizeRouteKey('workspaces?workspace=myapp&focus=1'), 'workspaces?workspace=myapp&focus=1');

@@ -107,7 +107,13 @@ assert.doesNotMatch(sessionsReact, /Request ID|Trace ID/, 'session diagnostics m
 assert.match(sessionsReact, /toolCallCount/, 'session rows must keep the tool-call count visible in the scan-first list');
 assert.match(sessionsReact, /project file/, 'session rows must keep the project-file count visible in the scan-first list');
 assert.match(sessionsReact, /label: 'Tool calls'/, 'task inspector must retain tool-call counts after list simplification');
-assert.match(sessionsReact, /label: 'Project files'/, 'task inspector must retain project-file counts after list simplification');
+assert.match(sessionsReact, /label: 'Project files'/, 'task inspector must retain the Project files count');
+assert.match(sessionsReact, /title: 'Project files'/, 'task inspector must retain the primary Project files section');
+assert.match(sessionsReact, /const visible = expanded \? ordered : ordered\.slice\(0, DETAIL_FILE_PREVIEW\)/, 'Show more must append the remaining files into the same Project files list');
+assert.match(sessionsReact, /h\(FileList, \{ files: visible, session, moreControl \}\)/, 'the Show more control and expanded files must share one file-list render');
+assert.match(sessionsReact, /className: 'task-file-more-row'/, 'Show more must render as the final row of the same file list');
+assert.doesNotMatch(sessionsReact, /task-detail-overflow-content|More \$\{title\.toLowerCase\(\)\}/, 'expanded files must not render in a disconnected secondary block');
+assert.doesNotMatch(sessionsReact, /task-detail-current\$\{sessionNeedsAttention\(session\)/, 'task progress card must stay neutral when a separate attention callout is present');
 assert.doesNotMatch(sessionsReact, /taskProgressHtml|Key activity|workflowTechnicalHtml/, 'Tasks must not reintroduce misleading per-tool whole-task progress or obsolete workflow guidance');
 assert.match(sessionsReact, /const ordered = orderSessionEvents\(session\.events \|\| \[\]\)/, 'open task Activity must render canonical task events instead of raw audit trace rows');
 assert.doesNotMatch(sessionsReact, /mergeSessionEvents\(traceEvents/, 'raw audit trace rows must not inflate the user-facing task Activity timeline');
@@ -137,6 +143,8 @@ assert.match(workspacesReact, /data-workspaces-react/, 'Projects React route mus
 assert.match(workspacesReact, /useWorkspaceAnalytics/, 'Projects must retain per-project analytics in React ownership');
 assert.match(workspaceModals, /sourcePaths:\s*paths/, 'Project create and edit must preserve multi-source project folders');
 assert.match(workspaceModals, /markUnsaved\(formRef\.current, dirty\)/, 'Project forms must mark unsaved local React state for navigation protection');
+assert.match(workspaceModals, /Forget stored activity for this project/, 'Project deletion must expose an explicit stored-activity cleanup choice');
+assert.match(workspaceModals, /forgetLocalData/, 'Project deletion must pass the cleanup choice to the workspace API');
 assert.doesNotMatch(diagnostics, /DiagnosticMaintenance|data-diagnostic-region': 'maintenance'/, 'Troubleshooting must not duplicate local-data cleanup controls owned by App settings');
 assert.match(diagnostics, /role: 'log'/, 'Diagnostic log regions must retain explicit log semantics without making the whole stream aria-live');
 assert.doesNotMatch(diagnostics, /aria-live[^\n]*diagnostic-log-list|window\.prompt/, 'Diagnostics must not turn the full live log into an aria-live region or regress to a native prompt');

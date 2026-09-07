@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import semver from 'semver';
 import { VERSION_JSON_FILES } from './release-surfaces.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,20 +61,6 @@ function die(message) {
   process.exit(1);
 }
 
-function validSemver(input) {
-  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(String(input || ''));
-}
-
-function compareVersions(a, b) {
-  const parse = (v) => String(v).split('-')[0].split('.').map(Number);
-  const aa = parse(a);
-  const bb = parse(b);
-  for (let i = 0; i < 3; i++) {
-    if (aa[i] > bb[i]) return 1;
-    if (aa[i] < bb[i]) return -1;
-  }
-  return 0;
-}
 
 function updateJsonVersion(relativePath, nextVersion) {
   const json = readJson(relativePath);
@@ -120,12 +107,12 @@ function insertChangelog(nextVersion, releaseDate) {
 }
 
 if (!version) die('usage: npm run release:bump -- <version> [--date YYYY-MM-DD] [--dry-run]');
-if (!validSemver(version)) die(`version must be semver-like x.y.z, got ${version}`);
+if (semver.valid(version) !== version) die(`version must be semver-like x.y.z, got ${version}`);
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) die(`date must be YYYY-MM-DD, got ${date}`);
 
 const packageJson = readJson('package.json');
 const current = packageJson.version;
-if (!allowSame && compareVersions(version, current) <= 0) {
+if (!allowSame && semver.compare(version, current) <= 0) {
   die(`new version ${version} must be greater than current ${current}; pass --allow-same to rewrite the same version`);
 }
 

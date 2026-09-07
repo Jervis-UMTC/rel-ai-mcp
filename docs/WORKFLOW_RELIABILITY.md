@@ -4,7 +4,7 @@ Rel.AI exposes one canonical public tool surface and supplies repository facts, 
 
 ## Runtime authority
 
-Use tools directly against an authorized workspace by default. Start `relai_work` with `action:"begin"` when durable ownership, recovery, task-scoped review/publication, or task history is useful, then supply that `work_id` only on operations that should belong to the durable task. Omitted task identity is never guessed. Rel.AI records factual evidence such as tool outcomes, validation fingerprints, workspace/task mutations, and process state. It does not return advisory `recommendedActions`, `avoidActions`, or synthetic workflow stages.
+Use tools directly against an authorized workspace for isolated reads, inspection, and genuinely small one-shot actions. Before substantial or multi-step local project work, start `relai_work` with `action:"begin"` and carry that `work_id` through the objective. This includes implementation, bug fixing, refactors, migrations, audit-and-fix work, multi-file changes, and work expected to need several mutation or validation calls. Omitted task identity is never guessed, and the runtime still permits taskless workspace/resource operations where the caller intentionally does not create a durable task. Rel.AI records factual evidence such as tool outcomes, validation fingerprints, workspace/task mutations, and process state. It does not return advisory `recommendedActions`, `avoidActions`, or synthetic workflow stages.
 
 Authorization, workspace containment, sensitive-file policy, stale-write checks, workspace/task mutation generations, resource ownership, workspace conflicts, Git safety, and defined destructive approvals remain authoritative.
 
@@ -23,19 +23,19 @@ These are shapes, not required sequences. Skip any stage that current evidence a
 
 ### Docs-only
 
-`targeted read -> edit -> review if useful`; add `begin ... finish` only when durable task identity is useful.
+For one isolated documentation correction, `targeted read -> edit -> review if useful` may stay taskless. For substantial or multi-file documentation work, start `begin ... finish` before mutation.
 
 Documentation-only work normally does not justify package builds, repository-wide tests, Knip, security scans, or release checks unless repository policy or the changed documentation specifically requires them.
 
 ### Local bug fix
 
-`reproduce or inspect -> coherent fix -> directly affected check -> review`; optionally attribute the flow to a durable work session.
+`begin -> reproduce or inspect -> coherent fix -> directly affected check -> review -> finish` for substantive bug fixes. A genuinely small one-shot correction may stay taskless.
 
 Prefer the smallest check that proves the defect is fixed. Broaden only when the affected boundary or risk justifies it.
 
 ### Feature slice
 
-`inspect/design only as needed -> implement coherent slice -> package-relevant checks -> review`; use a durable work session when ownership/recovery helps.
+`begin -> inspect/design only as needed -> implement coherent slice -> package-relevant checks -> review -> finish`; feature implementation is substantial project work and should keep one durable work_id through the objective.
 
 Do not validate after every tiny edit. Validate at a meaningful implementation boundary and reuse exact fresh evidence when nothing relevant has changed.
 
@@ -47,7 +47,7 @@ Investigation does not imply mutation or validation. Read and inspection evidenc
 
 ### Risky release
 
-`inspect release boundary -> focused regression proof -> required release/build/package checks -> review/publish`; a durable work session is useful when publication should default to task-owned paths.
+`begin -> inspect release boundary -> focused regression proof -> required release/build/package checks -> review/publish -> finish`; release work should keep one durable work_id so ownership and publication scope remain attributable.
 
 Release-wide validation is reserved for release, repository, cross-package, migration, dependency, contract, or other genuinely high-risk boundaries. It is not the default conclusion of a local source edit.
 
@@ -136,4 +136,4 @@ Ordinary evidence collection consumes existing authority facts and cached topolo
 
 Use `relai_changes` restore/reset/tidy actions only for the requested recovery scope. Publishing remains explicit through `relai_publish`; no evidence or planning helper commits or pushes automatically, and push targets are validated from the repository's actual Git remotes at execution time.
 
-When executing an approved multi-task plan, use a durable work session only when its persistent ownership/recovery benefits matter. Verify each completion condition and update checklists only when evidence proves it. Consolidate accumulated implementation as the plan advances instead of layering duplicate owners or compatibility paths.
+When executing an approved multi-step implementation plan, start a durable work session before mutation and keep that work_id for the objective. Verify each completion condition and update checklists only when evidence proves it. Consolidate accumulated implementation as the plan advances instead of layering duplicate owners or compatibility paths.

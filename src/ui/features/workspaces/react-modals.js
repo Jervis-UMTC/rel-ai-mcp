@@ -39,6 +39,7 @@ export function ProjectFormModal({ configuredWorkspaces = [], mode = 'add', onCl
   const [submitted, setSubmitted] = useState(false);
   const [serverError, setServerError] = useState('');
   const [confirmState, setConfirmState] = useState('');
+  const [forgetLocalData, setForgetLocalData] = useState(true);
   const [pendingNavigation, setPendingNavigation] = useState('');
   const formRef = useRef(null);
   const aliasRef = useRef(null);
@@ -105,7 +106,7 @@ export function ProjectFormModal({ configuredWorkspaces = [], mode = 'add', onCl
     setConfirmState('');
     if (!accepted) { setPendingNavigation(''); return; }
     if (state === 'delete') {
-      void deleteProject(originalAlias, { setBusy, onSuccess: finishClose });
+      void deleteProject(originalAlias, { forgetLocalData, setBusy, onSuccess: finishClose });
       return;
     }
     clearDirty();
@@ -184,7 +185,7 @@ export function ProjectFormModal({ configuredWorkspaces = [], mode = 'add', onCl
   };
 
   const confirmation = confirmState === 'delete'
-    ? deleteConfirmation(originalAlias)
+    ? deleteConfirmation(originalAlias, { forgetLocalData, setForgetLocalData })
     : confirmState
       ? { title: 'Discard changes?', message: 'Discard the unsaved changes in this dialog?', detail: 'Your changes will not be saved.', confirmLabel: 'Discard changes', danger: true }
       : null;
@@ -216,7 +217,7 @@ export function ProjectFormModal({ configuredWorkspaces = [], mode = 'add', onCl
     h('footer', { className: 'modal-footer' },
       isEdit ? h('div', { className: 'modal-danger-zone' },
         h('button', { type: 'button', className: 'secondary danger', disabled: busy, onClick: () => setConfirmState('delete') }, 'Delete project from Rel.AI'),
-        h('span', null, 'Removes Rel.AI access only. Files stay on your computer.')
+        h('span', null, 'Removes Rel.AI access. Files stay on your computer.')
       ) : h('span'),
       h('div', { className: 'modal-actions' },
         h('button', { type: 'button', className: 'secondary', disabled: busy, onClick: requestClose }, 'Cancel'),
@@ -448,7 +449,11 @@ function ProjectModal({ children, confirmation = null, initialFocus, onDismiss, 
               }, h('section', { className: 'modal-inline-confirm-card' },
                 h(AlertDialog.Title, { asChild: true }, h('h3', { className: 'modal-inline-confirm-title' }, confirmation.title)),
                 h(AlertDialog.Description, { asChild: true },
-                  h('div', { className: 'confirm-dialog-copy' }, h('strong', null, confirmation.message), confirmation.detail ? h('span', null, confirmation.detail) : null)
+                  h('div', { className: 'confirm-dialog-copy' },
+                    h('strong', null, confirmation.message),
+                    confirmation.detail ? h('span', null, confirmation.detail) : null,
+                    confirmation.control || null
+                  )
                 ),
                 h('div', { className: 'modal-actions' },
                   h(AlertDialog.Cancel, { asChild: true }, h('button', { type: 'button', className: 'secondary', ref: confirmCancelRef, onClick: () => onResolveConfirmation?.(false) }, 'Cancel')),
@@ -486,10 +491,28 @@ function genericPathStatus(info, repair) {
   if (errorFinding) return { text: repair ? errorFinding.message : `${errorFinding.message} You can save this folder before cloning the project.`, tone: repair ? 'error' : 'warn' };
   return repair ? { text: 'The selected folder could not be verified.', tone: 'warn' } : { text: '', tone: '' };
 }
-function deleteConfirmation(alias) { return { title: 'Delete project from Rel.AI?', message: `'${alias}' will be removed from Rel.AI.`, detail: 'Its source folders and every file inside them will stay on your computer. Rel.AI will no longer access those folders through this project.', confirmLabel: 'Delete from Rel.AI', danger: true }; }
-async function deleteProject(alias, { onSuccess, setBusy }) {
+function deleteConfirmation(alias, { forgetLocalData, setForgetLocalData }) {
+  return {
+    title: 'Delete project from Rel.AI?',
+    message: `'${alias}' will be removed from Rel.AI.`,
+    detail: forgetLocalData
+      ? 'Rel.AI will also remove this project’s stored task history, analytics, safety state, and cached project data. Source folders and files stay on your computer.'
+      : 'Rel.AI will keep this project’s historical task activity and analytics. Cached project indexing is still removed. Source folders and files stay on your computer.',
+    control: h('label', { className: 'toggle-control' },
+      h('input', {
+        type: 'checkbox',
+        checked: forgetLocalData,
+        onChange: event => setForgetLocalData(event.currentTarget.checked)
+      }),
+      h('span', null, 'Forget stored activity for this project')
+    ),
+    confirmLabel: 'Delete from Rel.AI',
+    danger: true
+  };
+}
+async function deleteProject(alias, { forgetLocalData = true, onSuccess, setBusy }) {
   setBusy?.(true);
-  const result = await postJson('/api/workspaces', { action: 'delete', alias, confirmDelete: true });
+  const result = await postJson('/api/workspaces', { action: 'delete', alias, confirmDelete: true, forgetLocalData });
   setBusy?.(false);
   if (!result?.ok) { toast(`Could not delete project from Rel.AI: ${result?.error || 'unknown error'}`, { variant: 'error' }); return false; }
   removeRecentWorkspace(alias);

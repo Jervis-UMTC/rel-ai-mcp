@@ -35,7 +35,7 @@ async function uploadAuthorizedBrowserFile(
   });
   const before = await fs.promises.stat(safe.absolutePath);
   if (!before.isFile()) throw new Error(`Browser upload target is not a file: ${safe.relativePath}`);
-  const result = await withAbort(page.upload(args, safe.absolutePath, timeoutMs), options.signal);
+  const result = await withAbort(page.upload(args, safe.absolutePath, timeoutMs, options.signal), options.signal);
   return {
     ...result,
     path: safe.relativePath,
@@ -64,7 +64,7 @@ async function downloadBrowserFile(
   if (fs.existsSync(verified.absolutePath)) throw new Error(`Browser download destination already exists: ${verified.relativePath}`);
 
   const download = await withAbortResource(
-    page.beginDownload(args, timeoutMs),
+    page.beginDownload(args, timeoutMs, options.signal),
     options.signal,
     handle => cleanupDownload(handle, true)
   );

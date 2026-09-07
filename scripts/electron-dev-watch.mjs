@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { watch } from 'chokidar';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electronRoot = path.join(root, 'electron');
@@ -157,9 +158,15 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   for (const target of sourceWatchTargets()) {
-    const watcher = fs.watch(target.directory, { recursive: target.recursive }, (_eventType, fileName) => {
-      if (!fileName) return;
-      const relative = `${target.prefix}${String(fileName).replaceAll('\\', '/')}`;
+    const watcher = watch(target.directory, {
+      ignoreInitial: true,
+      depth: target.recursive ? undefined : 0
+    });
+    watcher.on('all', (eventName, filePath) => {
+      if (!['add', 'change', 'unlink'].includes(eventName)) return;
+      const fileName = path.relative(target.directory, filePath);
+      if (!fileName || fileName.startsWith('..')) return;
+      const relative = `${target.prefix}${fileName.replaceAll('\\', '/')}`;
       if (!shouldRestartForPath(target.rootName, relative)) return;
       scheduleRestart(`${target.rootName}/${relative}`);
     });
@@ -170,7 +177,7 @@ async function main(argv = process.argv.slice(2)) {
     if (shuttingDown) return;
     shuttingDown = true;
     if (restartTimer) clearTimeout(restartTimer);
-    for (const watcher of watchers) watcher.close();
+    await Promise.allSettled(watchers.map(watcher => watcher.close()));
     terminateProcess(electronChild);
     terminateProcess(frontendWatcher);
     await restartChain.catch(() => {});

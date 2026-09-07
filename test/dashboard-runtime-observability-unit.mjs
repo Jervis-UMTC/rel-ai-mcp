@@ -14,6 +14,7 @@ import {
 } from '../src/ui/task-identity.js';
 import { taskProgressView } from '../src/ui/components/task-progress.js';
 import { activeTaskList } from '../src/ui/features/home/index.js';
+import { processListView } from '../src/ui/features/processes/index.js';
 
 const TASKS_EXTENSION_ID = 'io.modelcontextprotocol/tasks';
 
@@ -144,6 +145,14 @@ const restartedProcess = processStateView({ status: 'orphaned', pid: 123 });
 assert.equal(restartedProcess.label, 'Unknown after restart');
 assert.equal(restartedProcess.canStop, true);
 assert.match(restartedProcess.recovery, /Stop the process explicitly/i);
+const processSummary = processListView({
+  managedProcesses: [
+    { processId: 'orphaned-process', status: 'orphaned', pid: 123 },
+    { processId: 'finished-process', status: 'exited', endedAt: '2026-09-07T10:00:00.000Z' }
+  ]
+});
+assert.equal(processSummary.running, 0);
+assert.equal(processSummary.finished, 1, 'orphaned processes must not be counted as finished');
 const stoppedProcess = processStateView({ status: 'stopped' });
 assert.equal(stoppedProcess.terminal, true);
 assert.equal(stoppedProcess.canStop, false);

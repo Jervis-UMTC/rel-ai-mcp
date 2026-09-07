@@ -52,7 +52,8 @@ try {
   assert.equal(usage.categories.logs.bytes, 29);
   assert.equal(usage.categories.temporary.bytes, 19);
   assert.equal(usage.categories.indexes.bytes, 23);
-  assert.equal(usage.totalBytes, 112);
+  assert.equal(usage.categories.other.bytes, 11, 'uncategorized Rel.AI-owned state must still be included in local storage usage');
+  assert.equal(usage.totalBytes, 123, 'local storage total must include every Rel.AI-owned data root, not only managed history and caches');
 
   activeTaskCount = 1;
   const blocked = await manager.clearTemporary();
@@ -71,12 +72,13 @@ try {
 
   const plan = manager.prepareClearAll();
   assert.equal(plan.ok, true);
-  assert.deepEqual(new Set(plan.roots), new Set([path.resolve(stateDir), path.resolve(connectionStateDir), path.resolve(userDataDir)]));
+  assert.deepEqual(new Set(plan.roots), new Set([path.resolve(stateDir), path.resolve(connectionStateDir), path.resolve(userDataDir), path.resolve(logPath)]));
   const allCleared = await manager.clearAll(plan);
   assert.equal(allCleared.ok, true);
   assert.equal(fs.existsSync(stateDir), false);
   assert.equal(fs.existsSync(connectionStateDir), false);
   assert.equal(fs.existsSync(userDataDir), false);
+  assert.equal(fs.existsSync(logPath), false, 'clear all data must remove an external Rel.AI service log included in the reported total');
   assert.equal(fs.existsSync(persistentBrowserProfileFile), false, 'clear all data must remove persistent local browser profile state');
   assert.equal(fs.readFileSync(path.join(projectDir, 'keep.txt'), 'utf8'), 'project data');
 

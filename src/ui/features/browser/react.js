@@ -111,6 +111,7 @@ function createBrowserRoute() {
     }
 
     const userControl = state.control === 'user';
+    const sessions = Array.isArray(state.sessions) ? state.sessions : [];
     const tabs = Array.isArray(state.tabs) ? state.tabs : [];
     return h('section', { className: 'section browser-route', 'data-browser-control': userControl ? 'user' : 'ai' },
       h('div', { className: 'browser-toolbar' },
@@ -134,6 +135,29 @@ function createBrowserRoute() {
           }, busy === 'stop' ? 'Stopping…' : 'Stop session')
         )
       ),
+      sessions.length > 1
+        ? h('div', { className: 'browser-sessions' },
+            h('div', { className: 'browser-tabs-label' }, `${sessions.length} sessions`),
+            h('div', { className: 'browser-session-list', role: 'list', 'aria-label': 'Open browser sessions' },
+              sessions.map((session, index) => {
+                const nativeSessionId = String(session?.nativeSessionId || '');
+                const activeSession = session?.active === true || nativeSessionId === state.nativeSessionId;
+                const label = sessionLabel(session, index);
+                return h('button', {
+                  className: `browser-session-select${activeSession ? ' active' : ''}`,
+                  type: 'button',
+                  key: nativeSessionId || `${index}`,
+                  role: 'listitem',
+                  disabled: Boolean(busy) || !nativeSessionId || (userControl && !activeSession),
+                  'aria-current': activeSession ? 'page' : undefined,
+                  'aria-label': `Show ${label}`,
+                  title: session?.url || label,
+                  onClick: () => { void run(`session:${nativeSessionId}`, () => browser.selectSession(nativeSessionId)); }
+                }, label);
+              })
+            )
+          )
+        : null,
       h('div', { className: 'browser-tabs' },
         h('div', { className: 'browser-tabs-label' }, `${tabs.length} open ${tabs.length === 1 ? 'tab' : 'tabs'}`),
         tabs.length
@@ -199,6 +223,16 @@ function emptyState(available) {
     visible: false,
     tabs: []
   };
+}
+
+function sessionLabel(session, index) {
+  const title = String(session?.title || '').trim();
+  if (title) return `${title}${session?.headless ? ' · Headless' : ''}`;
+  const url = String(session?.url || '').trim();
+  if (url) {
+    try { return `${new URL(url).hostname || url}${session?.headless ? ' · Headless' : ''}`; } catch { return url; }
+  }
+  return `Session ${index + 1}${session?.headless ? ' · Headless' : ''}`;
 }
 
 function tabLabel(tab, index) {

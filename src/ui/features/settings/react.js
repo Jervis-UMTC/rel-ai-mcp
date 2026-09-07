@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { fetchJson, postJson, requestDashboardRefresh } from '../../api.js';
 import { confirmAction } from '../../components/confirm-dialog.js';
+import { Icon } from '../../components/icons.js';
 import { openModal } from '../../components/modal.js';
 import { toast } from '../../components/toast.js';
 import { connectionLayerViews, connectionStateFor, connectionSummary, hasObservedMcpConnection } from '../../connection-state.js';
@@ -39,7 +40,7 @@ export function SettingsView({ data = {}, subPage = '' }) {
   const content = {
     connection: h(ConnectionPage, { data }),
     preferences: h(PreferencesPage),
-    application: h(ApplicationPage),
+    application: h(ApplicationPage, { computerControl: data.config?.computerControl }),
     about: h(AboutPage, { metadata: data.application || {} })
   }[page] || h(PreferencesPage);
   return h('div', { id: '__settings-content', className: 'settings-content', 'data-settings-react': page }, content);
@@ -490,7 +491,7 @@ function ThemeSwitch({ theme, onChange }) {
     key: value, type: 'button', className: 'theme-switch-option', title: label, role: 'radio', 'data-theme-option': value,
     'aria-label': label, 'aria-checked': String(theme === value), tabIndex: theme === value ? 0 : -1,
     ref: element => { refs.current[index] = element; }, onClick: () => onChange(value)
-  }, h('span', { 'aria-hidden': 'true' }, value === 'system' ? '◐' : value === 'dark' ? '●' : '○'))));
+  }, h(Icon, { name: value }))));
 }
 
 function DesktopNotificationsSettings() {
@@ -559,7 +560,7 @@ function normalizeNotificationPreferences(value = {}) {
   };
 }
 
-function ApplicationPage() {
+function ApplicationPage({ computerControl }) {
   const [lifecycle, setLifecycle] = useState(undefined);
   const desktop = window.relaiDesktop;
   useEffect(() => {
@@ -572,7 +573,7 @@ function ApplicationPage() {
     h(SettingsHeader, { title: 'App', description: 'Startup, background behavior, updates, and local storage.' }),
     lifecycle === undefined ? h('div', { className: 'settings-loading', role: 'status' }, 'Loading app settings…') : h(React.Fragment, null,
       h(StartupSettings, { initial: lifecycle }),
-      h(ComputerControlSettings),
+      h(ComputerControlSettings, { initial: computerControl }),
       h(ApplicationUpdates, { lifecycle }),
       h(LocalDataSettings),
       typeof desktop?.quitApp === 'function' || typeof desktop?.logout === 'function'
@@ -650,30 +651,21 @@ function LifecycleNotice({ tone, title, text }) {
   return h('div', { className: `connection-notice ${tone} desktop-lifecycle-notice` }, h('strong', null, title), h('p', null, text));
 }
 
-function ComputerControlSettings() {
-  const [data, setData] = useState(null);
+function ComputerControlSettings({ initial = {} }) {
+  const [enabled, setEnabled] = useState(initial?.enabled === true);
   const [busy, setBusy] = useState(false);
-  const load = useCallback(async () => {
-    const result = await fetchJson('/api/computer', { cache: 'no-store' }).catch(error => ({ ok: false, error: messageOf(error) }));
-    setData(result);
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  if (!data) return h(Card, { title: 'Computer control' }, h('div', { className: 'settings-loading', role: 'status' }, 'Loading computer control status…'));
-  const enabled = data?.settings?.enabled === true;
-  const available = data?.status?.available === true;
-  const help = available
-    ? 'Allow ChatGPT connected through Rel.AI to perform local desktop actions when a task needs them. Rel.AI uses direct file and app actions where possible and full pointer or keyboard control only when necessary. Operating-system permissions and privilege boundaries still apply.'
-    : `Desktop automation is unavailable on this installation${data?.status?.message ? `: ${data.status.message}` : '.'}`;
+  useEffect(() => setEnabled(initial?.enabled === true), [initial?.enabled]);
+  const help = 'Allow ChatGPT connected through Rel.AI to perform local desktop actions when a task needs them. Rel.AI uses direct file and app actions where possible and full pointer or keyboard control only when necessary. Operating-system permissions and privilege boundaries still apply.';
   const update = async value => {
     setBusy(true);
     const result = await postJson('/api/computer', { enabled: value }, { cache: 'no-store' }).catch(error => ({ ok: false, error: messageOf(error) }));
     setBusy(false);
     if (!result?.ok) { toast(result?.error || 'Could not save computer control settings.', { variant: 'error' }); return; }
-    setData(current => ({ ...current, settings: { ...(current.settings || {}), enabled: value } }));
+    setEnabled(result?.settings?.enabled === true);
     toast(value ? 'Computer control is enabled.' : 'Computer control is disabled.', { variant: 'success' });
   };
   return h(Card, { title: 'Computer control' }, h(ToggleRow, {
-    label: 'Allow computer control', checked: enabled, disabled: busy || !available, busy,
+    label: 'Allow computer control', checked: enabled, disabled: busy, busy,
     enabledLabel: 'Allowed', disabledLabel: 'Off', help, onChange: value => void update(value)
   }));
 }
@@ -874,14 +866,15 @@ function LocalDataSettings() {
   };
   return h(Card, { title: 'Local data & storage', className: 'desktop-local-data-panel' },
     h('div', { className: 'local-data-summary' },
-      h('div', null, h('span', null, 'Managed history and caches'), h('strong', null, `${formatBytes(usage.totalBytes, { zero: true })}${usage.approximate ? ' approx.' : ''}`)),
-      h('small', null, 'Connection credentials and other app data are kept by these category controls. Use Log out → Clear all local data to erase everything Rel.AI stores locally.')
+      h('div', null, h('span', null, 'Total Rel.AI local data'), h('strong', null, `${formatBytes(usage.totalBytes, { zero: true })}${usage.approximate ? ' approx.' : ''}`)),
+      h('small', null, 'Includes Rel.AI state, desktop app data, connection state, logs, indexes, and caches. Use Log out → Clear all local data to erase everything Rel.AI stores locally.')
     ),
     h('div', { className: 'local-data-list' },
       h(DataRow, { label: 'Task & activity history', bytes: categories.history?.bytes }),
       h(DataRow, { label: 'Saved app log', bytes: categories.logs?.bytes }),
       h(DataRow, { label: 'Temporary command output', bytes: categories.temporary?.bytes }),
-      h(DataRow, { label: 'Repository indexes', bytes: categories.indexes?.bytes })
+      h(DataRow, { label: 'Repository indexes', bytes: categories.indexes?.bytes }),
+      h(DataRow, { label: 'Other Rel.AI app data', bytes: categories.other?.bytes })
     ),
     h('div', { className: 'local-data-actions' },
       h('button', { className: 'secondary', type: 'button', disabled: active > 0 || busy === 'temporary', onClick: () => void clearTemporary() }, busy === 'temporary' ? 'Clearing…' : 'Clear temporary output'),

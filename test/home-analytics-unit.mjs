@@ -46,12 +46,13 @@ assert.equal(view.metrics[1].value, '94.4%');
 assert.equal(view.metrics[2].value, '240 ms');
 assert.equal(view.metrics[3].value, '2');
 assert.equal(view.contextSummary, 'Most active project: rel-ai-mcp');
-assert.equal(view.errorSummary, '1 system error');
+assert.equal(view.errorSummary, '1 internal error');
 assert.equal(view.pulse.empty, false);
 assert.match(view.pulse.summary, /Latest hour 10 actions/);
 assert.match(view.pulse.summary, /Overall trend increasing/);
-assert.match(view.pulse.polyline, /,/);
-assert.match(view.pulse.area, /^0,/);
+assert.deepEqual(view.pulse.values, [1, 5, 2, 10]);
+assert.equal('polyline' in view.pulse, false);
+assert.equal('area' in view.pulse, false);
 
 const workspaceView = homeAnalyticsView({ ...scope, kind: 'workspace', label: 'Rel.AI', workspace: 'rel-ai-mcp', executionMs: 1500 });
 assert.equal(workspaceView.heading, 'Rel.AI activity');

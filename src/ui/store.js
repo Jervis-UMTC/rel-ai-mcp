@@ -1,18 +1,18 @@
 // Canonical dashboard client state. Aggregate refreshes replace the whole state;
 // typed domain deltas update only their owned projection and are ordered by revision.
+import { createStore } from 'zustand/vanilla';
 import { DASHBOARD_LIVE_EVENTS, createEmptyDashboardRevisions } from './generated/events-contract.js';
 
-let _state = {};
+const dashboardStore = createStore(() => ({}));
+let _state = dashboardStore.getState();
 let _streamId = '';
 let _revisions = emptyRevisions();
-const _listeners = new Set();
 
-export function getSnapshot() { return _state; }
+export function getSnapshot() { return dashboardStore.getState(); }
 
 export function subscribe(listener) {
   if (typeof listener !== 'function') return () => {};
-  _listeners.add(listener);
-  return () => _listeners.delete(listener);
+  return dashboardStore.subscribe(listener);
 }
 
 export function init(initial) {
@@ -235,7 +235,7 @@ function syncWorkspaceOperationalStates(states) {
 
 function commit() {
   syncLiveMetadata();
-  for (const listener of [..._listeners]) listener();
+  dashboardStore.setState(_state, true);
 }
 
 function syncLiveMetadata() {

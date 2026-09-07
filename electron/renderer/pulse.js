@@ -1,6 +1,9 @@
 let currentModel = { route: '#home' };
 let expanded = false;
 let collapseTimer = null;
+let geometryTimer = null;
+
+const PULSE_TRANSITION_MS = 170;
 
 const shell = document.getElementById('pulseShell');
 const toggle = document.getElementById('pulseToggle');
@@ -37,6 +40,7 @@ function updatePulse(model = {}) {
   const contextTitle = String(currentModel.contextTitle || '').trim();
   const detail = String(currentModel.detail || '').trim();
   const workspace = String(currentModel.workspace || '').trim();
+  const taskCount = Math.max(0, Number(currentModel.taskCount || 0));
   const otherTaskCount = Math.max(0, Number(currentModel.otherTaskCount || 0));
   const progressPercent = Number(currentModel.progressPercent);
   const hasProgress = Number.isFinite(progressPercent) && progressPercent >= 0;
@@ -44,6 +48,9 @@ function updatePulse(model = {}) {
   shell.dataset.tone = String(currentModel.tone || 'idle');
   document.getElementById('pulseState').textContent = label;
   document.getElementById('pulseExpandedState').textContent = label;
+  const taskCountElement = document.getElementById('pulseTaskCount');
+  taskCountElement.hidden = taskCount < 1;
+  taskCountElement.textContent = taskCount === 1 ? '1 task' : `${taskCount} tasks`;
   document.getElementById('pulseCompactTitle').textContent = title;
   document.getElementById('pulseTitle').textContent = title;
   document.getElementById('pulseSummary').textContent = contextTitle && contextTitle !== title ? contextTitle : (detail || 'Local activity is in progress.');
@@ -70,14 +77,35 @@ function setExpanded(next) {
   const value = next === true;
   clearTimeout(collapseTimer);
   collapseTimer = null;
+  clearTimeout(geometryTimer);
+  geometryTimer = null;
   if (expanded === value) return;
   expanded = value;
+
+  if (value) {
+    Promise.resolve(window.relaiPulse?.setExpanded?.(true))
+      .catch(() => {})
+      .finally(() => {
+        if (!expanded) return;
+        requestAnimationFrame(() => {
+          if (expanded) applyExpandedVisual(true);
+        });
+      });
+    return;
+  }
+
+  applyExpandedVisual(false);
+  geometryTimer = setTimeout(() => {
+    if (!expanded) Promise.resolve(window.relaiPulse?.setExpanded?.(false)).catch(() => {});
+  }, PULSE_TRANSITION_MS);
+}
+
+function applyExpandedVisual(value) {
   shell.dataset.expanded = String(value);
   toggle.setAttribute('aria-expanded', String(value));
   toggle.setAttribute('aria-label', value ? 'Hide activity details' : 'Show activity details');
   island.setAttribute('aria-hidden', String(!value));
   openButton.tabIndex = value ? 0 : -1;
-  Promise.resolve(window.relaiPulse?.setExpanded?.(value)).catch(() => {});
 }
 
 function scheduleCollapse() {

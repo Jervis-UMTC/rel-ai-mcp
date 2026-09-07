@@ -62,11 +62,14 @@ try {
   assert.equal(probe.aiState.control, 'ai');
   assert.equal(probe.finalState.active, true);
   assert.equal(probe.finalState.visible, true);
+  assert.equal(probe.windowVisible, true, 'The Electron probe window must be render-active for WebContentsView painting.');
+  assert.equal(probe.windowOpacity, 0, 'The real Electron browser probe must remain fully transparent so tests never flash a blank or black window on the user desktop.');
+  assert.equal(probe.windowFocused, false, 'The invisible browser probe must never steal user focus.');
   assert.ok(probe.stateCount >= 4, 'Embedded surface must publish lifecycle and navigation state.');
   assert.equal(probe.events.length, 1);
   assert.equal(probe.events[0].type, 'page_closed');
   console.log('Real Electron WebContentsView browser surface renders, automates, screenshots, and hands control to the user.');
 } finally {
   if (child.exitCode == null) child.kill('SIGKILL');
-  fs.rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  await fs.promises.rm(temp, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
 }

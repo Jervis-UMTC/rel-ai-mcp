@@ -21,22 +21,39 @@ function createDesktopLocalDataManager(options = {}) {
     if (!configuredStateDir) throw new Error('Rel.AI local data folder is unavailable.');
     const stateDir = path.resolve(configuredStateDir);
     const auditPath = path.resolve(String(config?.auditLogPath || path.join(stateDir, 'audit.jsonl')));
+    const serviceLogPath = String(getServiceLogPath() || '').trim();
+    const additional = getAdditionalDataRoots();
+    const ownedRoots = minimizeRoots([
+      stateDir,
+      auditPath,
+      `${auditPath}.1`,
+      String(getUserDataPath() || '').trim(),
+      ...(Array.isArray(additional) ? additional : []),
+      serviceLogPath
+    ].filter(Boolean).map(root => path.resolve(String(root))));
     const paths = {
       history: [path.join(stateDir, 'sessions'), auditPath, `${auditPath}.1`],
-      logs: [String(getServiceLogPath() || '')].filter(Boolean),
+      logs: serviceLogPath ? [serviceLogPath] : [],
       temporary: [path.join(stateDir, 'output-spills')],
       indexes: [path.join(stateDir, 'repository-intelligence')]
     };
-    const [history, logs, temporary, indexes] = await Promise.all(
-      Object.values(paths).map(targets => measurePaths(targets))
-    );
-    const categories = { history, logs, temporary, indexes };
+    const [history, logs, temporary, indexes, total] = await Promise.all([
+      ...Object.values(paths).map(targets => measurePaths(targets)),
+      measurePaths(ownedRoots)
+    ]);
+    const categorizedBytes = history.bytes + logs.bytes + temporary.bytes + indexes.bytes;
+    const other = {
+      bytes: Math.max(0, total.bytes - categorizedBytes),
+      entries: 0,
+      truncated: total.truncated
+    };
+    const categories = { history, logs, temporary, indexes, other };
     return {
       ok: true,
-      totalBytes: Object.values(categories).reduce((sum, item) => sum + item.bytes, 0),
+      totalBytes: total.bytes,
       categories,
       activeTaskCount: activeTaskCount(getTaskActivity()),
-      approximate: Object.values(categories).some(item => item.truncated)
+      approximate: total.truncated || Object.values(categories).some(item => item.truncated)
     };
   }
 
@@ -77,11 +94,20 @@ function createDesktopLocalDataManager(options = {}) {
     const config = getConfig();
     const stateDir = resolveOwnedRoot(config?.stateDir, 'Rel.AI state directory');
     const userDataDir = resolveOwnedRoot(getUserDataPath(), 'Electron user-data directory');
+    const auditPath = resolveOwnedRoot(config?.auditLogPath || path.join(stateDir, 'audit.jsonl'), 'Rel.AI audit log');
+    const serviceLogPath = String(getServiceLogPath() || '').trim();
     const additional = getAdditionalDataRoots();
     const additionalRoots = Array.isArray(additional)
       ? additional.map((root, index) => resolveOwnedRoot(root, `Additional Rel.AI data root ${index + 1}`))
       : [];
-    const roots = [stateDir, userDataDir, ...additionalRoots];
+    const roots = [
+      stateDir,
+      userDataDir,
+      auditPath,
+      `${auditPath}.1`,
+      ...(serviceLogPath ? [resolveOwnedRoot(serviceLogPath, 'Rel.AI service log')] : []),
+      ...additionalRoots
+    ];
     const protectedRoots = projectRoots(config);
     for (const root of roots) assertSafeClearRoot(root, protectedRoots);
     return { ok: true, roots: Object.freeze(minimizeRoots(roots)) };

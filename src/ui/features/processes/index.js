@@ -6,10 +6,11 @@ export function processListView(data = {}, now = Date.now()) {
   const processes = orderProcesses(data.managedProcesses || [], nativeTasks);
   const rows = processes.map(process => processRowView(process, nativeTasks, now));
   const running = rows.filter(row => row.state.active).length;
+  const finished = rows.filter(row => row.state.terminal).length;
   return {
     rows,
     running,
-    finished: Math.max(0, rows.length - running)
+    finished
   };
 }
 

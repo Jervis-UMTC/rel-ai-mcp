@@ -30,12 +30,19 @@ function classifyAnalyticsOutcome(event: ObservabilityResultInput = {}): Analyti
     return OUTCOME_CLASSES.OPERATION_FAILURE;
   }
 
-  return OUTCOME_CLASSES.INFRASTRUCTURE_FAILURE;
+  if (/\b(INTERNAL(?:_ERROR)?|UNHANDLED|EXCEPTIONGROUP|INVARIANT|ASSERTION(?:ERROR)?|PANIC|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND)\b/.test(signal)) {
+    return OUTCOME_CLASSES.INFRASTRUCTURE_FAILURE;
+  }
+
+  return OUTCOME_CLASSES.UNCLASSIFIED_FAILURE;
 }
 
 function reliabilityCountersForOutcome(outcome: AnalyticsOutcome): ReliabilityCounters {
   if (outcome === OUTCOME_CLASSES.CANCELLED) {
     return { reliabilityCalls: 0, reliableCalls: 0, infrastructureFailures: 0, operationFailures: 0, recoverableFailures: 0, cancellations: 1 };
+  }
+  if (outcome === OUTCOME_CLASSES.UNCLASSIFIED_FAILURE) {
+    return { reliabilityCalls: 0, reliableCalls: 0, infrastructureFailures: 0, operationFailures: 0, recoverableFailures: 0, cancellations: 0 };
   }
   if (outcome === OUTCOME_CLASSES.INFRASTRUCTURE_FAILURE) {
     return { reliabilityCalls: 1, reliableCalls: 0, infrastructureFailures: 1, operationFailures: 0, recoverableFailures: 0, cancellations: 0 };

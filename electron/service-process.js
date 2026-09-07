@@ -16,7 +16,7 @@ const [httpModule, toolActivity, dashboardSessions, coreDesktopOperations, deskt
 ]);
 
 desktopManager.configureDesktopNativeBridge(payload => callNative('desktopOperation', payload));
-browserDriver.configureBrowserNativeBridge(payload => callNative('browserOperation', payload));
+browserDriver.configureBrowserNativeBridge((payload, options) => callNative('browserOperation', payload, options));
 
 let httpServer = null;
 let activeToken = '';
@@ -232,30 +232,64 @@ function runtimeLogSnapshot(options = {}) {
   return { ...snapshot, entries: entries.slice(-limit) };
 }
 
-function callNative(method, payload = {}) {
+function callNative(method, payload = {}, options = {}) {
   const id = `native-${++nativeRequestSequence}`;
+  const signal = options.signal;
+  if (signal?.aborted) return Promise.reject(nativeCancelledError(signal.reason));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const timeoutMs = nativeRequestTimeoutMs(method, payload);
+    const finish = () => {
+      const entry = pendingNativeRequests.get(id);
+      if (!entry) return false;
       pendingNativeRequests.delete(id);
+      clearTimeout(entry.timer);
+      if (entry.signal && entry.onAbort) entry.signal.removeEventListener('abort', entry.onAbort);
+      return true;
+    };
+    const onAbort = () => {
+      if (!finish()) return;
+      post({ type: 'native-cancel', id });
+      reject(nativeCancelledError(signal?.reason));
+    };
+    const timer = setTimeout(() => {
+      if (!finish()) return;
+      post({ type: 'native-cancel', id });
       reject(new Error(`Native desktop request timed out: ${method}`));
-    }, 30_000);
+    }, timeoutMs);
     timer.unref?.();
-    pendingNativeRequests.set(id, { resolve, reject, timer });
+    pendingNativeRequests.set(id, { resolve, reject, timer, signal, onAbort });
+    signal?.addEventListener('abort', onAbort, { once: true });
     post({ type: 'native-request', id, method, payload });
   });
 }
 
 function settleNativeRequest(message) {
-  const entry = pendingNativeRequests.get(String(message.id || ''));
+  const id = String(message.id || '');
+  const entry = pendingNativeRequests.get(id);
   if (!entry) return;
-  pendingNativeRequests.delete(String(message.id || ''));
+  pendingNativeRequests.delete(id);
   clearTimeout(entry.timer);
+  if (entry.signal && entry.onAbort) entry.signal.removeEventListener('abort', entry.onAbort);
   if (message.ok) entry.resolve(message.result);
   else {
     const error = new Error(String(message.error?.message || 'Native desktop request failed.'));
     if (message.error?.code) error.code = String(message.error.code);
     entry.reject(error);
   }
+}
+
+function nativeRequestTimeoutMs(method, payload) {
+  const requested = Number(payload?.timeoutMs);
+  if (method === 'browserOperation' && Number.isFinite(requested)) {
+    return Math.max(5_000, Math.min(35_000, Math.floor(requested) + 5_000));
+  }
+  return 30_000;
+}
+
+function nativeCancelledError(reason) {
+  const error = new Error(reason instanceof Error ? reason.message : String(reason || 'Browser operation cancelled.'));
+  error.code = 'BROWSER_OPERATION_CANCELLED';
+  return error;
 }
 
 function publishActivitySnapshot() {

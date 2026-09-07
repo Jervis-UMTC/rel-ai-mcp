@@ -52,6 +52,7 @@ export const ANALYTICS_OUTCOME_CLASSES = Object.freeze({
   SUCCESS: 'success',
   OPERATION_FAILURE: 'operation_failure',
   RECOVERABLE_FAILURE: 'recoverable_failure',
+  UNCLASSIFIED_FAILURE: 'unclassified_failure',
   INFRASTRUCTURE_FAILURE: 'infrastructure_failure',
   CANCELLED: 'cancelled'
 } as const);

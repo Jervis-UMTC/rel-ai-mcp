@@ -217,4 +217,35 @@ await delayedStop;
 await client.dispose({ stop: false });
 assert.equal(child.killed, true);
 
+class DeferredSpawnUtilityProcess extends EventEmitter {
+  constructor() {
+    super();
+    this.pid = 8765;
+    this.stdout = new PassThrough();
+    this.stderr = new PassThrough();
+    this.killed = false;
+  }
+
+  postMessage() {}
+
+  kill() {
+    this.killed = true;
+  }
+}
+
+const deferredChild = new DeferredSpawnUtilityProcess();
+const deferredClient = createServiceProcessClient({
+  utilityProcess: { fork: () => deferredChild },
+  modulePath: '/app/electron/service-process.js'
+});
+const deferredStart = deferredClient.start({ host: '127.0.0.1', port: 3333, token: 'secret' });
+const deferredDispose = deferredClient.dispose({ stop: false });
+await assert.rejects(
+  deferredStart,
+  /closed during startup/i,
+  'disposing before spawn must settle the pending startup instead of removing the listeners it depends on'
+);
+await deferredDispose;
+assert.equal(deferredChild.killed, true);
+
 console.log('Electron utility-process service bridge contracts passed.');

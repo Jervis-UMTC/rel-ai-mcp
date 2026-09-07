@@ -125,4 +125,4 @@ function statusMapFromOutput(output: unknown): Map<string, string> {
 }
 
 export { INTERNAL_STATUS_MAX_BYTES, gitStatusArgs, parseGitStatus, formatGitStatus, statusMapFromOutput };
-export type { GitAheadBehind, GitStatusEntry, GitStatusOwner };
+export type { GitAheadBehind, GitStatusEntry, GitStatusOwner, ParsedGitStatus };

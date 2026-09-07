@@ -12,7 +12,10 @@ import {
 } from './playwrightBrowserDriver.ts';
 import type { StructuredInteractionArgs } from './playwrightPrimitives.ts';
 
-type NativeBrowserBridge = (payload: Record<string, unknown>) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
+type NativeBrowserBridge = (
+  payload: Record<string, unknown>,
+  options?: Readonly<{ signal?: AbortSignal }>
+) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
 type NativeBrowserEvent = Readonly<Record<string, unknown> & {
   resource?: unknown;
   type?: unknown;
@@ -71,16 +74,17 @@ async function launchBrowserDriver(options: LaunchBrowserDriverOptions): Promise
   const started = objectValue(await bridge({
     action: 'start',
     viewport: options.viewport,
+    headless: options.headlessExplicit === true ? options.headless : false,
     ignoreHTTPSErrors: options.ignoreHTTPSErrors === true,
     ...(options.profileDirectory ? { profileDirectory: options.profileDirectory } : {})
-  }));
+  }, options.signal ? { signal: options.signal } : undefined));
   const nativeSessionId = requiredId(started.nativeSessionId, 'Embedded browser session');
   let onDisconnected: (() => void) | null = null;
   sessionDisconnectListeners.set(nativeSessionId, () => onDisconnected?.());
 
   return Object.freeze({
     browserProduct: String(started.browserProduct || 'Rel.AI Embedded Chromium'),
-    createPage: () => createNativePage(bridge, nativeSessionId),
+    createPage: (signal?: AbortSignal) => createNativePage(bridge, nativeSessionId, signal),
     close: async () => {
       sessionDisconnectListeners.delete(nativeSessionId);
       for (const [pageId, entry] of pageListeners) {
@@ -92,29 +96,44 @@ async function launchBrowserDriver(options: LaunchBrowserDriverOptions): Promise
   });
 }
 
-async function createNativePage(bridge: NativeBrowserBridge, nativeSessionId: string): Promise<BrowserPageDriver> {
-  const opened = objectValue(await bridge({ action: 'open_page', nativeSessionId }));
+async function createNativePage(bridge: NativeBrowserBridge, nativeSessionId: string, signal?: AbortSignal): Promise<BrowserPageDriver> {
+  const opened = objectValue(await bridge({ action: 'open_page', nativeSessionId }, signal ? { signal } : undefined));
   const nativePageId = requiredId(opened.nativePageId, 'Embedded browser page');
   const listeners: NativePageListeners = { nativeSessionId, onClosed: null, onCrashed: null };
   pageListeners.set(nativePageId, listeners);
 
-  const request = async (action: string, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
-    objectValue(await bridge({ action, nativeSessionId, nativePageId, ...extra }));
-  const requestPage = async (action: string, extra: Record<string, unknown> = {}): Promise<BrowserPageResult> => {
-    const result = await request(action, extra);
-    return { ...result, url: String(result.url || '') };
+  const request = async (
+    action: string,
+    extra: Record<string, unknown> = {},
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> =>
+    objectValue(await bridge({ action, nativeSessionId, nativePageId, ...extra }, signal ? { signal } : undefined));
+  const requestPage = async (
+    action: string,
+    extra: Record<string, unknown> = {},
+    signal?: AbortSignal
+  ): Promise<BrowserPageResult> => {
+    const result = await request(action, extra, signal);
+    const {
+      loading: _loading,
+      ok: _ok,
+      nativeSessionId: _nativeSessionId,
+      nativePageId: _nativePageId,
+      ...publicResult
+    } = result;
+    return { ...publicResult, url: String(result.url || '') };
   };
 
   return Object.freeze({
-    describe: () => requestPage('describe'),
-    navigate: (url: string, timeoutMs: number) => requestPage('navigate', { url, timeoutMs }),
-    snapshot: (timeoutMs: number) => requestPage('snapshot', { timeoutMs }),
-    interact: (args: StructuredInteractionArgs, timeoutMs: number) => requestPage('interact', { ...args, timeoutMs }),
-    screenshot: (fullPage: boolean) => requestPage('screenshot', { fullPage }),
-    upload: (args: StructuredInteractionArgs, filePath: string, timeoutMs: number) =>
-      requestPage('upload', { target: args.target, filePath, timeoutMs }),
-    beginDownload: async (args: StructuredInteractionArgs, timeoutMs: number): Promise<BrowserDownloadHandle> => {
-      const result = await request('begin_download', { ...args, timeoutMs });
+    describe: (signal?: AbortSignal) => requestPage('describe', {}, signal),
+    navigate: (url: string, timeoutMs: number, signal?: AbortSignal) => requestPage('navigate', { url, timeoutMs }, signal),
+    snapshot: (timeoutMs: number, signal?: AbortSignal) => requestPage('snapshot', { timeoutMs }, signal),
+    interact: (args: StructuredInteractionArgs, timeoutMs: number, signal?: AbortSignal) => requestPage('interact', { ...args, timeoutMs }, signal),
+    screenshot: (fullPage: boolean, signal?: AbortSignal) => requestPage('screenshot', { fullPage }, signal),
+    upload: (args: StructuredInteractionArgs, filePath: string, timeoutMs: number, signal?: AbortSignal) =>
+      requestPage('upload', { target: args.target, filePath, timeoutMs }, signal),
+    beginDownload: async (args: StructuredInteractionArgs, timeoutMs: number, signal?: AbortSignal): Promise<BrowserDownloadHandle> => {
+      const result = await request('begin_download', { ...args, timeoutMs }, signal);
       const tempPath = requireDownloadTempPath(result.tempPath);
       const suggestedFilename = String(result.suggestedFilename || 'download');
       return Object.freeze({

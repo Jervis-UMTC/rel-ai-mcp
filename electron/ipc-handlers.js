@@ -69,6 +69,7 @@ function registerIpcHandlers(deps) {
     getBrowserState: deps.getBrowserState,
     setBrowserSurfaceBounds: deps.setBrowserSurfaceBounds,
     setBrowserControl: deps.setBrowserControl,
+    selectBrowserSession: deps.selectBrowserSession,
     selectBrowserTab: deps.selectBrowserTab,
     closeBrowserTab: deps.closeBrowserTab,
     stopActiveBrowserSession: deps.stopActiveBrowserSession

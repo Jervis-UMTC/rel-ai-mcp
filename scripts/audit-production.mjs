@@ -2,10 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import pRetry from 'p-retry';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MAX_ATTEMPTS = 2;
-const RETRY_DELAYS_MS = [1000];
 const AUDIT_NETWORK_ARGS = ['--fetch-retries=0', '--fetch-timeout=15000'];
 const TRANSIENT_AUDIT_FAILURE = /(?:EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|E50[0234]|E429|429 Too Many Requests|50[0234] Service|Service Unavailable|socket hang up|network timeout)/i;
 
@@ -27,28 +27,48 @@ function runAudit(npmCli, prefix) {
 }
 
 async function auditTarget(npmCli, label, prefix = '') {
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+  try {
+    await pRetry(() => {
     const result = runAudit(npmCli, prefix);
     if (result.error) throw new Error(`Could not execute npm audit for ${label}: ${result.error.message}`, { cause: result.error });
     if (result.status === 0) {
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
-      return;
+      return result;
     }
-    if (isTransientAuditFailure(result)) {
-      if (attempt === MAX_ATTEMPTS) {
-        console.warn(`npm audit advisory service is unavailable for ${label}; continuing without a live advisory check.`);
-        return { available: false };
+      throw new AuditFailure(result, isTransientAuditFailure(result));
+    }, {
+      retries: MAX_ATTEMPTS - 1,
+      minTimeout: 1000,
+      factor: 1,
+      randomize: false,
+      unref: true,
+      shouldRetry: ({ error }) => error instanceof AuditFailure && error.transient,
+      onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
+        if (!(error instanceof AuditFailure) || !error.transient || retriesLeft === 0) return;
+        console.warn(`npm audit for ${label} hit a transient registry error; retrying (${attemptNumber + 1}/${MAX_ATTEMPTS}).`);
       }
-      const delay = RETRY_DELAYS_MS[attempt - 1] || RETRY_DELAYS_MS.at(-1) || 0;
-      console.warn(`npm audit for ${label} hit a transient registry error; retrying (${attempt + 1}/${MAX_ATTEMPTS}).`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      continue;
+    });
+  } catch (error) {
+    if (error instanceof AuditFailure && error.transient) {
+      console.warn(`npm audit advisory service is unavailable for ${label}; continuing without a live advisory check.`);
+      return { available: false };
     }
-    if (result.stdout) process.stdout.write(result.stdout);
-    if (result.stderr) process.stderr.write(result.stderr);
-    process.exitCode = Number.isInteger(result.status) ? result.status : 1;
-    throw new Error(`npm audit failed for ${label}.`);
+    if (error instanceof AuditFailure) {
+      if (error.result.stdout) process.stdout.write(error.result.stdout);
+      if (error.result.stderr) process.stderr.write(error.result.stderr);
+      process.exitCode = Number.isInteger(error.result.status) ? error.result.status : 1;
+      throw new Error(`npm audit failed for ${label}.`, { cause: error });
+    }
+    throw error;
+  }
+}
+
+class AuditFailure extends Error {
+  constructor(result, transient) {
+    super('npm audit returned a non-zero status.');
+    this.result = result;
+    this.transient = transient;
   }
 }
 

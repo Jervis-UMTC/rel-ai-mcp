@@ -285,8 +285,8 @@ function bucketSeries(rows, start, end) {
   const points = Array.from({ length: count }, (_, index) => ({ at: start.getTime() + index * bucketMs, ...Object.fromEntries(TOTAL_KEYS.map(key => [key, 0])) }));
   for (const row of rows || []) {
     const time = hourTime(row.hour);
-    if (time === null) continue;
-    const index = Math.floor((time - start.getTime()) / bucketMs);
+    if (time === null || !inRange(row.hour, start, end)) continue;
+    const index = Math.floor((Math.max(time, start.getTime()) - start.getTime()) / bucketMs);
     if (index < 0 || index >= points.length) continue;
     for (const key of TOTAL_KEYS) points[index][key] += Number(row[key] || 0);
   }
@@ -304,7 +304,7 @@ function workspaceMatch(row, workspace, deviceId) {
 
 function inRange(hour, start, end) {
   const time = hourTime(hour);
-  return time !== null && time >= start.getTime() && time < end.getTime();
+  return time !== null && time < end.getTime() && time + 60 * 60 * 1000 > start.getTime();
 }
 
 function hourTime(hour) {

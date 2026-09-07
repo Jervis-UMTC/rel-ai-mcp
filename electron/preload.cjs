@@ -23,6 +23,7 @@ if (surface === 'dashboard') {
       getState: () => ipcRenderer.invoke('desktop:browser:get-state'),
       setBounds: bounds => ipcRenderer.invoke('desktop:browser:set-bounds', bounds),
       setControl: owner => ipcRenderer.invoke('desktop:browser:set-control', owner),
+      selectSession: nativeSessionId => ipcRenderer.invoke('desktop:browser:select-session', nativeSessionId),
       selectTab: nativePageId => ipcRenderer.invoke('desktop:browser:select-tab', nativePageId),
       closeTab: nativePageId => ipcRenderer.invoke('desktop:browser:close-tab', nativePageId),
       stop: () => ipcRenderer.invoke('desktop:browser:stop'),

@@ -1,4 +1,5 @@
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { SparkChart } from '../../components/charts.js';
 import { Icon } from '../../components/icons.js';
 import { pillClass } from '../../components/pill.js';
 import { statusTone } from '../../status-tone.js';
@@ -281,22 +282,13 @@ function WorkspaceAnalytics({ scope }) {
       h(MiniMetric, { label: 'Reliable', value: reliabilityCalls ? formatPercent(reliabilityRate) : '—' }),
       h(MiniMetric, { label: 'Average time', value: completed ? formatDuration(averageDuration) : '—' })
     ),
-    h(Sparkline, { values })
+    values.length
+      ? h(SparkChart, { values, className: 'workspace-analytics-sparkline', mode: 'bar' })
+      : h('span', { className: 'workspace-analytics-sparkline-empty', 'aria-hidden': 'true' })
   );
 }
 
 function MiniMetric({ label, value }) { return h('div', null, h('span', null, label), h('strong', null, value)); }
-function Sparkline({ values }) {
-  const data = values.map(Number).map(value => Number.isFinite(value) && value >= 0 ? value : 0);
-  if (!data.length) return h('span', { className: 'workspace-analytics-sparkline-empty', 'aria-hidden': 'true' });
-  const width = 220;
-  const height = 30;
-  const max = Math.max(...data, 1);
-  const points = data.map((value, index) => `${data.length === 1 ? width / 2 : index / (data.length - 1) * width},${height - 2 - value / max * (height - 5)}`).join(' ');
-  return h('svg', { className: 'workspace-analytics-sparkline', viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none', 'aria-hidden': 'true' },
-    h('polyline', { points, fill: 'none', vectorEffect: 'non-scaling-stroke' })
-  );
-}
 
 function useWorkspaceAnalytics(aliases) {
   const key = aliases.join('\u0000');

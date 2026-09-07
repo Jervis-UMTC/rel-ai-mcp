@@ -15,11 +15,13 @@ function createServiceProcessClient(options = {}) {
 
   let child = null;
   let spawnPromise = null;
+  let cancelSpawn = null;
   let requestSequence = 0;
   let activePort = 0;
   let context = {};
   let currentActivity = emptyActivity();
   const pending = new Map();
+  const activeNativeRequests = new Map();
   const activityListeners = new Set();
   const failedActivityListeners = new WeakSet();
 
@@ -97,15 +99,19 @@ function createServiceProcessClient(options = {}) {
   async function dispose(options = {}) {
     const owned = child;
     if (!owned) return;
-    if (options.stop !== false) {
+    const startupPending = typeof cancelSpawn === 'function';
+    if (startupPending) cancelSpawn();
+    if (options.stop !== false && !startupPending) {
       try { await stop(); } catch {}
     }
     if (child !== owned) return;
     rejectPending(new Error('Rel.AI service process closed.'));
+    abortNativeRequests(new Error('Rel.AI service process closed.'));
     owned.removeAllListeners();
     try { owned.kill(); } catch {}
     child = null;
     spawnPromise = null;
+    cancelSpawn = null;
     activePort = 0;
   }
 
@@ -134,10 +140,13 @@ function createServiceProcessClient(options = {}) {
         settled = true;
         utility.off('spawn', onSpawn);
         utility.off('exit', onEarlyExit);
+        if (cancelSpawn === onCancel) cancelSpawn = null;
         action();
       };
       const onSpawn = () => finish(resolve);
       const onEarlyExit = code => finish(() => reject(new Error(`Rel.AI service process exited during startup with code ${code}.`)));
+      const onCancel = () => finish(() => reject(new Error('Rel.AI service process closed during startup.')));
+      cancelSpawn = onCancel;
       utility.once('spawn', onSpawn);
       utility.once('exit', onEarlyExit);
     });
@@ -175,6 +184,10 @@ function createServiceProcessClient(options = {}) {
       publishActivity(event);
       return;
     }
+    if (message.type === 'native-cancel') {
+      activeNativeRequests.get(String(message.id || ''))?.abort(new Error('Native browser operation cancelled by the service process.'));
+      return;
+    }
     if (message.type === 'native-request') void handleNativeRequest(utility, message);
   }
 
@@ -186,6 +199,7 @@ function createServiceProcessClient(options = {}) {
     currentActivity = emptyActivity();
     publishActivity({ phase: 'snapshot', snapshot: currentActivity });
     rejectPending(new Error(`Rel.AI service process exited with code ${code}.`));
+    abortNativeRequests(new Error(`Rel.AI service process exited with code ${code}.`));
     onExit({ code: Number(code || 0) });
   }
 
@@ -220,11 +234,14 @@ function createServiceProcessClient(options = {}) {
   }
 
   async function handleNativeRequest(utility, message) {
+    const id = String(message.id || '');
     const method = String(message.method || '');
     const handler = nativeHandlers[method];
+    const controller = new AbortController();
+    activeNativeRequests.set(id, controller);
     try {
       if (typeof handler !== 'function') throw new Error(`Unsupported native desktop request: ${method}`);
-      const result = await handler(message.payload || {});
+      const result = await handler(message.payload || {}, { signal: controller.signal });
       if (utility === child) utility.postMessage({ type: 'native-response', id: message.id, ok: true, result });
     } catch (error) {
       if (utility === child) utility.postMessage({
@@ -234,7 +251,14 @@ function createServiceProcessClient(options = {}) {
           ...(error?.code ? { code: String(error.code) } : {})
         }
       });
+    } finally {
+      if (activeNativeRequests.get(id) === controller) activeNativeRequests.delete(id);
     }
+  }
+
+  function abortNativeRequests(reason) {
+    for (const controller of activeNativeRequests.values()) controller.abort(reason);
+    activeNativeRequests.clear();
   }
 
   function publishActivity(event = {}) {

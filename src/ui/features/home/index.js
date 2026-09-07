@@ -111,7 +111,7 @@ export function homeAnalyticsView(scope = {}) {
   const completed = Number(scope.completed || 0);
   const actions = Number(scope.toolCalls || 0);
   const reliabilityCalls = Number(scope.reliabilityCalls || 0);
-  const systemErrors = Number(scope.infrastructureFailures || 0);
+  const internalErrors = Number(scope.infrastructureFailures || 0);
   const workspaceScoped = scope.kind === 'workspace';
   const activeProjects = (Array.isArray(scope.workspaces) ? scope.workspaces : []).filter(item => Number(item.toolCalls || 0) > 0).length;
   return {
@@ -135,9 +135,9 @@ export function homeAnalyticsView(scope = {}) {
         : { label: 'Active projects', value: formatInteger(activeProjects), detail: '' }
     ],
     contextSummary: analyticsContextSummary(scope, actions),
-    errorSummary: systemErrors
-      ? `${formatInteger(systemErrors)} system ${pluralLabel(systemErrors, 'error')}`
-      : 'No system errors',
+    errorSummary: internalErrors
+      ? `${formatInteger(internalErrors)} internal ${pluralLabel(internalErrors, 'error')}`
+      : 'No confirmed internal errors',
     pulse: homeAnalyticsPulseView(scope.points)
   };
 }
@@ -147,11 +147,6 @@ function homeAnalyticsPulseView(points = []) {
     .map(point => Number(point?.toolCalls || 0))
     .map(value => Number.isFinite(value) && value >= 0 ? value : 0);
   if (!values.length || values.every(value => value === 0)) return { empty: true, values };
-  const width = 720;
-  const height = 112;
-  const baseline = height - 10;
-  const max = Math.max(...values, 1);
-  const polyline = values.map((value, index) => `${values.length === 1 ? width / 2 : index / (values.length - 1) * width},${baseline - value / max * (height - 28)}`).join(' ');
   const total = values.reduce((sum, value) => sum + value, 0);
   const latest = values.at(-1) || 0;
   const peak = Math.max(...values);
@@ -160,11 +155,7 @@ function homeAnalyticsPulseView(points = []) {
   const trend = latest > values[0] ? 'increasing' : latest < values[0] ? 'decreasing' : 'steady';
   return {
     empty: false,
-    width,
-    height,
-    baseline,
-    polyline,
-    area: `0,${baseline} ${polyline} ${width},${baseline}`,
+    values,
     summary: `Action activity over the last 24 hours. ${formatInteger(total)} total actions. Peak ${formatInteger(peak)} ${pluralLabel(peak, 'action')} ${hoursAgo ? `${hoursAgo} ${pluralLabel(hoursAgo, 'hour')} ago` : 'in the latest hour'}. Latest hour ${formatInteger(latest)} ${pluralLabel(latest, 'action')}. Overall trend ${trend}.`
   };
 }

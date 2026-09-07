@@ -5,7 +5,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SERVER_INFO_META_KEY } from '@modelcontextprotocol/server';
 import { TASKS_EXTENSION_REVISION } from '../src/mcp/protocol.js';
+import { recordTaskValidationAffinity, learnedValidationChecks } from '../src/knowledgeStore.js';
+import { readLocalUsageSnapshot, recordLocalToolOutcome } from '../src/localAnalytics.js';
 import { repositoryIndexPath } from '../src/repository/intelligence/database.js';
+import { withStateDatabase } from '../src/stateDatabase.ts';
+import { getTaskHistoryDir, writeSession } from '../src/taskHistoryStorage.ts';
 import { readTaskHistorySessionRecord } from '../src/taskHistoryStore.ts';
 import { createHttpMcpSession, MCP_VERSION } from './helpers/http-mcp.mjs';
 import { activeMcpToolCount, activeToolCount, activeToolNames, activeToolSurface } from './helpers/tool-surface.mjs';
@@ -270,6 +274,29 @@ try {
   assert.equal(synchronizedDashboard.mcpConnection.status, 'ready');
   assert.equal(synchronizedDashboard.mcpConnection.toolManifestVersion, liveDashboard.mcpConnection.toolManifestVersion);
 
+  const workspaceStateConfig = { stateDir, auditLogPath: path.join(stateDir, 'audit.jsonl') };
+  writeSession(getTaskHistoryDir(workspaceStateConfig), {
+    id: 'secondary-history', workspace: 'secondary', status: 'completed', title: 'Secondary workspace history'
+  });
+  assert.equal(recordLocalToolOutcome(workspaceStateConfig, {
+    tool: 'relai_read', workspace: 'secondary', ok: true, durationMs: 7, at: new Date().toISOString()
+  }), true);
+  const analyticsMonth = new Date().toISOString().slice(0, 7);
+  const analyticsBeforeDelete = readLocalUsageSnapshot(workspaceStateConfig, analyticsMonth);
+  const secondaryAnalyticsCalls = Number(analyticsBeforeDelete.workspaces.find(row => row.workspace === 'secondary')?.toolCalls || 0);
+  assert.ok(secondaryAnalyticsCalls > 0, 'workspace deletion regression must seed workspace-scoped analytics');
+  withStateDatabase(workspaceStateConfig, db => {
+    db.prepare('INSERT OR REPLACE INTO task_integrity_tasks(task_id,updated_at_ms,payload) VALUES(?,?,?)')
+      .run('secondary-history', Date.now(), JSON.stringify({ version: 1, taskId: 'secondary-history', workspace: 'secondary' }));
+    db.prepare('INSERT OR REPLACE INTO workspace_integrity(workspace,updated_at_ms,payload) VALUES(?,?,?)')
+      .run('secondary', Date.now(), JSON.stringify({ version: 1, workspace: 'secondary', files: {} }));
+  }, { transaction: true });
+  assert.equal(recordTaskValidationAffinity(workspaceStateConfig, 'secondary', {
+    workflowEvidence: [{ kind: 'check', command: 'npm test' }]
+  }, { validationStatus: 'passed', changedFiles: ['src/secondary.js'] })?.ok, true);
+  assert.ok(learnedValidationChecks(workspaceStateConfig, 'secondary', ['src/secondary.js']).length > 0,
+    'workspace deletion regression must seed workspace validation affinity');
+
   const secondaryIndexDirectory = path.dirname(repositoryIndexPath({ stateDir }, { alias: 'secondary', path: secondaryPath }));
   fs.mkdirSync(secondaryIndexDirectory, { recursive: true });
   fs.writeFileSync(path.join(secondaryIndexDirectory, 'stale-cache-marker'), 'delete me\n');
@@ -281,6 +308,50 @@ try {
   assert.equal(workspaceDelete.ok, true);
   assert.equal(fs.existsSync(secondaryIndexDirectory), false,
     'deleting a project must remove its Repository Intelligence cache immediately');
+  assert.equal(readTaskHistorySessionRecord(workspaceStateConfig, 'secondary-history'), null,
+    'deleting a project must remove its retained task history');
+  const analyticsAfterDelete = readLocalUsageSnapshot(workspaceStateConfig, analyticsMonth);
+  assert.equal(analyticsAfterDelete.workspaces.some(row => row.workspace === 'secondary'), false,
+    'deleting a project must remove its workspace analytics dimension');
+  assert.equal(analyticsAfterDelete.totals.toolCalls,
+    Number(analyticsBeforeDelete.totals.toolCalls || 0) - secondaryAnalyticsCalls,
+    'deleted workspace analytics must no longer inflate global tool-call totals');
+  withStateDatabase(workspaceStateConfig, db => {
+    assert.equal(Number(db.prepare('SELECT COUNT(*) AS count FROM task_integrity_tasks WHERE task_id=?').get('secondary-history')?.count || 0), 0,
+      'deleting a project must remove its task integrity state');
+    assert.equal(Number(db.prepare('SELECT COUNT(*) AS count FROM workspace_integrity WHERE workspace=?').get('secondary')?.count || 0), 0,
+      'deleting a project must remove its workspace integrity state');
+  });
+  assert.deepEqual(learnedValidationChecks(workspaceStateConfig, 'secondary', ['src/secondary.js']), [],
+    'deleting a project must remove its learned validation affinity');
+
+  const archivePath = path.join(stateDir, 'archive-workspace');
+  fs.mkdirSync(archivePath);
+  fs.writeFileSync(path.join(archivePath, 'keep.txt'), 'project files must stay\n');
+  const archiveCreate = await fetch(`${base}/api/workspaces`, {
+    method: 'POST',
+    headers: { ...dashboardHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'upsert', alias: 'archive', workspaceConfig: { mode: 'create', path: archivePath } })
+  }).then(response => response.json());
+  assert.equal(archiveCreate.ok, true);
+  writeSession(getTaskHistoryDir(workspaceStateConfig), {
+    id: 'archive-history', workspace: 'archive', status: 'completed', title: 'Archive workspace history'
+  });
+  assert.equal(recordLocalToolOutcome(workspaceStateConfig, {
+    tool: 'relai_read', workspace: 'archive', ok: true, durationMs: 3, at: new Date().toISOString()
+  }), true);
+  const archiveDelete = await fetch(`${base}/api/workspaces`, {
+    method: 'POST',
+    headers: { ...dashboardHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'delete', alias: 'archive', confirmDelete: true, forgetLocalData: false })
+  }).then(response => response.json());
+  assert.equal(archiveDelete.ok, true);
+  assert.ok(readTaskHistorySessionRecord(workspaceStateConfig, 'archive-history'),
+    'deleting a project with forgetLocalData=false must preserve retained task history');
+  assert.equal(readLocalUsageSnapshot(workspaceStateConfig, analyticsMonth).workspaces.some(row => row.workspace === 'archive'), true,
+    'deleting a project with forgetLocalData=false must preserve historical workspace analytics');
+  assert.equal(fs.readFileSync(path.join(archivePath, 'keep.txt'), 'utf8'), 'project files must stay\n',
+    'deleting a project must never delete source files regardless of history cleanup choice');
 
   const resources = await client.request('resources/list');
   assert.ok(resources.body.result.resources.some(item => item.uri === 'relai://server/tool-surface'));

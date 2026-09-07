@@ -75,6 +75,8 @@ function serializeToolError(toolName, error) {
       ...(error.workspaceMatchStatus ? { workspaceMatchStatus: String(error.workspaceMatchStatus) } : {}),
       ...(error.workspaceResolutionFailure ? { workspaceResolutionFailure: String(error.workspaceResolutionFailure) } : {}),
       ...(Array.isArray(error.configuredWorkspaceAliases) ? { configuredWorkspaceAliases: error.configuredWorkspaceAliases.map(String).slice(0, 100) } : {}),
+      ...(Array.isArray(error.workspaceAliases) ? { workspaceAliases: error.workspaceAliases.map(String).slice(0, 100) } : {}),
+      ...(Number.isFinite(error.workspaceCount) ? { workspaceCount: Number(error.workspaceCount) } : {}),
       retryable: error.retryable === true,
       requiresUserConfirmation: error.requiresUserConfirmation === true,
       allowedAlternatives: Array.isArray(error.allowedAlternatives)

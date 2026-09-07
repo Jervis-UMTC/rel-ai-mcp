@@ -182,6 +182,16 @@ function recordTaskValidationAffinity(config, workspace, session = {}, completio
   } finally { db.close(); }
 }
 
+function clearWorkspaceValidationAffinity(config, workspaceValue) {
+  const workspace = clean(workspaceValue?.alias || workspaceValue, 120);
+  if (!workspace || !fs.existsSync(knowledgeDatabasePath(config))) return { ok: true, removed: 0 };
+  const db = openKnowledgeDatabase(config);
+  try {
+    const result = db.prepare('DELETE FROM validation_affinity WHERE workspace=?').run(workspace);
+    return { ok: true, removed: Number(result.changes || 0) };
+  } finally { db.close(); }
+}
+
 function learnedValidationChecks(config, workspace, paths = [], options = {}) {
   const workspaceAlias = clean(workspace?.alias || workspace, 120);
   if (!workspaceAlias) return [];
@@ -235,6 +245,7 @@ function setMeta(db, key, value) { db.prepare('INSERT INTO knowledge_meta(key,va
 function metaValue(db, key, fallback = '') { return db.prepare('SELECT value FROM knowledge_meta WHERE key=?').get(String(key))?.value ?? fallback; }
 
 export {
+  clearWorkspaceValidationAffinity,
   ensureLearningState,
   initializeKnowledgeDatabase,
   knowledgeDatabaseBackupPath,

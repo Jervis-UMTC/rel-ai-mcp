@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { postJson } from '../../api.js';
+import { AnalyticsTimelineChart, SparkChart } from '../../components/charts.js';
 import { confirmAction } from '../../components/confirm-dialog.js';
 import { Icon } from '../../components/icons.js';
 import { toast } from '../../components/toast.js';
@@ -7,13 +8,13 @@ import { getRouteParams, getWorkspaceFilter, replaceRouteParams, routeHref } fro
 import { ANALYTICS_RANGES, analyticsBounds, workspaceOptions } from './range-model.js';
 import { loadAnalyticsData } from './data.js';
 import { analyticsPrivacyCopy, customDateDefaults, rangeButtonLabel } from './index.js';
-import { analyticsMetrics, duration, failureCategoryLabel, formatChartValue, integer, pointMetric, sparklineModel, timelineModel } from './render.js';
+import { analyticsMetrics, failureCategoryLabel, formatChartValue, integer, pointMetric, timelineModel } from './render.js';
 
 const h = React.createElement;
 const USAGE_STORE_KEYS = Object.freeze(['live']);
 const CHART_METRICS = Object.freeze([
   ['toolCalls', 'Actions', 'activity'],
-  ['infrastructureFailures', 'System errors', 'warning'],
+  ['infrastructureFailures', 'Internal errors', 'warning'],
   ['operationSuccessRate', 'Successful actions', 'success'],
   ['averageDuration', 'Average time', 'timer']
 ]);
@@ -267,10 +268,7 @@ function UsageContent({ bounds, current, previous }) {
     ),
     h(ActivityBars, { title: 'Actions by tool', rows: current.tools, kind: 'tool' }),
     current.kind === 'workspace'
-      ? h(React.Fragment, null,
-          h(FailureCategories, { rows: current.failureCategories, totalFailures: current.failures }),
-          h(Breakdown, { title: 'Devices', rows: current.devices, kind: 'device' })
-        )
+      ? h(FailureCategories, { rows: current.failureCategories, totalFailures: current.failures })
       : h('div', { className: 'usage-side-by-side' },
           h(FailureCategories, { rows: current.failureCategories, totalFailures: current.failures }),
           h(ActivityBars, { title: 'Project activity', rows: current.workspaces, kind: 'workspace' })
@@ -281,7 +279,8 @@ function UsageContent({ bounds, current, previous }) {
 function Metric({ metric }) {
   const [open, setOpen] = useState(false);
   const helpId = `usage-metric-help-${metric.key}`;
-  const spark = sparklineModel(metric.values);
+  const sparkValues = Array.isArray(metric.values) ? metric.values : [];
+  const sparkMode = ['toolCalls', 'infrastructureFailures', 'recoverableFailures'].includes(metric.key) ? 'bar' : 'line';
   return h('article', { className: `usage-metric ${metric.tone}${open ? ' help-open' : ''}`.trim() },
     h('div', { className: 'usage-metric-label-row' },
       h('span', { className: 'usage-metric-label-main' },
@@ -317,9 +316,9 @@ function Metric({ metric }) {
       metric.delta ? h('small', { className: `usage-delta ${metric.delta.tone || ''}`.trim() }, metric.delta.text) : null
     ),
     metric.detail ? h('small', { className: 'usage-metric-detail' }, metric.detail) : null,
-    spark ? h('svg', { className: `usage-sparkline ${metric.tone}`.trim(), viewBox: `0 0 ${spark.width} ${spark.height}`, preserveAspectRatio: 'none', 'aria-hidden': 'true' },
-      h('polyline', { points: spark.points, fill: 'none', vectorEffect: 'non-scaling-stroke' })
-    ) : h('span', { className: 'usage-sparkline-empty', 'aria-hidden': 'true' })
+    sparkValues.length
+      ? h(SparkChart, { values: sparkValues, className: `usage-sparkline ${metric.tone}`.trim(), mode: sparkMode, tone: metric.tone })
+      : h('span', { className: 'usage-sparkline-empty', 'aria-hidden': 'true' })
   );
 }
 
@@ -336,32 +335,15 @@ function Timeline({ bounds, points = [], metricKey, label }) {
   if (model.empty) return h('div', { className: 'usage-chart-empty' }, 'No activity in this range.');
 
   const safeIndex = Math.max(0, Math.min(model.latestIndex, activeIndex));
-  const active = model.coordinates[safeIndex];
-  const peak = model.coordinates[model.peakIndex];
-  const latest = model.coordinates[model.latestIndex];
   const point = points[safeIndex];
   const readoutId = `usage-chart-readout-${metricKey}`;
   const selectedTime = formatPointTime(point, bounds, true);
-  const selectedValue = formatChartValue(active.value, label);
+  const selectedValue = formatChartValue(values[safeIndex], label);
   const peakValue = formatChartValue(model.peak, label);
-  const tickIndexes = timelineTickIndexes(points.length);
-
-  const selectFromPointer = event => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (!rect.width) return;
-    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    setActiveIndex(Math.round(ratio * model.latestIndex));
-  };
-  const onKeyDown = event => {
-    let next = null;
-    if (event.key === 'ArrowLeft') next = Math.max(0, safeIndex - 1);
-    else if (event.key === 'ArrowRight') next = Math.min(model.latestIndex, safeIndex + 1);
-    else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End' || event.key === 'Escape') next = model.latestIndex;
-    if (next == null) return;
-    event.preventDefault();
-    setActiveIndex(next);
-  };
+  const mode = ['toolCalls', 'infrastructureFailures'].includes(metricKey) ? 'bar' : 'line';
+  const labels = points.map(item => formatPointTime(item, bounds, false));
+  const detailedLabels = points.map(item => formatPointTime(item, bounds, true));
+  const formatValue = value => formatChartValue(value, label);
 
   return h('div', { className: 'usage-timeline-plot' },
     h('div', { className: 'usage-chart-readout', id: readoutId },
@@ -370,47 +352,31 @@ function Timeline({ bounds, points = [], metricKey, label }) {
       h('small', null, safeIndex === model.peakIndex ? 'Peak in this range' : `Peak ${peakValue}`)
     ),
     h('div', { className: 'usage-timeline-stage' },
-      h('div', { className: 'usage-chart-y-axis', 'aria-hidden': 'true' },
-        h('span', null, formatChartValue(model.max, label)),
-        h('span', null, formatChartValue(0, label))
-      ),
-      h('svg', {
-        className: 'usage-timeline-svg',
-        viewBox: `0 0 ${model.width} ${model.height}`,
-        preserveAspectRatio: 'none',
-        role: 'group',
-        tabIndex: 0,
-        'aria-label': `${model.summary} Use Left and Right Arrow keys to inspect periods. Home selects the first period and End selects the latest.`,
-        'aria-describedby': readoutId,
-        onPointerMove: selectFromPointer,
-        onPointerLeave: () => setActiveIndex(model.latestIndex),
-        onFocus: () => setActiveIndex(index => Number.isInteger(index) ? index : model.latestIndex),
-        onBlur: () => setActiveIndex(model.latestIndex),
-        onKeyDown
-      },
-        [0.28, 0.52, 0.76].map(ratio => h('line', { key: ratio, x1: 0, y1: model.height * ratio, x2: model.width, y2: model.height * ratio, className: 'usage-chart-grid' })),
-        h('polygon', { points: model.area, className: 'usage-chart-area' }),
-        h('line', { x1: 0, y1: model.baseline, x2: model.width, y2: model.baseline, className: 'usage-chart-axis' }),
-        h('polyline', { points: model.points, className: 'usage-chart-line', fill: 'none', vectorEffect: 'non-scaling-stroke' }),
-        peak ? h('circle', { cx: peak.x, cy: peak.y, r: 4, className: 'usage-chart-point peak', 'aria-hidden': 'true' }) : null,
-        latest ? h('circle', { cx: latest.x, cy: latest.y, r: 3.5, className: 'usage-chart-point latest', 'aria-hidden': 'true' }) : null,
-        h('line', { x1: active.x, y1: 8, x2: active.x, y2: model.baseline, className: 'usage-chart-crosshair', 'aria-hidden': 'true' }),
-        h('circle', { cx: active.x, cy: active.y, r: 5, className: 'usage-chart-point active', 'aria-hidden': 'true' })
-      )
-    ),
-    h('div', { className: 'usage-timeline-scale', 'aria-hidden': 'true' },
-      tickIndexes.map(index => h('span', { key: index }, formatPointTime(points[index], bounds, false)))
+      h(AnalyticsTimelineChart, {
+        values,
+        labels,
+        detailedLabels,
+        mode,
+        className: 'usage-timeline-chart',
+        ariaLabel: model.summary,
+        ariaDescribedBy: readoutId,
+        valueLabel: label,
+        formatValue,
+        peakIndex: model.peakIndex,
+        activeIndex: safeIndex,
+        onActiveIndexChange: setActiveIndex
+      })
     ),
     h('div', { className: 'usage-chart-hint' }, 'Hover the chart or focus it and use ← / → to inspect exact values. Times are UTC.')
   );
 }
 
 function FailureCategories({ rows = [], totalFailures = 0 }) {
-  const visible = [...rows].sort((a, b) => b.failures - a.failures).slice(0, 10);
+  const visible = [...rows].sort((a, b) => b.failures - a.failures);
   const max = Math.max(1, ...visible.map(row => row.failures));
   return h('section', { className: 'card usage-breakdown usage-bar-card' },
     h('div', { className: 'card-head' },
-      h('div', null, h('h3', null, 'What went wrong'), h('p', null, 'Detailed error messages are not stored.'))
+      h('div', null, h('h3', null, 'Problems by type'), h('p', null, 'Grouped by category. Recent details are available in Troubleshooting.'))
     ),
     h('div', { className: 'card-body' }, visible.length
       ? h('div', { className: 'usage-bar-list' }, visible.map(row => h(BarRow, {
@@ -425,7 +391,7 @@ function FailureCategories({ rows = [], totalFailures = 0 }) {
 }
 
 function ActivityBars({ title, rows = [], kind }) {
-  const visible = [...rows].sort((a, b) => b.toolCalls - a.toolCalls).slice(0, 10);
+  const visible = [...rows].sort((a, b) => b.toolCalls - a.toolCalls);
   const max = Math.max(1, ...visible.map(row => row.toolCalls));
   return h('section', { className: 'card usage-breakdown usage-bar-card' },
     h('div', { className: 'card-head' }, h('h3', null, title)),
@@ -461,38 +427,6 @@ function BarRowContent({ label, value, max, unit = 'action', drilldown = false }
   );
 }
 
-function Breakdown({ title, rows = [], kind }) {
-  return h('section', { className: 'card usage-breakdown' },
-    h('div', { className: 'card-head' }, h('h3', null, title)),
-    h('div', { className: 'card-body' }, rows.length
-      ? h('div', { className: 'usage-table-wrap' }, h('table', { className: 'usage-table' },
-          h('thead', null, h('tr', null,
-            h('th', { scope: 'col' }, title.slice(0, -1)),
-            h('th', { scope: 'col' }, 'Actions'),
-            h('th', { scope: 'col' }, 'Successful'),
-            h('th', { scope: 'col' }, 'Failed'),
-            h('th', { scope: 'col' }, 'Total execution time')
-          )),
-          h('tbody', null, rows.map((row, index) => {
-            const label = kind === 'device' ? (row.displayName || shortId(row.deviceId) || 'Unknown device') : (row[kind] || 'Unknown');
-            return h('tr', { key: `${label}-${index}` },
-              h('th', { scope: 'row' }, label),
-              h('td', null, integer(row.toolCalls)),
-              h('td', null, integer(row.successes)),
-              h('td', null, integer(row.failures)),
-              h('td', null, duration(row.executionMs))
-            );
-          }))
-        ))
-      : h('div', { className: 'usage-breakdown-empty' }, 'No activity in this range.'))
-  );
-}
-
-function timelineTickIndexes(length) {
-  if (length <= 1) return [0];
-  return [...new Set([0, Math.floor((length - 1) / 2), length - 1])];
-}
-
 function formatPointTime(point, bounds, detailed) {
   const at = Number(point?.at);
   if (!Number.isFinite(at)) return detailed ? 'Selected period' : '—';
@@ -508,10 +442,6 @@ function formatPointTime(point, bounds, detailed) {
   return new Intl.DateTimeFormat(undefined, options).format(date);
 }
 
-function shortId(value) {
-  const text = String(value || '');
-  return text.length > 12 ? `${text.slice(0, 8)}…${text.slice(-4)}` : text;
-}
 
 function messageOf(error) {
   return error instanceof Error ? error.message : String(error || 'Analytics unavailable.');

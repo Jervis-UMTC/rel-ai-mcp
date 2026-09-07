@@ -56,6 +56,8 @@ assert.match(connectorInstructions(config), /omit it for workspace\/resource wor
 assert.match(connectorInstructions(config), /approval/i, 'global instructions retain approval safety where defined');
 assert.match(connectorInstructions(config), /authoritative evidence/i, 'global instructions retain truthful evidence semantics');
 assert.match(connectorInstructions(config), /validation is factual evidence, not execution permission/i, 'global instructions must describe validation as evidence rather than permission');
+assert.match(connectorInstructions(config), /workspace-resolution error returns workspaceAliases/i, 'global instructions must preserve authorized workspace recovery guidance');
+assert.match(connectorInstructions(config), /do not ask for a filesystem path that Rel\.AI already knows/i, 'global instructions must avoid unnecessary workspace-path prompts');
 assert.match(connectorInstructions(config), /brief normal assistant progress messages/i, 'global instructions must keep user-visible progress in normal assistant messages');
 assert.match(connectorInstructions(config), /Native tool invocation labels are supplemental status only/i, 'native status chrome must not suppress user-visible progress messages');
 assert.match(connectorInstructions(config), /Do not poll relai_work status merely to refresh UI/i, 'global instructions must avoid redundant UI-only status polling');
@@ -178,7 +180,7 @@ assert.match(editSchema.inputSchema.properties.updateText.description, /One logi
 assert.deepEqual(editSchema.inputSchema.properties.stage.enum, ['start', 'append', 'commit', 'abort'], 'canonical executable schema must retain the internal staged transport lifecycle');
 
 await valid('relai_work', { action: 'begin', workspace: 'repo' });
-await invalid('relai_work', { action: 'begin' });
+await valid('relai_work', { action: 'begin' });
 await valid('relai_work', { action: 'finish', work_id: 'work', summary: 'Done.' });
 await invalid('relai_work', { action: 'finish', work_id: 'work' });
 await valid('relai_process', { action: 'start', workspace: 'repo', command: 'npm run dev', kind: 'service', purpose: 'Run the development server.', reuseExisting: true });

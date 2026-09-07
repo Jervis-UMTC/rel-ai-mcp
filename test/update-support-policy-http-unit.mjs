@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { startHttpServer } from '../src/httpServer.ts';
+import { mcpConnectionManager } from '../src/mcp/connectionManager.js';
 
 const httpServerSource = fs.readFileSync(new URL('../src/httpServer.ts', import.meta.url), 'utf8');
 assert.match(httpServerSource, /if \(!isolated\) \{[\s\S]*?pruneManagedProcesses\(runtimeConfig\)/, 'isolated HTTP servers must not prune shared managed-process state');
@@ -32,8 +33,16 @@ try {
   const payload = await mcp.json();
   assert.equal(payload.errorCode, 'update_required');
 } finally {
+  const originalShutdown = mcpConnectionManager.shutdown;
+  mcpConnectionManager.shutdown = async () => { throw new Error('injected connection-manager shutdown failure'); };
   await new Promise(resolve => server.close(resolve));
-  await server.waitForShutdown?.();
+  const cleanup = await server.waitForShutdown?.();
+  mcpConnectionManager.shutdown = originalShutdown;
+  assert.equal(cleanup.clean, false, 'HTTP shutdown must report transport cleanup failures as unclean');
+  assert.ok(
+    cleanup.errors.some(item => item.step === 'mcpConnectionManager' && /injected connection-manager shutdown failure/.test(item.error)),
+    'HTTP shutdown must retain the transport cleanup failure details'
+  );
 }
 
 console.log('Remote update support policy HTTP gate passed.');

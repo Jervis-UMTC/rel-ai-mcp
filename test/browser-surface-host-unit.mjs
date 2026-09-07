@@ -27,6 +27,8 @@ class FakeWebContents extends EventEmitter {
     this.title = '';
     this.destroyed = false;
     this.focusCount = 0;
+    this.executeJavaScriptError = null;
+    this.onExecuteJavaScript = null;
   }
   setWindowOpenHandler(handler) { this.windowOpenHandler = handler; }
   getURL() { return this.url; }
@@ -39,6 +41,12 @@ class FakeWebContents extends EventEmitter {
     this.emit('did-stop-loading');
   }
   stop() {}
+  async executeJavaScript(script) {
+    this.onExecuteJavaScript?.();
+    if (this.executeJavaScriptError) throw this.executeJavaScriptError;
+    if (String(script).includes('return { attached:')) return { attached: true, visible: true };
+    return true;
+  }
   focus() { this.focusCount += 1; }
   isDestroyed() { return this.destroyed; }
   close() {
@@ -60,6 +68,13 @@ class FakeWebContentsView {
 
 function createHarness({ failOpen = false } = {}) {
   const sessions = [];
+  const webContents = [];
+  const HarnessWebContentsView = class extends FakeWebContentsView {
+    constructor(options) {
+      super(options);
+      webContents.push(this.webContents);
+    }
+  };
   const sessionApi = {
     fromPartition() { const value = new FakeSession(); sessions.push(value); return value; },
     fromPath() { const value = new FakeSession(); sessions.push(value); return value; }
@@ -77,7 +92,7 @@ function createHarness({ failOpen = false } = {}) {
   const routes = [];
   const events = [];
   const host = createBrowserSurfaceHost({
-    WebContentsView: FakeWebContentsView,
+    WebContentsView: HarnessWebContentsView,
     session: sessionApi,
     getDashboardWindow: () => dashboard,
     openDashboard: async route => {
@@ -86,7 +101,7 @@ function createHarness({ failOpen = false } = {}) {
     },
     onEvent: event => events.push(event)
   });
-  return { host, sessions, childViews, routes, sent, events };
+  return { host, sessions, webContents, childViews, routes, sent, events };
 }
 
 {
@@ -122,8 +137,10 @@ function createHarness({ failOpen = false } = {}) {
   );
   assert.equal((await host.run({ action: 'describe', nativeSessionId: started.nativeSessionId, nativePageId: opened.nativePageId })).url, 'about:blank');
 
-  const concurrent = await host.run({ action: 'start' });
+  const concurrent = await host.run({ action: 'start', viewport: { width: 640, height: 480 } });
   const concurrentPage = await host.run({ action: 'open_page', nativeSessionId: concurrent.nativeSessionId });
+  assert.equal(host.getState().sessions.length, 2, 'desktop browser state must expose all concurrent sessions for inspection');
+  assert.equal(host.getState().sessions.filter(session => session.active).length, 1);
   await host.run({ action: 'navigate', nativeSessionId: concurrent.nativeSessionId, nativePageId: concurrentPage.nativePageId, url: 'https://background.example.test/' });
   assert.equal(host.getState().nativeSessionId, started.nativeSessionId, 'user takeover must pin the visible browser surface while other AI sessions continue');
   assert.equal(host.getState().control, 'user');
@@ -131,11 +148,15 @@ function createHarness({ failOpen = false } = {}) {
 
   host.setControl('ai');
   assert.equal(host.getState().nativeSessionId, concurrent.nativeSessionId, 'returning control should reveal the most recently active AI session');
+  host.selectSession(started.nativeSessionId);
+  assert.equal(host.getState().nativeSessionId, started.nativeSessionId, 'the user must be able to choose which concurrent browser session to inspect');
+  host.selectSession(concurrent.nativeSessionId);
   const navigated = await host.run({ action: 'navigate', nativeSessionId: started.nativeSessionId, nativePageId: opened.nativePageId, url: 'https://example.test/' });
   assert.equal(navigated.url, 'https://example.test/');
 
   await host.closeAll();
   assert.equal(host.getState().active, false);
+  assert.deepEqual(host.getState().sessions, []);
   assert.equal(childViews.size, 0);
   assert.equal(sessions[0].storageCleared, 1, 'ephemeral browser storage must be cleared on session close');
   assert.equal(sessions[0].cacheCleared, 1, 'ephemeral browser cache must be cleared on session close');
@@ -143,4 +164,69 @@ function createHarness({ failOpen = false } = {}) {
   assert.equal(sessions[1].cacheCleared, 1, 'concurrent ephemeral browser cache must also be cleared');
 }
 
-console.log('Embedded browser surface lifecycle, attachment, takeover, and cleanup passed.');
+{
+  const { host, webContents } = createHarness();
+  const started = await host.run({ action: 'start' });
+  const opened = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
+  webContents[0].executeJavaScriptError = new Error('download click failed');
+  const unhandled = [];
+  const onUnhandledRejection = reason => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandledRejection);
+  try {
+    await assert.rejects(
+      () => host.run({
+        action: 'begin_download',
+        nativeSessionId: started.nativeSessionId,
+        nativePageId: opened.nativePageId,
+        interaction: 'click',
+        target: { by: 'text', value: 'Download', exact: true },
+        timeoutMs: 1_000
+      }),
+      /download click failed/
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(unhandled, [], 'a failed download click must not emit a second unhandled rejection');
+  } finally {
+    process.off('unhandledRejection', onUnhandledRejection);
+    await host.closeAll();
+  }
+}
+
+{
+  const { host, sessions, webContents } = createHarness();
+  const started = await host.run({ action: 'start' });
+  const opened = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
+  let signalInteractionStarted;
+  const interactionStarted = new Promise(resolve => { signalInteractionStarted = resolve; });
+  webContents[0].onExecuteJavaScript = signalInteractionStarted;
+  const downloadPromise = host.run({
+    action: 'begin_download',
+    nativeSessionId: started.nativeSessionId,
+    nativePageId: opened.nativePageId,
+    interaction: 'click',
+    target: { by: 'text', value: 'Download', exact: true },
+    timeoutMs: 1_000
+  });
+  const cancelledDownload = assert.rejects(
+    downloadPromise,
+    error => error?.code === 'BROWSER_OPERATION_CANCELLED'
+  );
+  await interactionStarted;
+
+  const item = new EventEmitter();
+  let cancelCount = 0;
+  let prevented = false;
+  item.getFilename = () => 'report.txt';
+  item.setSavePath = value => { item.savePath = value; };
+  item.cancel = () => { cancelCount += 1; };
+  sessions[0].emit('will-download', { preventDefault: () => { prevented = true; } }, item, webContents[0]);
+  assert.equal(prevented, false, 'a tracked download should be accepted');
+  assert.ok(item.savePath, 'a tracked download should receive a temporary save path');
+
+  await host.run({ action: 'close_page', nativeSessionId: started.nativeSessionId, nativePageId: opened.nativePageId });
+  assert.equal(cancelCount, 1, 'closing a page must cancel a download that already started');
+  await cancelledDownload;
+  await host.closeAll();
+}
+
+console.log('Embedded browser surface lifecycle, attachment, takeover, downloads, and cleanup passed.');

@@ -2,7 +2,7 @@ import { safeLogAudit } from '../audit.js';
 import { createValidationFingerprint } from '../bridge/validationPlan.js';
 import { readConfig, resolveWorkspace, resolveWorkspaceInput } from '../config.js';
 import { principalFingerprint, principalForContext } from '../mcp/principal.js';
-import { assertAuthorizedToolCall } from '../mcp/authorizationPolicy.js';
+import { assertAuthorizedToolCall, authorizedWorkspaceAliases } from '../mcp/authorizationPolicy.js';
 import { clearSessionPolicy } from '../policyResolver.js';
 import { readTaskIntegrity } from '../taskIntegrity.ts';
 import { bindTaskHistoryActivityPersistence, recordWorkflowEvidence } from '../taskHistoryStore.ts';
@@ -50,6 +50,7 @@ async function callToolObserved(name, args = {}, context = {}) {
   let analyticsFailureCode = '';
   let sessionStart;
   let resolvedAction = '';
+  let effectivePrincipal = null;
   try {
     if (!isToolCallable(name, config)) {
       throw new Error(`Unknown tool '${name}'. Available tools: ${getToolNames(config).join(', ')}. Removed direct operation names are not callable; restart or reconnect if discovery is stale.`);
@@ -63,7 +64,7 @@ async function callToolObserved(name, args = {}, context = {}) {
     const taskScope = definition?.behavior?.taskScope || 'required';
     const taskScoped = taskScope === 'required';
     const taskAware = taskScoped || taskScope === 'optional';
-    const effectivePrincipal = principalForContext(context, connector);
+    effectivePrincipal = principalForContext(context, connector);
     requestedTaskId = normalizeTaskId(effectiveArgs?.work_id);
     if (taskScoped && !requestedTaskId) {
       throw taskError('TASK_ID_REQUIRED', `${name} requires the work_id returned by relai_work action begin.`);
@@ -72,13 +73,23 @@ async function callToolObserved(name, args = {}, context = {}) {
       knownTask = assertKnownTask(config, requestedTaskId, '', operationName, effectivePrincipal, effectiveArgs);
       if (knownTask && taskAware && !String(effectiveArgs?.workspace || '').trim()) effectiveArgs = { ...effectiveArgs, workspace: knownTask.workspace };
     }
-    workspaceResolution = resolveConfiguredWorkspaceArgument(config, effectiveArgs?.workspace);
-    if (workspaceResolution?.alias) effectiveArgs = { ...effectiveArgs, workspace: workspaceResolution.alias };
     assertAuthorizedToolCall({
       principal: effectivePrincipal,
       operationName,
-      workspace: workspaceResolution?.alias || effectiveArgs?.workspace || knownTask?.workspace || ''
+      workspace: ''
     });
+    const workspaceRequired = Array.isArray(definition?.inputSchema?.required)
+      && definition.inputSchema.required.includes('workspace');
+    workspaceResolution = resolveConfiguredWorkspaceArgument(config, effectiveArgs?.workspace, { required: workspaceRequired });
+    if (workspaceResolution?.alias) effectiveArgs = { ...effectiveArgs, workspace: workspaceResolution.alias };
+    const authorizedWorkspace = workspaceResolution?.alias || effectiveArgs?.workspace || knownTask?.workspace || '';
+    if (authorizedWorkspace) {
+      assertAuthorizedToolCall({
+        principal: effectivePrincipal,
+        operationName,
+        workspace: authorizedWorkspace
+      });
+    }
     if (operationName === OP.WORK_BEGIN) {
       const reusableTask = findReusableTask(
         config,
@@ -236,7 +247,11 @@ async function callToolObserved(name, args = {}, context = {}) {
       : responseValue;
     return ok(responseWithRepeatWarning);
   } catch (error) {
-    const enhanced = enhanceToolError(operationName, error);
+    const enhanced = restrictWorkspaceRecoveryErrorAliases(
+      enhanceToolError(operationName, error),
+      effectivePrincipal,
+      connector
+    );
     analyticsFailureCode = String(enhanced.code || '');
     activityResult = {
       ok: false,
@@ -357,12 +372,30 @@ function workflowCommandId(operationName, action, args = {}) {
     }
   });
 }
-function resolveConfiguredWorkspaceArgument(config, input) {
-  if (input == null || String(input).trim() === '') return null;
+function resolveConfiguredWorkspaceArgument(config, input, options = {}) {
+  if (input == null || String(input).trim() === '') {
+    if (options.required === true) resolveWorkspace(config, input);
+    return null;
+  }
   const resolution = resolveWorkspaceInput(config, input);
   if (resolution.source === 'configured_path') return resolution;
   if (resolution.source === 'path_unavailable' || resolution.source === 'unmatched_path') resolveWorkspace(config, input);
+  if (options.required === true && resolution.source === 'unmatched_alias') resolveWorkspace(config, input);
   return resolution;
+}
+
+function restrictWorkspaceRecoveryErrorAliases(error, principal, connector) {
+  if (!error || typeof error !== 'object' || !Array.isArray(error.configuredWorkspaceAliases)) return error;
+  const aliases = connector
+    ? authorizedWorkspaceAliases(principal, error.configuredWorkspaceAliases)
+    : [...error.configuredWorkspaceAliases];
+  error.configuredWorkspaceAliases = aliases;
+  error.workspaceAliases = aliases;
+  error.workspaceCount = aliases.length;
+  error.allowedAlternatives = aliases.length
+    ? [`Use one authorized workspace alias: ${aliases.join(', ')}.`]
+    : ['No authorized workspace alias is available for this client.'];
+  return error;
 }
 
 function signalRepositoryIntelligenceMutation(config, operationName, args, value) {

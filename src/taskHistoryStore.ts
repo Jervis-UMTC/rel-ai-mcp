@@ -21,6 +21,7 @@ import {
   pruneSessions,
   readSession,
   removeSession,
+  removeWorkspaceSessions,
   writeSession,
   writeSessionAsync,
   type StoredTaskSession,
@@ -692,6 +693,21 @@ function recordTaskHistoryPersistenceSuccess(): void {
   taskHistoryPersistenceState = { lastError: '', lastFailureAt: null, retryCount: 0 };
 }
 
+async function clearWorkspaceTaskHistory(config: TaskHistoryConfig, workspaceValue: unknown): Promise<{ removed: number; taskIds: string[] }> {
+  const workspace = String(workspaceValue || '').trim();
+  if (!workspace) return { removed: 0, taskIds: [] };
+  const flushed = await flushTaskHistoryPersistence();
+  if (!flushed.ok) throw new Error('Task history could not be flushed before project data cleanup.');
+  const directory = getTaskHistoryDir(config);
+  for (const [key, pending] of [...pendingSessions.entries()]) {
+    if (pending.directory === directory && String(pending.session?.workspace || '').trim() === workspace) pendingSessions.delete(key);
+  }
+  if (!pendingSessionEntriesForDirectory(directory).length) clearPendingDirectoryFlush(directory);
+  const taskIds = removeWorkspaceSessions(config, workspace);
+  recordTaskHistoryPersistenceSuccess();
+  return { removed: taskIds.length, taskIds };
+}
+
 function clearTaskHistory(config: TaskHistoryConfig): void {
   const directory = getTaskHistoryDir(config);
   const prefix = `${directory}\u0000`;
@@ -752,6 +768,7 @@ function emptySession(id: string): TaskRecord {
 export {
   bindTaskHistoryActivityPersistence,
   clearTaskHistory,
+  clearWorkspaceTaskHistory,
   flushTaskHistoryPersistence,
   getTaskHistoryDir,
   readConversationContinuity,

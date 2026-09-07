@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { copyText } from '../../clipboard.js';
+import { SparkChart } from '../../components/charts.js';
 import { Icon } from '../../components/icons.js';
 import { pillClass } from '../../components/pill.js';
 import { taskProgressView } from '../../components/task-progress.js';
@@ -213,12 +214,13 @@ function homeAnalyticsMetricIcon(label) {
 function HomeAnalyticsPulse({ pulse }) {
   if (pulse.empty) return h('div', { className: 'home-analytics-pulse-empty' }, 'No activity yet.');
   return h('div', { className: 'home-analytics-chart' },
-    h('svg', { className: 'home-analytics-svg', viewBox: `0 0 ${pulse.width} ${pulse.height}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': pulse.summary },
-      h('line', { x1: 0, y1: pulse.height * .32, x2: pulse.width, y2: pulse.height * .32, className: 'home-analytics-gridline' }),
-      h('line', { x1: 0, y1: pulse.height * .62, x2: pulse.width, y2: pulse.height * .62, className: 'home-analytics-gridline' }),
-      h('polygon', { points: pulse.area, className: 'home-analytics-area' }),
-      h('polyline', { points: pulse.polyline, className: 'home-analytics-line', fill: 'none', vectorEffect: 'non-scaling-stroke' })
-    ),
+    h(SparkChart, {
+      values: pulse.values,
+      className: 'home-analytics-chart-canvas',
+      mode: 'bar',
+      ariaLabel: pulse.summary,
+      decorative: false
+    }),
     h('div', { className: 'home-analytics-scale' }, h('span', null, '24h ago'), h('span', null, 'Now'))
   );
 }

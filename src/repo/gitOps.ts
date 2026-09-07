@@ -3,7 +3,8 @@ import { taskOwnedChangedFiles } from "../taskIntegrity.ts";
 import { runProcess, summarizeCommand } from "../process.js";
 import { resolveSafePath, isSecretPath } from "../safety.js";
 import { INTERNAL_STATUS_MAX_BYTES, gitStatusArgs, parseGitStatus, formatGitStatus } from "./gitStatus.js";
-import type { GitStatusEntry, GitStatusOwner } from "./gitStatus.ts";
+import type { GitStatusEntry, GitStatusOwner, ParsedGitStatus } from "./gitStatus.ts";
+import { checkGitRepository, readGitStatus } from './gitClient.ts';
 
 type RepoConfig = Record<string, any>;
 type RepoArgs = Record<string, any>;
@@ -95,6 +96,14 @@ function safeTaskOwnedChangedFiles(config: RepoConfig, taskId: string, workspace
   }
 }
 
+function isParsedGitStatus(value: unknown): value is ParsedGitStatus {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Partial<ParsedGitStatus>;
+  return Array.isArray(candidate.entries)
+    && typeof candidate.branchRaw === 'string'
+    && typeof candidate.unborn === 'boolean';
+}
+
 function statusGroups(): StatusGroups {
   return {
     entries: [],
@@ -133,7 +142,7 @@ function classifyStatusOwnership(workspace: RepoWorkspace, config: RepoConfig, s
   const hasSession = baselineSource !== null;
   const baselineSet = new Set(baselineDirty);
   const groups = statusGroups();
-  const parsed = parseGitStatus(statusOutput);
+  const parsed = isParsedGitStatus(statusOutput) ? statusOutput : parseGitStatus(statusOutput);
 
   for (const parsedEntry of parsed.entries) {
     recordStatusEntry(groups, {
@@ -168,9 +177,9 @@ function classifyStatusOwnership(workspace: RepoWorkspace, config: RepoConfig, s
 
 // ---- Git operation private helpers -------------------------------------------
 
-async function ensureGitRepo(workspace: RepoWorkspace, config: RepoConfig): Promise<void> {
-  const result = await runProcess("git", ["rev-parse", "--is-inside-work-tree"], { cwd: workspace.path, timeout: 30000 }, config);
-  if (result.exitCode !== 0 || !String(result.stdout || "").trim().startsWith("true")) throw new Error(`Workspace '${workspace.alias}' is not a git work tree.`);
+async function ensureGitRepo(workspace: RepoWorkspace, _config: RepoConfig): Promise<void> {
+  const isRepository = await checkGitRepository(workspace.path, { timeoutMs: 30_000 });
+  if (!isRepository) throw new Error(`Workspace '${workspace.alias}' is not a git work tree.`);
 }
 
 async function inspectPatchPaths(workspace: RepoWorkspace, config: RepoConfig, patch: string, timeoutMs = 120000) {
@@ -370,12 +379,15 @@ function buildPrBodyFromDiff(diffText: unknown): string {
 
 async function workspaceGitStatus(workspace: RepoWorkspace, config: RepoConfig, args: RepoArgs = {}) {
   const maxBytes = clampNumber(args.maxBytes, 1000, 5 * 1024 * 1024, DEFAULT_MAX_GIT_OUTPUT_BYTES);
-  const status = await runProcess("git", gitStatusArgs(), {
-    cwd: workspace.path,
-    timeout: 30000,
-    maxOutputBytes: INTERNAL_STATUS_MAX_BYTES
-  }, config);
-  const ownership = classifyStatusOwnership(workspace, config, status.stdout || "", args.work_id);
+  let parsed: ParsedGitStatus;
+  let statusError = '';
+  try {
+    parsed = await readGitStatus(workspace.path, { timeoutMs: 30_000 });
+  } catch (error) {
+    parsed = parseGitStatus('');
+    statusError = error instanceof Error ? error.message : String(error);
+  }
+  const ownership = classifyStatusOwnership(workspace, config, parsed, args.work_id);
   const taskScoped = Boolean(String(args.work_id || '').trim());
   const sessionChangedFiles = taskScoped ? ownership.sessionTouched : ownership.sessionChanged;
   const scopedSessionSet = new Set(sessionChangedFiles);
@@ -383,7 +395,7 @@ async function workspaceGitStatus(workspace: RepoWorkspace, config: RepoConfig, 
     ? ownership.untrackedSession.filter(file => scopedSessionSet.has(file))
     : ownership.untrackedSession;
   return {
-    ok: status.exitCode === 0 && !status.stdoutTruncated,
+    ok: !statusError,
     workspace: workspace.alias,
     branch: ownership.branch,
     aheadBehind: ownership.aheadBehind,
@@ -397,7 +409,7 @@ async function workspaceGitStatus(workspace: RepoWorkspace, config: RepoConfig, 
     untrackedSessionFiles,
     untrackedBaselineFiles: ownership.untrackedBaseline,
     ...(ownership.baselineSource ? { baselineSource: ownership.baselineSource } : {}),
-    ...(status.stderr ? { stderr: truncateUtf8(status.stderr, maxBytes, "git status stderr") } : {})
+    ...(statusError ? { stderr: truncateUtf8(statusError, maxBytes, "git status stderr") } : {})
   };
 }
 

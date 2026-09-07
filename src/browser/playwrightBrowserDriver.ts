@@ -17,9 +17,11 @@ type BrowserPageResult = Record<string, unknown> & Readonly<{ url: string }>;
 
 type LaunchBrowserDriverOptions = Readonly<{
   headless: boolean;
+  headlessExplicit?: boolean;
   viewport: Viewport;
   ignoreHTTPSErrors?: boolean;
   profileDirectory?: string;
+  signal?: AbortSignal;
 }>;
 
 interface BrowserDownloadHandle {
@@ -30,13 +32,13 @@ interface BrowserDownloadHandle {
 }
 
 interface BrowserPageDriver {
-  describe(): Promise<BrowserPageResult>;
-  navigate(url: string, timeoutMs: number): Promise<BrowserPageResult>;
-  snapshot(timeoutMs: number): Promise<BrowserPageResult>;
-  interact(args: StructuredInteractionArgs, timeoutMs: number): Promise<BrowserPageResult>;
-  screenshot(fullPage: boolean): Promise<BrowserPageResult>;
-  upload(args: StructuredInteractionArgs, filePath: string, timeoutMs: number): Promise<BrowserPageResult>;
-  beginDownload(args: StructuredInteractionArgs, timeoutMs: number): Promise<BrowserDownloadHandle>;
+  describe(signal?: AbortSignal): Promise<BrowserPageResult>;
+  navigate(url: string, timeoutMs: number, signal?: AbortSignal): Promise<BrowserPageResult>;
+  snapshot(timeoutMs: number, signal?: AbortSignal): Promise<BrowserPageResult>;
+  interact(args: StructuredInteractionArgs, timeoutMs: number, signal?: AbortSignal): Promise<BrowserPageResult>;
+  screenshot(fullPage: boolean, signal?: AbortSignal): Promise<BrowserPageResult>;
+  upload(args: StructuredInteractionArgs, filePath: string, timeoutMs: number, signal?: AbortSignal): Promise<BrowserPageResult>;
+  beginDownload(args: StructuredInteractionArgs, timeoutMs: number, signal?: AbortSignal): Promise<BrowserDownloadHandle>;
   close(): Promise<void>;
   onClosed(listener: () => void): void;
   onCrashed(listener: () => void): void;
@@ -44,7 +46,7 @@ interface BrowserPageDriver {
 
 interface LocalBrowserDriver {
   readonly browserProduct: string;
-  createPage(): Promise<BrowserPageDriver>;
+  createPage(signal?: AbortSignal): Promise<BrowserPageDriver>;
   close(): Promise<void>;
   onDisconnected(listener: () => void): void;
 }
@@ -105,41 +107,41 @@ async function launchLocalBrowserDriver(options: LaunchBrowserDriverOptions): Pr
 
 function wrapPage(page: Page): BrowserPageDriver {
   return Object.freeze({
-    describe: async () => {
+    describe: async (_signal?: AbortSignal) => {
       assertSupportedPageUrl(page, true);
       return pageResult(page, { title: await safeTitle(page) });
     },
-    navigate: async (url: string, timeoutMs: number) => {
+    navigate: async (url: string, timeoutMs: number, _signal?: AbortSignal) => {
       const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
       assertSupportedPageUrl(page);
       return pageResult(page, { statusCode: response?.status() ?? null, title: await safeTitle(page) });
     },
-    snapshot: async (timeoutMs: number) => {
+    snapshot: async (timeoutMs: number, _signal?: AbortSignal) => {
       assertSupportedPageUrl(page);
       const yaml = await page.locator('body').ariaSnapshot({ timeout: timeoutMs });
       const bounded = boundText(yaml, MAX_SNAPSHOT_CHARS);
       return pageResult(page, { title: await safeTitle(page), snapshot: bounded.text, truncated: bounded.truncated });
     },
-    interact: async (args: StructuredInteractionArgs, timeoutMs: number) => {
+    interact: async (args: StructuredInteractionArgs, timeoutMs: number, _signal?: AbortSignal) => {
       assertSupportedPageUrl(page);
       const interaction = await performStructuredInteraction(page, args, timeoutMs, 'browser');
       assertSupportedPageUrl(page);
       return pageResult(page, { ...interaction, title: await safeTitle(page) });
     },
-    screenshot: async (fullPage: boolean) => {
+    screenshot: async (fullPage: boolean, _signal?: AbortSignal) => {
       assertSupportedPageUrl(page);
       return pageResult(page, {
         title: await safeTitle(page),
         ...(await screenshotPage(page, fullPage, 'Browser screenshot'))
       });
     },
-    upload: async (args: StructuredInteractionArgs, filePath: string, timeoutMs: number) => {
+    upload: async (args: StructuredInteractionArgs, filePath: string, timeoutMs: number, _signal?: AbortSignal) => {
       assertSupportedPageUrl(page);
       await targetLocator(page, args.target).setInputFiles(filePath, { timeout: timeoutMs });
       assertSupportedPageUrl(page);
       return pageResult(page, { interaction: 'upload', title: await safeTitle(page) });
     },
-    beginDownload: async (args: StructuredInteractionArgs, timeoutMs: number) => {
+    beginDownload: async (args: StructuredInteractionArgs, timeoutMs: number, _signal?: AbortSignal) => {
       assertSupportedPageUrl(page);
       const [download] = await Promise.all([
         page.waitForEvent('download', { timeout: timeoutMs }),

@@ -51,6 +51,8 @@ interface ParseFailure {
 
 type ParseResult = ParseSuccess | ParseFailure;
 
+const asyncWriteQueues = new Map<string, Promise<unknown>>();
+
 class DurableStateError extends Error implements PersistenceFailure {
   readonly code: string;
   readonly details: Readonly<Record<string, unknown>>;
@@ -91,28 +93,39 @@ function writeJsonAtomic(target: unknown, value: unknown, options: JsonWriteOpti
   return writeTextAtomic(target, `${JSON.stringify(value, null, spacing)}\n`, options);
 }
 
-async function writeTextAtomicAsync(target: unknown, text: unknown, options: AsyncAtomicWriteOptions = {}): Promise<AtomicPersistenceResult> {
+function writeTextAtomicAsync(target: unknown, text: unknown, options: AsyncAtomicWriteOptions = {}): Promise<AtomicPersistenceResult> {
   const file = path.resolve(String(target));
-  const directory = path.dirname(file);
-  const mode = options.mode ?? 0o600;
-  const durable = options.durable !== false;
-  const backup = options.backup === true ? path.resolve(String(options.backupPath || `${file}.bak`)) : '';
-  try {
-    await fs.promises.mkdir(directory, { recursive: true, mode: 0o700 });
-    if (backup && await pathExistsAsync(file)) {
-      await writeFileAtomic(backup, await fs.promises.readFile(file), { fsync: durable, mode });
+  return serializeAsyncWrite(file, async () => {
+    const directory = path.dirname(file);
+    const mode = options.mode ?? 0o600;
+    const durable = options.durable !== false;
+    const backup = options.backup === true ? path.resolve(String(options.backupPath || `${file}.bak`)) : '';
+    try {
+      await fs.promises.mkdir(directory, { recursive: true, mode: 0o700 });
+      if (backup && await pathExistsAsync(file)) {
+        await writeFileAtomic(backup, await fs.promises.readFile(file), { fsync: durable, mode });
+      }
+      await writeFileAtomic(file, String(text), { encoding: 'utf8', fsync: durable, mode });
+      if (durable) await syncDirectoryAsync(directory);
+      return { path: file, backupPath: backup || null };
+    } catch (error) {
+      throw new DurableStateError(
+        'DURABLE_STATE_WRITE_FAILED',
+        `Could not persist state file ${path.basename(file)}.`,
+        { path: file, fsCode: errorCode(error) },
+        { cause: error }
+      );
     }
-    await writeFileAtomic(file, String(text), { encoding: 'utf8', fsync: durable, mode });
-    if (durable) await syncDirectoryAsync(directory);
-    return { path: file, backupPath: backup || null };
-  } catch (error) {
-    throw new DurableStateError(
-      'DURABLE_STATE_WRITE_FAILED',
-      `Could not persist state file ${path.basename(file)}.`,
-      { path: file, fsCode: errorCode(error) },
-      { cause: error }
-    );
-  }
+  });
+}
+
+function serializeAsyncWrite<T>(file: string, action: () => Promise<T>): Promise<T> {
+  const previous = asyncWriteQueues.get(file) || Promise.resolve();
+  const current = previous.catch(() => undefined).then(action);
+  asyncWriteQueues.set(file, current);
+  return current.finally(() => {
+    if (asyncWriteQueues.get(file) === current) asyncWriteQueues.delete(file);
+  });
 }
 
 function writeJsonAtomicAsync(target: unknown, value: unknown, options: AsyncJsonWriteOptions = {}): Promise<AtomicPersistenceResult> {

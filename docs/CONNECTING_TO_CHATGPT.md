@@ -25,7 +25,7 @@ After enabling Rel.AI MCP in a chat, start with a read-only request:
 Use Rel.AI MCP with workspace "myapp". Start one work session, read the project, and explain how the relevant parts work before changing anything.
 ```
 
-Rel.AI creates a separate work session for each new goal. Internally, that session has a `work_id` so edits, checks, review, recovery, and completion stay attached to the same task even if the connection changes.
+For substantial or multi-step local project goals, ChatGPT should start one Rel.AI work session before meaningful mutation and keep its `work_id` across edits, checks, review, recovery, and completion. Isolated reads, inspection, and genuinely small one-shot actions may use the authorized workspace directly without creating a durable task.
 
 ## Why Rel.AI uses ChatGPT
 

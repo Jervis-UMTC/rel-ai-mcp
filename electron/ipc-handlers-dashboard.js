@@ -1,7 +1,8 @@
-function registerBrowserSurfaceIpc({ ipc, channels, getBrowserState, setBrowserSurfaceBounds, setBrowserControl, selectBrowserTab, closeBrowserTab, stopActiveBrowserSession }) {
+function registerBrowserSurfaceIpc({ ipc, channels, getBrowserState, setBrowserSurfaceBounds, setBrowserControl, selectBrowserSession, selectBrowserTab, closeBrowserTab, stopActiveBrowserSession }) {
   ipc.handle(channels.DESKTOP_BROWSER_GET_STATE, 'Embedded browser state', () => getBrowserState());
   ipc.handle(channels.DESKTOP_BROWSER_SET_BOUNDS, 'Embedded browser surface', (_event, bounds) => setBrowserSurfaceBounds(normalizeBrowserBounds(bounds)));
   ipc.handle(channels.DESKTOP_BROWSER_SET_CONTROL, 'Embedded browser control', (_event, owner) => setBrowserControl(normalizeBrowserControl(owner)));
+  ipc.handle(channels.DESKTOP_BROWSER_SELECT_SESSION, 'Embedded browser session selection', (_event, nativeSessionId) => selectBrowserSession(normalizeBrowserSessionId(nativeSessionId)));
   ipc.handle(channels.DESKTOP_BROWSER_SELECT_TAB, 'Embedded browser tab selection', (_event, nativePageId) => selectBrowserTab(normalizeBrowserPageId(nativePageId)));
   ipc.handle(channels.DESKTOP_BROWSER_CLOSE_TAB, 'Embedded browser tab close', (_event, nativePageId) => closeBrowserTab(normalizeBrowserPageId(nativePageId)));
   ipc.handle(channels.DESKTOP_BROWSER_STOP, 'Embedded browser stop', () => stopActiveBrowserSession());
@@ -68,6 +69,12 @@ function normalizeBrowserControl(owner) {
   const value = String(owner || '').trim();
   if (value !== 'ai' && value !== 'user') throw new Error('Embedded browser control owner must be ai or user.');
   return value;
+}
+
+function normalizeBrowserSessionId(value) {
+  const nativeSessionId = String(value || '').trim();
+  if (!/^embedded_browser_[A-Za-z0-9_-]{16,160}$/.test(nativeSessionId)) throw new Error('Embedded browser session identifier is invalid.');
+  return nativeSessionId;
 }
 
 function normalizeBrowserPageId(value) {

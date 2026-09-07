@@ -16,7 +16,8 @@ import {
   type TelemetryConfig
 } from './telemetry.types.ts';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
+const PREVIOUS_SCHEMA_VERSION = 2;
 const LEGACY_SCHEMA_VERSION = 1;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -272,9 +273,10 @@ function upsertDocument(db: StateDatabase, document: AnalyticsDocument, updatedA
 
 function parseDocument(text: string, month: string): AnalyticsDocument {
   const parsed = asRecord(JSON.parse(text) as unknown);
-  const supportedSchema = parsed.schemaVersion === SCHEMA_VERSION || parsed.schemaVersion === LEGACY_SCHEMA_VERSION;
+  const schemaVersion = Number(parsed.schemaVersion);
+  const supportedSchema = [SCHEMA_VERSION, PREVIOUS_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION].includes(schemaVersion);
   return supportedSchema && parsed.month === month
-    ? sanitizeDocument(parsed, month, { resetReliability: parsed.schemaVersion !== SCHEMA_VERSION })
+    ? sanitizeDocument(parsed, month, { resetReliability: schemaVersion !== SCHEMA_VERSION })
     : emptyDocument(month);
 }
 
@@ -345,6 +347,63 @@ async function pruneLocalAnalytics(config: AnalyticsConfig = {}, options: PruneO
   }, { transaction: true }) as { ok: true; removedFiles: number; removedBytes: number };
   retentionPruneTimes.set(statePath(config, 'durable-state.sqlite'), nowMs);
   return result;
+}
+
+function removeWorkspaceLocalAnalytics(config: AnalyticsConfig = {}, workspaceValue: unknown = ''): { ok: true; updatedMonths: number; removedToolCalls: number } {
+  const workspace = boundedLabel(workspaceValue, 160);
+  if (!workspace) return { ok: true, updatedMonths: 0, removedToolCalls: 0 };
+  migrateLegacyLocalAnalytics(config);
+  return withStateDatabase(config, (db: StateDatabase) => {
+    const rows = db.prepare('SELECT month,payload FROM analytics_months').all() as Array<{ month?: unknown; payload?: unknown }>;
+    let updatedMonths = 0;
+    let removedToolCalls = 0;
+    for (const row of rows) {
+      const month = normalizeMonth(row.month);
+      if (!month) continue;
+      let document: AnalyticsDocument;
+      try { document = parseDocument(String(row.payload || ''), month); }
+      catch { continue; }
+
+      const workspaceAggregate = document.workspaces.find(item => item.workspace === workspace);
+      const workspaceTools = document.workspaceTools.filter(item => item.workspace === workspace);
+      const workspaceFailures = document.workspaceFailureCategories.filter(item => item.workspace === workspace);
+      const hasHourlyData = document.hours.some(hour =>
+        hour.workspaces.some(item => item.workspace === workspace)
+        || hour.workspaceTools.some(item => item.workspace === workspace)
+        || hour.workspaceFailureCategories.some(item => item.workspace === workspace));
+      if (!workspaceAggregate && !workspaceTools.length && !workspaceFailures.length && !hasHourlyData) continue;
+
+      const removedCalls = number(workspaceAggregate?.toolCalls)
+        || workspaceTools.reduce((sum, item) => sum + number(item.toolCalls), 0);
+      removedToolCalls += removedCalls;
+      if (workspaceAggregate) subtractAggregate(document.totals, workspaceAggregate, true);
+      subtractToolRows(document.tools, workspaceTools);
+      subtractFailureRows(document.failureCategories, workspaceFailures);
+      document.workspaces = document.workspaces.filter(item => item.workspace !== workspace);
+      document.workspaceTools = document.workspaceTools.filter(item => item.workspace !== workspace);
+      document.workspaceFailureCategories = document.workspaceFailureCategories.filter(item => item.workspace !== workspace);
+      document.tools = document.tools.filter(item => number(item.toolCalls) > 0);
+      document.failureCategories = document.failureCategories.filter(item => number(item.failures) > 0);
+
+      for (const hour of document.hours) {
+        const hourlyAggregate = hour.workspaces.find(item => item.workspace === workspace);
+        const hourlyTools = hour.workspaceTools.filter(item => item.workspace === workspace);
+        const hourlyFailures = hour.workspaceFailureCategories.filter(item => item.workspace === workspace);
+        if (hourlyAggregate) subtractAggregate(hour, hourlyAggregate, true);
+        subtractToolRows(hour.tools, hourlyTools);
+        subtractFailureRows(hour.failureCategories, hourlyFailures);
+        hour.workspaces = hour.workspaces.filter(item => item.workspace !== workspace);
+        hour.workspaceTools = hour.workspaceTools.filter(item => item.workspace !== workspace);
+        hour.workspaceFailureCategories = hour.workspaceFailureCategories.filter(item => item.workspace !== workspace);
+        hour.tools = hour.tools.filter(item => number(item.toolCalls) > 0);
+        hour.failureCategories = hour.failureCategories.filter(item => number(item.failures) > 0);
+      }
+      document.hours = document.hours.filter(hour => number(hour.toolCalls) > 0);
+      upsertDocument(db, document);
+      updatedMonths += 1;
+    }
+    return { ok: true as const, updatedMonths, removedToolCalls };
+  }, { transaction: true }) as { ok: true; updatedMonths: number; removedToolCalls: number };
 }
 
 async function clearLocalAnalytics(config: AnalyticsConfig = {}): Promise<{ ok: true; removedFiles: number; removedBytes: number }> {
@@ -536,6 +595,34 @@ function incrementPerformancePhases(target: PerformancePhaseDurations, phases: P
   }
 }
 
+function subtractAggregate(target: AnalyticsAggregate, source: Partial<AnalyticsAggregate>, includeRequests = false): void {
+  if (includeRequests) target.requests = Math.max(0, number(target.requests) - number(source.toolCalls));
+  target.toolCalls = Math.max(0, number(target.toolCalls) - number(source.toolCalls));
+  target.successes = Math.max(0, number(target.successes) - number(source.successes));
+  target.failures = Math.max(0, number(target.failures) - number(source.failures));
+  target.reliabilityCalls = Math.max(0, number(target.reliabilityCalls) - number(source.reliabilityCalls));
+  target.reliableCalls = Math.max(0, number(target.reliableCalls) - number(source.reliableCalls));
+  target.infrastructureFailures = Math.max(0, number(target.infrastructureFailures) - number(source.infrastructureFailures));
+  target.operationFailures = Math.max(0, number(target.operationFailures) - number(source.operationFailures));
+  target.recoverableFailures = Math.max(0, number(target.recoverableFailures) - number(source.recoverableFailures));
+  target.cancellations = Math.max(0, number(target.cancellations) - number(source.cancellations));
+  target.executionMs = Math.max(0, number(target.executionMs) - number(source.executionMs));
+}
+
+function subtractToolRows(targetRows: Array<NamedAggregate<'tool'>>, workspaceRows: WorkspaceToolAggregate[]): void {
+  for (const workspaceRow of workspaceRows) {
+    const target = targetRows.find(item => item.tool === workspaceRow.tool);
+    if (target) subtractAggregate(target, workspaceRow);
+  }
+}
+
+function subtractFailureRows(targetRows: FailureCategoryAggregate[], workspaceRows: WorkspaceFailureCategoryAggregate[]): void {
+  for (const workspaceRow of workspaceRows) {
+    const target = targetRows.find(item => item.category === workspaceRow.category);
+    if (target) target.failures = Math.max(0, number(target.failures) - number(workspaceRow.failures));
+  }
+}
+
 function incrementAggregate(row: AnalyticsAggregate, success: number, failure: number, durationMs: number, reliability: ReliabilityCounters): void {
   row.toolCalls = number(row.toolCalls) + 1;
   row.successes = number(row.successes) + success;
@@ -600,6 +687,7 @@ export {
   flushLocalAnalytics,
   pruneLocalAnalytics,
   recordLocalToolOutcome,
+  removeWorkspaceLocalAnalytics,
   readLocalUsageSnapshot,
   readLocalUsageSnapshotAsync
 };

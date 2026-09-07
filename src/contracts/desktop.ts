@@ -31,12 +31,24 @@ export interface DesktopBrowserTabDto {
   loading: boolean;
   createdAt: string;
 }
+export interface DesktopBrowserSessionDto {
+  nativeSessionId: string;
+  active: boolean;
+  control: 'ai' | 'user';
+  headless: boolean;
+  pageCount: number;
+  url: string;
+  title: string;
+  createdAt: string;
+}
 export interface DesktopBrowserStateDto {
   ok?: boolean;
   available?: boolean;
   active?: boolean;
   activeSessionCount?: number;
+  sessions?: readonly DesktopBrowserSessionDto[];
   control?: 'ai' | 'user';
+  headless?: boolean;
   nativeSessionId?: string;
   nativePageId?: string;
   pageCount?: number;
@@ -75,6 +87,7 @@ export interface DesktopIpcRequestMap {
   'desktop:browser:get-state': [];
   'desktop:browser:set-bounds': [bounds: DesktopBrowserSurfaceBoundsDto];
   'desktop:browser:set-control': [owner: 'ai' | 'user'];
+  'desktop:browser:select-session': [nativeSessionId: string];
   'desktop:browser:select-tab': [nativePageId: string];
   'desktop:browser:close-tab': [nativePageId: string];
   'desktop:browser:stop': [];
@@ -121,6 +134,7 @@ export interface DesktopIpcResponseMap {
   'desktop:browser:get-state': DesktopBrowserStateDto;
   'desktop:browser:set-bounds': DesktopBrowserStateDto;
   'desktop:browser:set-control': DesktopBrowserStateDto;
+  'desktop:browser:select-session': DesktopBrowserStateDto;
   'desktop:browser:select-tab': DesktopBrowserStateDto;
   'desktop:browser:close-tab': DesktopBrowserStateDto;
   'desktop:browser:stop': Record<string, unknown>;
@@ -166,6 +180,7 @@ export const DESKTOP_IPC = Object.freeze({
   DESKTOP_BROWSER_GET_STATE: 'desktop:browser:get-state',
   DESKTOP_BROWSER_SET_BOUNDS: 'desktop:browser:set-bounds',
   DESKTOP_BROWSER_SET_CONTROL: 'desktop:browser:set-control',
+  DESKTOP_BROWSER_SELECT_SESSION: 'desktop:browser:select-session',
   DESKTOP_BROWSER_SELECT_TAB: 'desktop:browser:select-tab',
   DESKTOP_BROWSER_CLOSE_TAB: 'desktop:browser:close-tab',
   DESKTOP_BROWSER_STOP: 'desktop:browser:stop',
@@ -240,6 +255,7 @@ export const DESKTOP_IPC_INPUT_CONTRACT = Object.freeze({
   [DESKTOP_IPC.DESKTOP_BROWSER_GET_STATE]: input('handle', ['dashboard'], 'reject'),
   [DESKTOP_IPC.DESKTOP_BROWSER_SET_BOUNDS]: input('handle', ['dashboard'], 'reject'),
   [DESKTOP_IPC.DESKTOP_BROWSER_SET_CONTROL]: input('handle', ['dashboard'], 'reject'),
+  [DESKTOP_IPC.DESKTOP_BROWSER_SELECT_SESSION]: input('handle', ['dashboard'], 'reject'),
   [DESKTOP_IPC.DESKTOP_BROWSER_SELECT_TAB]: input('handle', ['dashboard'], 'reject'),
   [DESKTOP_IPC.DESKTOP_BROWSER_CLOSE_TAB]: input('handle', ['dashboard'], 'reject'),
   [DESKTOP_IPC.DESKTOP_BROWSER_STOP]: input('handle', ['dashboard'], 'reject'),

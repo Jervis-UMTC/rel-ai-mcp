@@ -94,6 +94,7 @@ try {
   assert.equal(result.tools.emptyState, true);
   assert.deepEqual(result.settings.themes.map(item => item.preference), ['dark', 'light', 'system']);
   assert.deepEqual(result.settings.themeSwitchLabels, ['Follow system appearance', 'Dark theme', 'Light theme']);
+  assert.equal(result.settings.themeSwitchIconsUseSvg, true);
   assert.equal(result.settings.themeSwitchCheckedCount, 1);
   assert.equal(result.settings.themeSwitchRole, 'radiogroup');
   assert.deepEqual(result.settings.themeOptionRoles, ['radio', 'radio', 'radio']);

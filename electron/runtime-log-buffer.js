@@ -1,6 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import electronLog from 'electron-log/node';
 import { sanitizeText } from "../src/diagnostics.js";
+
+let loggerSequence = 0;
 
 function createRuntimeLogBuffer({ maxEntries = 200, now = () => new Date().toISOString(), filePath = '' } = {}) {
   const entryLimit = Math.max(1, Math.floor(Number(maxEntries) || 200));
@@ -9,10 +12,22 @@ function createRuntimeLogBuffer({ maxEntries = 200, now = () => new Date().toISO
   const listeners = new Set();
   let hydratedPath = '';
   let persistedEntries = 0;
-  let preparedDirectory = '';
-  let writeQueue = Promise.resolve();
   let revision = 0;
   let persistence = { healthy: true, failureCount: 0, lastFailureAt: null, lastError: '' };
+  const diskLogger = electronLog.create({ logId: `relai-runtime-${++loggerSequence}` });
+  diskLogger.transports.file.resolvePathFn = () => resolveFilePath();
+  diskLogger.transports.file.format = '{text}';
+  diskLogger.transports.file.maxSize = 0;
+  diskLogger.transports.file.sync = true;
+  diskLogger.transports.file.writeOptions = { flag: 'a', mode: 0o600, encoding: 'utf8' };
+  if (diskLogger.transports.ipc) diskLogger.transports.ipc.level = false;
+  if (diskLogger.transports.remote) diskLogger.transports.remote.level = false;
+  diskLogger.transports.console.level = 'error';
+  diskLogger.transports.console.writeFn = ({ message }) => {
+    if (!message.data.some(value => String(value || '').includes('electron-log.transports.file:'))) return;
+    const error = message.data.find(value => value instanceof Error);
+    schedulePersistenceFailure(error || new Error('App log persistence failed.'));
+  };
 
   function append(message, options = {}) {
     hydrate();
@@ -116,30 +131,30 @@ function createRuntimeLogBuffer({ maxEntries = 200, now = () => new Date().toISO
       rewriteFile();
       return;
     }
-    enqueueWrite(target, () => fs.promises.appendFile(target, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 }));
+    writeEntries(target, [entry], false);
   }
 
   function rewriteFile() {
     const target = resolveFilePath();
     if (!target) return;
     persistedEntries = entries.length;
-    const text = entries.map(entry => JSON.stringify(entry)).join('\n');
-    enqueueWrite(target, () => fs.promises.writeFile(target, text ? `${text}\n` : '', { encoding: 'utf8', mode: 0o600 }));
+    writeEntries(target, entries, true);
   }
 
-  function enqueueWrite(target, operation) {
-    writeQueue = writeQueue.then(async () => {
-      const directory = path.dirname(target);
-      if (preparedDirectory !== directory) {
-        await fs.promises.mkdir(directory, { recursive: true, mode: 0o700 });
-        preparedDirectory = directory;
-      }
-      await operation();
+  function writeEntries(target, values, replace) {
+    const failureCount = persistence.failureCount;
+    try {
+      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(target, '', { flag: 'a', mode: 0o600 });
+      const file = diskLogger.transports.file.getFile();
+      if (replace && !file.clear()) throw new Error(`Could not clear runtime log ${target}.`);
+      for (const value of values) diskLogger.info(JSON.stringify(value));
+      if (persistence.failureCount !== failureCount) return;
       markPersistenceHealthy();
-    }).catch(error => {
-      markPersistenceFailure(error);
+    } catch (error) {
+      schedulePersistenceFailure(error);
       if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] runtime log persist:', error);
-    });
+    }
   }
 
   function markPersistenceHealthy() {
@@ -147,6 +162,10 @@ function createRuntimeLogBuffer({ maxEntries = 200, now = () => new Date().toISO
     persistence = { ...persistence, healthy: true, lastError: '' };
     revision += 1;
     emit({ type: 'persistence', revision, persistence: { ...persistence } });
+  }
+
+  function schedulePersistenceFailure(error) {
+    queueMicrotask(() => markPersistenceFailure(error));
   }
 
   function markPersistenceFailure(error) {
@@ -160,9 +179,7 @@ function createRuntimeLogBuffer({ maxEntries = 200, now = () => new Date().toISO
     emit({ type: 'persistence', revision, persistence: { ...persistence } });
   }
 
-  async function flush() {
-    await writeQueue;
-  }
+  async function flush() {}
 
   function onChange(listener) {
     if (typeof listener !== 'function') return () => {};

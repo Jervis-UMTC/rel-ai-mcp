@@ -268,7 +268,7 @@ function SessionInspector({ session, activeTab, setActiveTab, olderExpanded, set
     ),
     h(SessionTabs, { activeTab, setActiveTab }),
     h('div', { className: 'inspector-panel', id: 'session-panel-overview', role: 'tabpanel', 'aria-labelledby': 'session-tab-overview', tabIndex: 0, hidden: activeTab !== 'overview', 'data-session-panel': 'overview' },
-      h('div', { className: `task-detail-current${sessionNeedsAttention(session) ? ' attention' : ''}` },
+      h('div', { className: 'task-detail-current' },
         h('strong', null, currentTitle),
         h('span', null, currentCopy)
       ),
@@ -377,23 +377,26 @@ function ChangedFilesSection({ files, session }) {
 }
 
 function ChangedFileGroup({ title, files, session = null }) {
+  const [expanded, setExpanded] = useState(false);
   const ordered = orderChangedFiles(files);
   if (!ordered.length) return null;
-  const visible = ordered.slice(0, DETAIL_FILE_PREVIEW);
-  const hidden = ordered.slice(DETAIL_FILE_PREVIEW);
+  const hiddenCount = Math.max(0, ordered.length - DETAIL_FILE_PREVIEW);
+  const visible = expanded ? ordered : ordered.slice(0, DETAIL_FILE_PREVIEW);
+  const moreControl = hiddenCount ? h('button', {
+    className: 'task-file-more',
+    type: 'button',
+    'aria-expanded': expanded ? 'true' : 'false',
+    onClick: () => setExpanded(value => !value)
+  }, expanded ? 'Show fewer files' : `Show ${hiddenCount} more file${hiddenCount === 1 ? '' : 's'}`) : null;
   return h('section', { className: 'task-detail-section' },
     h('div', { className: 'task-detail-heading' }, h('h3', null, title), h('span', null, ordered.length)),
-    h(FileList, { files: visible, session }),
-    hidden.length ? h('details', { className: 'task-detail-overflow' },
-      h('summary', null, `Show ${hidden.length} more file${hidden.length === 1 ? '' : 's'}`),
-      h(FileList, { files: hidden, session })
-    ) : null
+    h(FileList, { files: visible, session, moreControl })
   );
 }
 
-function FileList({ files, session = null }) {
+function FileList({ files, session = null, moreControl = null }) {
   const taskId = session ? sessionIdentifier(session) : '';
-  return h('ul', { className: 'task-file-list' }, ...files.map(file => {
+  const rows = files.map(file => {
     if (!taskId) return h('li', { key: file }, h('code', null, file));
     return h('li', { className: 'task-file-link-row', key: file },
       h('a', {
@@ -402,7 +405,9 @@ function FileList({ files, session = null }) {
         'aria-label': `Open ${file} in Changes`
       }, h('code', null, file))
     );
-  }));
+  });
+  if (moreControl) rows.push(h('li', { className: 'task-file-more-row', key: 'more-files' }, moreControl));
+  return h('ul', { className: 'task-file-list' }, ...rows);
 }
 
 function TaskTraceSection({ session, olderExpanded, setOlderExpanded }) {

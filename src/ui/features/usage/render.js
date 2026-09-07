@@ -2,8 +2,8 @@ import { deltaFor } from './range-model.js';
 
 const METRIC_HELP = Object.freeze({
   toolCalls: 'Total Rel.AI tool actions recorded in this range. The change compares with the previous equivalent period.',
-  reliabilityRate: 'Share of measured, non-cancelled actions without a Rel.AI system error. “pp” means percentage points. A change from 90% to 95% is +5 pp.',
-  infrastructureFailures: 'Actions with Rel.AI system errors. Expected command failures, check failures, and cancellations are excluded.',
+  reliabilityRate: 'Share of measured actions without a confirmed Rel.AI infrastructure failure. Cancellations and unclassified failures are excluded. “pp” means percentage points. A change from 90% to 95% is +5 pp.',
+  infrastructureFailures: 'Actions with confirmed Rel.AI infrastructure failures. Expected command failures, check failures, cancellations, and unclassified failures are excluded.',
   recoverableFailures: 'Actions with a recoverable task or context problem. A retry or context refresh can usually resolve the problem.',
   operationSuccessRate: 'Share of recorded actions where the requested command or check succeeded. Rate changes use percentage points (pp).',
   averageDuration: 'Average elapsed time per completed action in this range. The change compares with the previous equivalent period when available.'
@@ -22,7 +22,7 @@ export function analyticsMetrics(scope, previous) {
   return [
     metric('Actions', 'toolCalls', integer(scope.toolCalls), '', { neutral: true }),
     metric('Reliable actions', 'reliabilityRate', scope.reliabilityCalls ? percent(scope.reliabilityRate) : '—', scope.reliabilityCalls ? `${integer(scope.reliabilityCalls)} measured actions` : 'Measured after new actions run', { rate: true, available: scope.reliabilityCalls > 0, previousAvailable: Number(previous?.reliabilityCalls || 0) > 0, spark: false }),
-    metric('System errors', 'infrastructureFailures', integer(scope.infrastructureFailures), 'Rel.AI internal errors only', { inverse: true, metricTone: scope.infrastructureFailures ? 'bad' : 'good' }),
+    metric('Internal errors', 'infrastructureFailures', integer(scope.infrastructureFailures), 'Confirmed Rel.AI infrastructure failures only', { inverse: true, metricTone: scope.infrastructureFailures ? 'bad' : 'good' }),
     metric('Retryable problems', 'recoverableFailures', integer(scope.recoverableFailures), 'Usually fixed by retrying or refreshing context', { inverse: true }),
     metric('Successful actions', 'operationSuccessRate', scope.completed ? percent(scope.operationSuccessRate) : '—', 'Whether the command or check itself succeeded', { rate: true, sparkKey: 'operationSuccessRate', available: scope.completed > 0, previousAvailable: Number(previous?.completed || 0) > 0 }),
     metric('Average time', 'averageDuration', duration(scope.averageDuration), scope.completed ? 'Per completed action' : '', { inverse: true, sparkKey: 'averageDuration', available: scope.completed > 0, previousAvailable: Number(previous?.completed || 0) > 0 })
@@ -39,18 +39,8 @@ export function pointMetric(point, key) {
 
 export function timelineModel(values, metricLabel = 'Actions') {
   const data = finite(values);
-  const width = 720;
-  const height = 180;
-  const baseline = height - 12;
-  if (!data.length || data.every(value => value === 0)) return { empty: true, data, width, height, baseline, coordinates: [], summary: 'No activity in this range.' };
+  if (!data.length || data.every(value => value === 0)) return { empty: true, data, summary: 'No activity in this range.' };
   const max = Math.max(...data, 1);
-  const coordinates = data.map((value, index) => ({
-    index,
-    value,
-    x: data.length === 1 ? width / 2 : index / (data.length - 1) * width,
-    y: baseline - value / max * (height - 32)
-  }));
-  const points = coordinates.map(point => `${point.x},${point.y}`).join(' ');
   const peak = Math.max(...data);
   const peakIndex = data.indexOf(peak);
   const bucketsAgo = Math.max(0, data.length - 1 - peakIndex);
@@ -59,35 +49,16 @@ export function timelineModel(values, metricLabel = 'Actions') {
   return {
     empty: false,
     data,
-    width,
-    height,
-    baseline,
     max,
     peak,
     peakIndex,
     latestIndex: data.length - 1,
-    coordinates,
-    points,
-    area: `0,${baseline} ${points} ${width},${baseline}`,
     summary: `${metricLabel} trend. Peak ${formatChartValue(peak, metricLabel)} ${bucketsAgo ? `${bucketsAgo} periods ago` : 'in the latest period'}. Latest ${formatChartValue(latest, metricLabel)}. Overall trend ${trend}.`
   };
 }
 
-export function sparklineModel(values) {
-  const data = finite(values);
-  const width = 120;
-  const height = 28;
-  if (!data.length) return null;
-  const max = Math.max(...data, 1);
-  return {
-    width,
-    height,
-    points: data.map((value, index) => `${data.length === 1 ? width / 2 : index / (data.length - 1) * width},${height - 2 - value / max * (height - 5)}`).join(' ')
-  };
-}
-
 export function failureCategoryLabel(category) {
-  return ({ cancelled: 'Cancelled', timeout: 'Timed out', authorization: 'Sign-in', capacity: 'Busy', transport: 'Connection', policy: 'Safety rule', workspace: 'Project folder', git: 'Git', process: 'Command', validation: 'Input or check', runtime: 'App' })[String(category || '').toLowerCase()] || 'App';
+  return ({ cancelled: 'Cancelled', timeout: 'Timed out', authorization: 'Sign-in', capacity: 'Busy', transport: 'Connection', policy: 'Safety rule', workspace: 'Project folder', git: 'Git', process: 'Command', validation: 'Input or check', runtime: 'Other' })[String(category || '').toLowerCase()] || 'Other';
 }
 
 export function integer(value) {

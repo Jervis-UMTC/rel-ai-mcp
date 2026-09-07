@@ -68,7 +68,9 @@ try {
 
   const omittedWorkspaceResponse = await invoke('relai_work', { action: 'begin' }, { publicHttpOnly: true });
   assert.equal(omittedWorkspaceResponse.isError, true);
-  assert.match(omittedWorkspaceResponse.structuredContent.error, /Missing required field 'workspace'/);
+  assert.equal(omittedWorkspaceResponse.structuredContent.errorCode, 'WORKSPACE_INPUT_OMITTED');
+  assert.deepEqual(omittedWorkspaceResponse.structuredContent.errorDetails.workspaceAliases, ['repo']);
+  assert.equal(omittedWorkspaceResponse.structuredContent.errorDetails.workspaceCount, 1);
 
   const writeResponse = await invoke('relai_edit', { workspace: 'repo', work_id: taskId, path: '.env', content: 'API_KEY=replacement\n' }, { publicHttpOnly: true });
 

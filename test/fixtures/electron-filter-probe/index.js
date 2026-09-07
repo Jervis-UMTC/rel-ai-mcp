@@ -221,6 +221,7 @@ app.whenReady().then(async () => {
       return {
         themes,
         themeSwitchLabels: [...theme.querySelectorAll('[data-theme-option]')].map(button => button.getAttribute('aria-label')),
+        themeSwitchIconsUseSvg: [...theme.querySelectorAll('[data-theme-option]')].every(button => Boolean(button.querySelector('svg'))),
         themeSwitchCheckedCount: theme.querySelectorAll('[aria-checked="true"]').length,
         themeSwitchRole: theme.getAttribute('role'),
         themeOptionRoles: [...theme.querySelectorAll('[data-theme-option]')].map(button => button.getAttribute('role')),

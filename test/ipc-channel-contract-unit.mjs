@@ -48,6 +48,7 @@ registerIpcHandlers({
   getBrowserState: () => ({ sessionId: '', pages: [] }),
   setBrowserSurfaceBounds: value => ({ ok: true, value }),
   setBrowserControl: value => ({ ok: true, value }),
+  selectBrowserSession: value => ({ ok: true, value }),
   selectBrowserTab: value => ({ ok: true, value }),
   closeBrowserTab: value => ({ ok: true, value }),
   stopActiveBrowserSession: () => ({ ok: true }),
@@ -128,6 +129,7 @@ function argsFor(channel) {
     case 'desktop:reload-dashboard': return ['#tasks'];
     case 'desktop:browser:set-bounds': return [{ visible: false }];
     case 'desktop:browser:set-control': return ['user'];
+    case 'desktop:browser:select-session': return ['embedded_browser_1234567890abcdef'];
     case 'desktop:browser:select-tab':
     case 'desktop:browser:close-tab': return ['embedded_page_1234567890abcdef'];
     case 'desktop:logout': return [{ clearData: false }];

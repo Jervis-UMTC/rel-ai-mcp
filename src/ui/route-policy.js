@@ -86,7 +86,7 @@ function sanitizeValue(key, value) {
   if (key === 'range') return ANALYTICS_RANGES.has(text.toLowerCase()) ? text.toLowerCase() : '';
   if (key === 'start' || key === 'end') return DATE_PATTERN.test(text) ? text : '';
   if (key === 'status') return STATUSES.has(text.toLowerCase()) ? text.toLowerCase() : '';
-  const limit = key === 'search' ? 200 : 160;
+  const limit = key === 'search' ? 200 : key === 'file' ? 1000 : 160;
   return text.slice(0, limit);
 }
 

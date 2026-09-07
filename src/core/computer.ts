@@ -1,12 +1,11 @@
 import { readConfig, writeConfig } from '../config.js';
-import { computerControlSettings, readComputerStatus } from '../computerManager.js';
+import { computerControlSettings } from '../computerManager.js';
 
 export async function getComputerControlState(): Promise<Record<string, unknown>> {
   const config = readConfig();
   return {
     ok: true,
-    settings: computerControlSettings(config),
-    status: await readComputerStatus(config)
+    settings: computerControlSettings(config)
   };
 }
 
@@ -17,7 +16,6 @@ export async function updateComputerControlEnabled(enabled: boolean): Promise<Re
   const config = writeConfig(next);
   return {
     ok: true,
-    settings: computerControlSettings(config),
-    status: await readComputerStatus(config)
+    settings: computerControlSettings(config)
   };
 }

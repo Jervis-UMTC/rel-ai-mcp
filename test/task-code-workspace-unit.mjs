@@ -11,6 +11,7 @@ const configPath = path.join(root, 'config.json');
 fs.mkdirSync(repo, { recursive: true });
 fs.writeFileSync(path.join(repo, 'alpha.txt'), 'alpha baseline\n');
 fs.writeFileSync(path.join(repo, 'beta.txt'), 'beta baseline\n');
+fs.writeFileSync(path.join(repo, 'café.txt'), 'café baseline\n');
 fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ type: 'module' }, null, 2));
 
 const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
@@ -33,6 +34,7 @@ process.env.REL_AI_MCP_CONFIG = configPath;
 
 const { flushAuditWrites } = await import('../src/audit.js');
 const { readConfig } = await import('../src/config.js');
+const { updateWorkspace } = await import('../src/configEditor.js');
 const { flushLocalAnalytics } = await import('../src/localAnalytics.js');
 const { repositoryIntelligence } = await import('../src/repository/intelligence/service.js');
 const { describeTaskCodeWorkspace, readTaskCodeDiff } = await import('../src/taskCodeWorkspace.js');
@@ -79,13 +81,48 @@ try {
     content: 'beta from agent\n'
   }, context);
   assert.equal(betaEdit.ok, true);
+  const unicodeEdit = await callTool('relai_edit', {
+    workspace: 'app',
+    work_id: taskId,
+    path: 'café.txt',
+    content: 'café from agent\n'
+  }, context);
+  assert.equal(unicodeEdit.ok, true);
 
   const live = await describeTaskCodeWorkspace(config, { taskId });
-  assert.deepEqual(new Set(live.changedFiles), new Set(['alpha.txt', 'beta.txt']));
+  assert.deepEqual(new Set(live.changedFiles), new Set(['alpha.txt', 'beta.txt', 'café.txt']));
   assert.equal(live.changedFileStatuses?.['alpha.txt']?.code, 'M');
   assert.equal(live.changedFiles.includes('ambient.txt'), false, 'unrelated dirty files must stay out of the task changes list');
   assert.equal(live.readOnly, true);
   assert.equal(live.writable, false);
+
+  const renamed = updateWorkspace(readConfig(), {
+    action: 'upsert',
+    mode: 'update',
+    originalAlias: 'app',
+    alias: 'renamed-app',
+    path: repo,
+    sourcePaths: [repo],
+    enforceUniquePath: true
+  });
+  assert.equal(renamed.ok, true);
+  const renamedConfig = readConfig();
+  const renamedLive = await describeTaskCodeWorkspace(renamedConfig, { taskId });
+  assert.equal(renamedLive.workspace, 'renamed-app', 'task changes must follow a renamed project through its recorded workspace path');
+  assert.deepEqual(new Set(renamedLive.changedFiles), new Set(['alpha.txt', 'beta.txt', 'café.txt']));
+  const renamedLiveDiff = await readTaskCodeDiff(renamedConfig, { taskId, path: 'alpha.txt' });
+  assert.equal(renamedLiveDiff.content.replaceAll('\r\n', '\n'), 'alpha from agent\n');
+
+  const restoredAlias = updateWorkspace(readConfig(), {
+    action: 'upsert',
+    mode: 'update',
+    originalAlias: 'renamed-app',
+    alias: 'app',
+    path: repo,
+    sourcePaths: [repo],
+    enforceUniquePath: true
+  });
+  assert.equal(restoredAlias.ok, true);
 
   const liveDiff = await readTaskCodeDiff(config, { taskId, path: 'alpha.txt' });
   assert.equal(liveDiff.baseContent.replaceAll('\r\n', '\n'), 'alpha baseline\n');
@@ -104,7 +141,7 @@ try {
   const integrity = readTaskIntegrity(config, taskId, 'app');
   assert.deepEqual(
     new Set(integrity.taskOwnedChangedFiles),
-    new Set(['alpha.txt', 'beta.txt']),
+    new Set(['alpha.txt', 'beta.txt', 'café.txt']),
     'agent changes must remain attributed to the active task'
   );
 
@@ -116,7 +153,7 @@ try {
   }, context);
   assert.equal(committed.ok, true);
   assert.match(committed.head || '', /^[a-f0-9]{40,64}$/i, 'task commits must return the exact commit identity');
-  assert.equal(git('status', '--porcelain=v1', '--', 'alpha.txt', 'beta.txt'), '', 'committed task files must be clean');
+  assert.equal(git('status', '--porcelain=v1', '--', 'alpha.txt', 'beta.txt', 'café.txt'), '', 'committed task files must be clean');
   assert.ok(git('status', '--porcelain=v1', '--', 'ambient.txt').startsWith('??'), 'ambient work must remain untouched');
 
   await flushAuditWrites();
@@ -126,7 +163,7 @@ try {
   assert.equal(committedView.historyMode, 'committed', 'a clean committed task must fall back to its historical diff');
   assert.equal(committedView.historyAvailable, true);
   assert.equal(committedView.commitHead, committed.head);
-  assert.deepEqual(new Set(committedView.changedFiles), new Set(['alpha.txt', 'beta.txt']));
+  assert.deepEqual(new Set(committedView.changedFiles), new Set(['alpha.txt', 'beta.txt', 'café.txt']), 'historical task changes must preserve non-ASCII filenames');
   assert.equal(committedView.changedFileStatuses?.['alpha.txt']?.code, 'M');
 
   const committedDiff = await readTaskCodeDiff(config, { taskId, path: 'alpha.txt' });
@@ -136,6 +173,10 @@ try {
   assert.equal(committedDiff.commitHead, committed.head);
   assert.equal(committedDiff.readOnly, true);
   assert.equal(committedDiff.writable, false);
+  const unicodeDiff = await readTaskCodeDiff(config, { taskId, path: 'café.txt' });
+  assert.equal(unicodeDiff.baseContent.replaceAll('\r\n', '\n'), 'café baseline\n');
+  assert.equal(unicodeDiff.content.replaceAll('\r\n', '\n'), 'café from agent\n');
+  assert.equal(unicodeDiff.historyMode, 'committed');
 
   const completed = await callTool('relai_validate', {
     action: 'checks',
@@ -154,7 +195,7 @@ try {
   assert.equal(completedView.historyMode, 'committed');
   assert.equal(completedView.readOnly, true);
   assert.equal(completedView.writable, false);
-  assert.deepEqual(new Set(completedView.changedFiles), new Set(['alpha.txt', 'beta.txt']), 'completed tasks must keep their committed file list reviewable');
+  assert.deepEqual(new Set(completedView.changedFiles), new Set(['alpha.txt', 'beta.txt', 'café.txt']), 'completed tasks must keep their committed file list reviewable');
   const completedDiff = await readTaskCodeDiff(config, { taskId, path: 'beta.txt' });
   assert.equal(completedDiff.baseContent.replaceAll('\r\n', '\n'), 'beta baseline\n');
   assert.equal(completedDiff.content.replaceAll('\r\n', '\n'), 'beta from agent\n');

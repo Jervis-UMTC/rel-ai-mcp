@@ -192,7 +192,7 @@ async function createDesktopHost(options = {}) {
       openFolder: payload => dashboardWindowManager.openFolder(payload.path),
       clearRuntimeLogs: () => runtimeLogs.clear(),
       desktopOperation: payload => desktopOsOperations.run(payload),
-      browserOperation: payload => browserSurfaceHost.run(payload)
+      browserOperation: (payload, operationOptions) => browserSurfaceHost.run(payload, operationOptions)
     },
     onLog: (message, logOptions) => publicConnectionLog(logOptions.source || 'local-service', message, logOptions),
     onExit: ({ code }) => {
@@ -340,6 +340,7 @@ async function createDesktopHost(options = {}) {
     getBrowserState: browserSurfaceHost.getState,
     setBrowserSurfaceBounds: browserSurfaceHost.setBounds,
     setBrowserControl: browserSurfaceHost.setControl,
+    selectBrowserSession: browserSurfaceHost.selectSession,
     selectBrowserTab: browserSurfaceHost.selectTab,
     closeBrowserTab: browserSurfaceHost.closeTab,
     stopActiveBrowserSession: browserSurfaceHost.stopActiveSession,

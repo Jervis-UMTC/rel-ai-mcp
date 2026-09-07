@@ -1,6 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as path from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { execa, type Options as ExecaOptions } from 'execa';
 import { resolveGitExecutable } from './gitExecutable.js';
 import { makeProcessEnvironment } from './processEnvironment.js';
 import { getStateDir } from './statePaths.js';
@@ -333,186 +334,114 @@ async function runProcess(command: string, args: readonly string[] = [], options
       throw error;
     }
   }
+
   try {
-    return await new Promise<RunProcessResult>((resolve) => {
-      const startedAt = Date.now();
-      const queueWaitMs = resourceLease?.waitMs || 0;
-      let stdoutBytes = 0;
-      let stderrBytes = 0;
-      let stdoutTruncated = false;
-      let stderrTruncated = false;
-      let settled = false;
-      let timer: NodeJS.Timeout | null = null;
-      let terminationRequest: TerminationRequest | null = null;
-      const configuredMaxOutputBytes = Number(options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES);
-      const maxOutputBytes = Number.isFinite(configuredMaxOutputBytes) && configuredMaxOutputBytes > 0
-        ? configuredMaxOutputBytes
-        : DEFAULT_MAX_OUTPUT_BYTES;
-      const stdoutSpill = createOutputSpillWriter(config, options.outputSpillTaskId) as OutputSpillWriter;
-      const stderrSpill = createOutputSpillWriter(config, options.outputSpillTaskId) as OutputSpillWriter;
-      const stdoutBuffer = new BoundedOutputBuffer(maxOutputBytes, stdoutSpill);
-      const stderrBuffer = new BoundedOutputBuffer(maxOutputBytes, stderrSpill);
-      const timeoutMs = Number.isFinite(Number(options.timeout)) && Number(options.timeout) > 0
-        ? Number(options.timeout)
-        : 0;
-      const terminationGraceMs = clampMilliseconds(
-        options.terminationGraceMs ?? config.processTerminationGraceMs,
-        0,
-        30000,
-        DEFAULT_TERMINATION_GRACE_MS
-      );
-      const forceWaitMs = clampMilliseconds(
-        options.forceWaitMs ?? config.processForceWaitMs,
-        0,
-        30000,
-        DEFAULT_FORCE_WAIT_MS
-      );
-      const isGit = command === 'git';
-      if (isGit && options.shell) throw new Error('Rel.AI-owned Git commands must run without shell parsing.');
-      const executable = isGit ? (resolveGitExecutable() || command) : command;
-      const childEnvironment = makeProcessEnvironment(options.env, {
-        allow: config.processEnvironment?.allow,
-        inheritCredentials: options.inheritCredentials === true
-      });
-      Object.assign(childEnvironment, traceContextEnvironment());
-      const processArgs = isGit ? hardenedGitArgs(config, args) : [...args];
-      const spawnOptions = {
-        cwd: options.cwd,
-        env: childEnvironment,
-        detached: process.platform !== 'win32',
-        windowsHide: true
-      };
-      const child: ChildProcess = options.shell
-        ? spawn(options.commandString || executable, { ...spawnOptions, shell: true })
-        : spawn(executable, processArgs, { ...spawnOptions, shell: false });
-      const abortSignal = options.signal;
-      let resolveChildClosed: (() => void) | null = null;
-      const childClosed = new Promise<void>(resolveClosed => { resolveChildClosed = resolveClosed; });
-
-      function finish(payload: Omit<RunProcessResult, 'durationMs' | 'queueWaitMs' | 'stdoutBytes' | 'stderrBytes' | 'stdoutTruncated' | 'stderrTruncated'>): void {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-        abortSignal?.removeEventListener?.('abort', onAbort);
-        const stdoutSpillResult = stdoutSpill.finish();
-        const stderrSpillResult = stderrSpill.finish();
-        resolve({
-          ...payload,
-          durationMs: Date.now() - startedAt,
-          queueWaitMs,
-          stdoutBytes,
-          stderrBytes,
-          stdoutTruncated,
-          stderrTruncated,
-          ...(stdoutSpillResult ? { stdoutOutputRef: stdoutSpillResult.outputRef, stdoutSpillTruncated: stdoutSpillResult.spillTruncated } : {}),
-          ...(stderrSpillResult ? { stderrOutputRef: stderrSpillResult.outputRef, stderrSpillTruncated: stderrSpillResult.spillTruncated } : {})
-        });
-      }
-
-      function finishTermination(code: number | null | undefined, signal: NodeJS.Signals | string | null | undefined, outcome: ProcessTreeTerminationResult = { exited: false, forced: false }): void {
-        const request = terminationRequest;
-        if (!request || settled) return;
-        finish({
-          exitCode: typeof code === 'number' ? code : -1,
-          signal: signal || (outcome.forced ? 'SIGKILL' : 'SIGTERM'),
-          stdout: processOutputText(stdoutBuffer, options.preserveOutputWhitespace),
-          stderr: processOutputText(stderrBuffer, options.preserveOutputWhitespace),
-          error: request.error,
-          cancelled: request.cancelled === true,
-          timedOut: request.timedOut === true,
-          terminationConfirmed: outcome.exited !== false,
-          forcedTermination: outcome.forced === true
-        });
-      }
-
-      function requestTermination(request: TerminationRequest): void {
-        if (settled || terminationRequest) return;
-        terminationRequest = request;
-        stderrBuffer.append(request.marker);
-        stderrTruncated = stderrBuffer.truncated;
-        void terminateProcessTree(child, { graceMs: terminationGraceMs, forceWaitMs })
-          .then(async outcome => {
-            if (outcome.exited) await childClosed;
-            finishTermination(child.exitCode, child.signalCode, outcome);
-          })
-          .catch(async error => {
-            const exited = !isProcessTreeAlive(child);
-            if (exited) await childClosed;
-            finishTermination(-1, undefined, {
-              exited,
-              forced: true,
-              error: errorMessage(error)
-            });
-          });
-      }
-
-      function onAbort(): void {
-        requestTermination({
-          marker: '\n[rel-ai-mcp operation cancelled]\n',
-          error: 'Operation cancelled.',
-          cancelled: true,
-          timedOut: false
-        });
-      }
-
-      if (child.stdin) {
-        if (options.input != null) child.stdin.end(String(options.input));
-        else child.stdin.end();
-      }
-
-      child.stdout?.on('data', (chunk: Buffer | string) => {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        stdoutBytes += buffer.length;
-        stdoutBuffer.append(buffer);
-        stdoutTruncated = stdoutBuffer.truncated;
-      });
-      child.stderr?.on('data', (chunk: Buffer | string) => {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        stderrBytes += buffer.length;
-        stderrBuffer.append(buffer);
-        stderrTruncated = stderrBuffer.truncated;
-      });
-      child.on('error', (error: Error) => {
-        resolveChildClosed?.();
-        if (settled) return;
-        if (terminationRequest) return;
-        finish({
-          exitCode: -1,
-          stdout: processOutputText(stdoutBuffer, options.preserveOutputWhitespace),
-          stderr: processOutputText(stderrBuffer, options.preserveOutputWhitespace),
-          error: error.message,
-          spawnError: true,
-          timedOut: false
-        });
-      });
-      child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
-        resolveChildClosed?.();
-        if (settled) return;
-        if (terminationRequest) return;
-        finish({
-          exitCode: typeof code === 'number' ? code : -1,
-          ...(signal ? { signal } : {}),
-          stdout: processOutputText(stdoutBuffer, options.preserveOutputWhitespace),
-          stderr: processOutputText(stderrBuffer, options.preserveOutputWhitespace),
-          timedOut: false
-        });
-      });
-
-      if (abortSignal?.aborted) onAbort();
-      else abortSignal?.addEventListener?.('abort', onAbort, { once: true });
-
-      if (timeoutMs > 0) {
-        timer = setTimeout(() => {
-          requestTermination({
-            marker: `\n[rel-ai-mcp timed out after ${timeoutMs}ms]\n`,
-            error: `Timed out after ${timeoutMs}ms`,
-            cancelled: false,
-            timedOut: true
-          });
-        }, timeoutMs);
-        timer.unref?.();
-      }
+    const queueWaitMs = resourceLease?.waitMs || 0;
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    const configuredMaxOutputBytes = Number(options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES);
+    const maxOutputBytes = Number.isFinite(configuredMaxOutputBytes) && configuredMaxOutputBytes > 0
+      ? configuredMaxOutputBytes
+      : DEFAULT_MAX_OUTPUT_BYTES;
+    const stdoutSpill = createOutputSpillWriter(config, options.outputSpillTaskId) as OutputSpillWriter;
+    const stderrSpill = createOutputSpillWriter(config, options.outputSpillTaskId) as OutputSpillWriter;
+    const stdoutBuffer = new BoundedOutputBuffer(maxOutputBytes, stdoutSpill);
+    const stderrBuffer = new BoundedOutputBuffer(maxOutputBytes, stderrSpill);
+    const timeoutMs = Number.isFinite(Number(options.timeout)) && Number(options.timeout) > 0
+      ? Number(options.timeout)
+      : 0;
+    const terminationGraceMs = clampMilliseconds(
+      options.terminationGraceMs ?? config.processTerminationGraceMs,
+      0,
+      30000,
+      DEFAULT_TERMINATION_GRACE_MS
+    );
+    const isGit = command === 'git';
+    if (isGit && options.shell) throw new Error('Rel.AI-owned Git commands must run without shell parsing.');
+    const executable = isGit ? (resolveGitExecutable() || command) : command;
+    const childEnvironment = makeProcessEnvironment(options.env, {
+      allow: config.processEnvironment?.allow,
+      inheritCredentials: options.inheritCredentials === true
     });
+    Object.assign(childEnvironment, traceContextEnvironment());
+    const processArgs = isGit ? hardenedGitArgs(config, args) : [...args];
+    const shell = options.shell === true;
+    const file = shell ? (options.commandString || executable) : executable;
+    const execaOptions: ExecaOptions = {
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      env: childEnvironment,
+      extendEnv: false,
+      shell,
+      windowsHide: true,
+      reject: false,
+      buffer: false,
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      stripFinalNewline: false,
+      timeout: timeoutMs,
+      ...(options.signal ? { cancelSignal: options.signal } : {}),
+      killDescendants: true,
+      forceKillAfterDelay: Math.max(1, terminationGraceMs),
+      ...(options.input != null ? { input: String(options.input) } : {})
+    };
+
+    const subprocess = execa(file, shell ? [] : processArgs, execaOptions);
+    subprocess.stdout?.on('data', (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      stdoutBytes += buffer.length;
+      stdoutBuffer.append(buffer);
+    });
+    subprocess.stderr?.on('data', (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      stderrBytes += buffer.length;
+      stderrBuffer.append(buffer);
+    });
+
+    const result = await subprocess;
+    if (result.timedOut) {
+      stderrBuffer.append(`\n[rel-ai-mcp timed out after ${timeoutMs}ms]\n`);
+    } else if (result.isCanceled) {
+      stderrBuffer.append('\n[rel-ai-mcp operation cancelled]\n');
+    }
+
+    const stdoutSpillResult = stdoutSpill.finish();
+    const stderrSpillResult = stderrSpill.finish();
+    const spawnError = result.failed
+      && result.exitCode == null
+      && !result.signal
+      && !result.timedOut
+      && !result.isCanceled;
+    const error = result.timedOut
+      ? `Timed out after ${timeoutMs}ms`
+      : result.isCanceled
+        ? 'Operation cancelled.'
+        : spawnError
+          ? String(result.originalMessage || result.shortMessage || result.message || 'Process failed to start.')
+          : undefined;
+
+    return {
+      exitCode: typeof result.exitCode === 'number' ? result.exitCode : -1,
+      ...(result.signal ? { signal: result.signal } : {}),
+      stdout: processOutputText(stdoutBuffer, options.preserveOutputWhitespace),
+      stderr: processOutputText(stderrBuffer, options.preserveOutputWhitespace),
+      ...(error ? { error } : {}),
+      ...(result.isCanceled ? { cancelled: true } : {}),
+      timedOut: result.timedOut === true,
+      ...(spawnError ? { spawnError: true } : {}),
+      ...((result.timedOut || result.isCanceled) ? {
+        terminationConfirmed: true,
+        forcedTermination: result.isForcefullyTerminated === true
+      } : {}),
+      queueWaitMs,
+      durationMs: Number(result.durationMs || 0),
+      stdoutBytes,
+      stderrBytes,
+      stdoutTruncated: stdoutBuffer.truncated,
+      stderrTruncated: stderrBuffer.truncated,
+      ...(stdoutSpillResult ? { stdoutOutputRef: stdoutSpillResult.outputRef, stdoutSpillTruncated: stdoutSpillResult.spillTruncated } : {}),
+      ...(stderrSpillResult ? { stderrOutputRef: stderrSpillResult.outputRef, stderrSpillTruncated: stderrSpillResult.spillTruncated } : {})
+    };
   } finally {
     resourceLease?.release();
   }

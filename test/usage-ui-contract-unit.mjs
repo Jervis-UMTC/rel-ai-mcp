@@ -21,6 +21,10 @@ const reactMain = read('src/ui/react/main.js');
 const usageRange = read('src/ui/features/usage/range-model.js');
 const usageData = read('src/ui/features/usage/data.js');
 const usageCss = read('src/ui/features/usage/styles.css');
+const charts = read('src/ui/components/charts.js');
+const homeReact = read('src/ui/features/home/react.js');
+const workspacesReact = read('src/ui/features/workspaces/react.js');
+const uiPackage = JSON.parse(read('src/ui/package.json'));
 const usageCombined = `${usageSource}\n${usageReact}\n${usageRender}\n${usageRange}\n${usageData}`;
 
 assert.match(navigationCatalog, /route\(['"]usage['"], ['"]Analytics['"]/);
@@ -55,8 +59,14 @@ assert.match(usageRender, /percentage points[\s\S]{0,80}90% to 95% is \+5 pp/i, 
 assert.match(usageCss, /\.usage-metric-help\.is-open \.usage-metric-tooltip/, 'Analytics metric tooltips must have an explicit visible state');
 assert.match(usageReact, /'aria-expanded': open \? 'true' : 'false'/, 'Analytics metric help must expose its expanded state to assistive technology');
 assert.match(usageReact, /onClick: \(\) => setOpen\(value => !value\)/, 'Analytics metric help must support explicit touch and click toggling');
-assert.match(usageReact, /event\.key === 'ArrowLeft'/, 'Analytics timeline must support keyboard period navigation');
-assert.match(usageReact, /event\.key === 'ArrowRight'/, 'Analytics timeline must support keyboard period navigation');
+assert.match(charts, /event\.key === 'ArrowLeft'/, 'Analytics timeline must support keyboard period navigation');
+assert.match(charts, /event\.key === 'ArrowRight'/, 'Analytics timeline must support keyboard period navigation');
+assert.match(charts, /react-chartjs-2/, 'Analytics charts must use the canonical React Chart.js wrapper');
+assert.match(charts, /chart\.js/, 'Analytics charts must use Chart.js instead of first-party SVG geometry');
+assert.ok(uiPackage.dependencies['chart.js'], 'Chart.js must be owned by the UI workspace');
+assert.ok(uiPackage.dependencies['react-chartjs-2'], 'The React Chart.js wrapper must be owned by the UI workspace');
+assert.doesNotMatch(`${usageReact}\n${homeReact}\n${workspacesReact}`, /h\(['"]svg['"]/, 'Analytics feature renderers must not retain first-party SVG chart markup');
+assert.doesNotMatch(usageRender, /coordinates|polyline|area:\s*`/, 'Analytics view models must not retain first-party chart geometry');
 assert.match(usageReact, /'aria-valuetext': valueText/, 'Analytics breakdown progress must expose readable values');
 assert.match(usageCss, /\.usage-privacy-body/, 'Analytics privacy disclosure must use a stable responsive layout');
 
@@ -86,11 +96,12 @@ assert.match(timeline.summary, /Overall trend increasing/);
 assert.equal(timeline.max, 3);
 assert.equal(timeline.peakIndex, 1);
 assert.equal(timeline.latestIndex, 2);
-assert.deepEqual(timeline.coordinates.map(point => point.value), [1, 3, 2]);
-assert.equal(timeline.coordinates[0].x, 0);
-assert.equal(timeline.coordinates.at(-1).x, timeline.width);
+assert.deepEqual(timeline.data, [1, 3, 2]);
+assert.equal('coordinates' in timeline, false);
+assert.equal('points' in timeline, false);
+assert.equal('area' in timeline, false);
 
-for (const label of ['Actions', 'Reliable actions', 'System errors', 'Retryable problems', 'Successful actions', 'Average time']) {
+for (const label of ['Actions', 'Reliable actions', 'Internal errors', 'Retryable problems', 'Successful actions', 'Average time']) {
   assert.match(usageCombined, new RegExp(label), `Usage must render ${label}.`);
 }
 for (const field of ['requests', 'toolCalls', 'successes', 'failures', 'requestBytes', 'resultBytes', 'executionMs', 'activeDays']) {
@@ -101,8 +112,8 @@ assert.match(usageReact, /Retry/);
 assert.match(usageReact, /Refresh/);
 assert.match(usageRender, /operationSuccessRate/);
 assert.match(usageRender, /recoverableFailures/);
-assert.match(usageCombined, /What went wrong/);
-assert.match(usageCombined, /Detailed error messages are not stored/);
+assert.match(usageCombined, /Problems by type/);
+assert.match(usageCombined, /Recent details are available in Troubleshooting/);
 assert.doesNotMatch(usageRender, /Trend starts now|Completed outcomes|Workspace position|usage-fact-strip|<h3>Outcomes<\/h3>/);
 
 const snapshot = buildUsageModel({
@@ -137,6 +148,22 @@ const ranged = analyticsRangeScope([buildUsageModel({
 assert.equal(ranged.toolCalls, 2);
 assert.equal(ranged.averageDuration, 50);
 assert.deepEqual(ranged.failureCategories, [{ category: 'policy', failures: 1 }]);
+
+const rollingHourBounds = analyticsBounds('1h', { now: new Date('2026-08-08T10:45:00.000Z') });
+const rollingHour = analyticsRangeScope([buildUsageModel({
+  ok: true,
+  source: 'local',
+  month: '2026-08',
+  totals: { requests: 2, toolCalls: 2, successes: 2, failures: 0, requestBytes: 0, resultBytes: 0, executionMs: 20, activeDays: 1 },
+  tools: [], devices: [], workspaces: [],
+  series: [
+    { hour: '2026-08-08T08', requests: 1, toolCalls: 1, successes: 1, failures: 0, requestBytes: 0, resultBytes: 0, executionMs: 10 },
+    { hour: '2026-08-08T09', requests: 1, toolCalls: 1, successes: 1, failures: 0, requestBytes: 0, resultBytes: 0, executionMs: 10 }
+  ],
+  toolSeries: [], workspaceSeries: [], workspaceToolSeries: []
+}, '2026-08')], rollingHourBounds);
+assert.equal(rollingHour.toolCalls, 1, 'rolling ranges must include an hourly bucket that overlaps the cutoff');
+assert.equal(rollingHour.points.reduce((sum, point) => sum + point.toolCalls, 0), 1, 'timeline totals must match rolling-range totals at a partial-hour cutoff');
 
 const loaded = await loadAnalyticsData({
   desktop: { getLocalUsage: async () => ({

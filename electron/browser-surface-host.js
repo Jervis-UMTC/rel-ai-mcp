@@ -3,8 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-const MAX_SNAPSHOT_CHARS = 200_000;
-const MAX_SCREENSHOT_BYTES = 12 * 1024 * 1024;
+const MAX_SNAPSHOT_CHARS = 64 * 1024;
+const MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 const DOWNLOAD_TEMP_ROOT = path.resolve(os.tmpdir(), 'relai-browser-downloads');
 const CONTROL_OWNERS = new Set(['ai', 'user']);
 const READ_ONLY_ACTIONS = new Set(['describe', 'snapshot', 'screenshot']);
@@ -34,28 +34,32 @@ function createBrowserSurfaceHost(options = {}) {
   let attached = null;
   let closingAll = false;
 
-  async function run(payload = {}) {
+  async function run(payload = {}, options = {}) {
+    throwIfAborted(options.signal);
     const action = String(payload.action || '').trim();
     switch (action) {
-      case 'start': return startSession(payload);
-      case 'open_page': return openPage(payload);
-      case 'describe': return withPage(payload, action, describePage);
-      case 'navigate': return withPage(payload, action, navigatePage);
-      case 'snapshot': return withPage(payload, action, snapshotPage);
-      case 'interact': return withPage(payload, action, interactPage);
-      case 'screenshot': return withPage(payload, action, screenshotPage);
-      case 'upload': return withPage(payload, action, uploadFile);
-      case 'begin_download': return withPage(payload, action, beginDownload);
+      case 'start': return startSession(payload, options);
+      case 'open_page': return openPage(payload, options);
+      case 'describe': return withPage(payload, action, describePage, options);
+      case 'navigate': return withPage(payload, action, navigatePage, options);
+      case 'snapshot': return withPage(payload, action, snapshotPage, options);
+      case 'interact': return withPage(payload, action, interactPage, options);
+      case 'screenshot': return withPage(payload, action, screenshotPage, options);
+      case 'upload': return withPage(payload, action, uploadFile, options);
+      case 'begin_download': return withPage(payload, action, beginDownload, options);
       case 'close_page': return closePage(payload);
       case 'close_session': return closeSession(payload.nativeSessionId, { emit: false });
       default: throw new Error(`Unsupported embedded browser action '${action || '(missing)'}.`);
     }
   }
 
-  async function startSession(payload = {}) {
+  async function startSession(payload = {}, options = {}) {
+    throwIfAborted(options.signal);
     const nativeSessionId = `embedded_browser_${crypto.randomBytes(18).toString('base64url')}`;
     const profileDirectory = String(payload.profileDirectory || '').trim();
     const persistent = Boolean(profileDirectory);
+    const headless = payload.headless === true;
+    const viewport = normalizeViewport(payload.viewport);
     const browserSession = persistent
       ? session.fromPath(path.resolve(profileDirectory))
       : session.fromPartition(`relai-browser:${nativeSessionId}`);
@@ -64,6 +68,8 @@ function createBrowserSurfaceHost(options = {}) {
       nativeSessionId,
       electronSession: browserSession,
       persistent,
+      headless,
+      viewport,
       pages: new Map(),
       activePageId: '',
       control: 'ai',
@@ -77,20 +83,23 @@ function createBrowserSurfaceHost(options = {}) {
     activeSessionId = nativeSessionId;
     publishState();
     try {
-      await openDashboard('#browser');
+      if (!headless) await withAbort(openDashboard('#browser'), options.signal);
       return {
         ok: true,
         nativeSessionId,
         browserProduct: 'Rel.AI Embedded Chromium',
-        profile: persistent ? 'persistent' : 'ephemeral'
-      };
+        profile: persistent ? 'persistent' : 'ephemeral',
+        headless,
+        viewport
+      }; 
     } catch (error) {
       await closeSession(nativeSessionId, { emit: false });
       throw error;
     }
   }
 
-  async function openPage(payload = {}) {
+  async function openPage(payload = {}, options = {}) {
+    throwIfAborted(options.signal);
     const record = requireSession(payload.nativeSessionId);
     assertAiControl(record, 'open_page');
     const nativePageId = `embedded_page_${crypto.randomBytes(18).toString('base64url')}`;
@@ -107,10 +116,13 @@ function createBrowserSurfaceHost(options = {}) {
         backgroundThrottling: false
       }
     });
+    const initialBounds = { x: 0, y: 0, width: record.viewport.width, height: record.viewport.height };
+    view.setBounds(initialBounds);
     const page = {
       nativePageId,
       view,
       webContents: view.webContents,
+      bounds: initialBounds,
       closing: false,
       loading: false,
       aiInputDepth: 0,
@@ -125,12 +137,13 @@ function createBrowserSurfaceHost(options = {}) {
     return { ok: true, nativeSessionId: record.nativeSessionId, nativePageId, ...describePage(record, page) };
   }
 
-  async function withPage(payload, action, operation) {
+  async function withPage(payload, action, operation, options = {}) {
+    throwIfAborted(options.signal);
     const record = requireSession(payload.nativeSessionId);
     const page = requirePage(record, payload.nativePageId);
     if (!READ_ONLY_ACTIONS.has(action)) assertAiControl(record, action);
     if (action !== 'describe') activate(record, page);
-    return operation(record, page, payload);
+    return operation(record, page, payload, options);
   }
 
   function describePage(_record, page) {
@@ -141,11 +154,15 @@ function createBrowserSurfaceHost(options = {}) {
     };
   }
 
-  async function navigatePage(record, page, payload) {
+  async function navigatePage(record, page, payload, options = {}) {
     assertAiControl(record, 'navigate');
     const url = normalizeBrowserUrl(payload.url);
     try {
-      await withTimeout(page.webContents.loadURL(url), timeoutFor(payload.timeoutMs), 'Browser navigation timed out.');
+      await withTimeout(
+        withAbort(page.webContents.loadURL(url), options.signal, () => page.webContents.stop?.()),
+        timeoutFor(payload.timeoutMs),
+        'Browser navigation timed out.'
+      );
     } catch (error) {
       page.webContents.stop?.();
       throw error;
@@ -154,10 +171,10 @@ function createBrowserSurfaceHost(options = {}) {
     return { ...describePage(record, page), statusCode: null };
   }
 
-  async function snapshotPage(_record, page, payload) {
+  async function snapshotPage(_record, page, payload, options = {}) {
     const debuggerApi = await attachedDebugger(page.webContents);
     const response = await withTimeout(
-      debuggerApi.sendCommand('Accessibility.getFullAXTree'),
+      withAbort(debuggerApi.sendCommand('Accessibility.getFullAXTree'), options.signal),
       timeoutFor(payload.timeoutMs),
       'Browser accessibility snapshot timed out.'
     );
@@ -166,18 +183,23 @@ function createBrowserSurfaceHost(options = {}) {
     return { ...describePage(null, page), snapshot: bounded.text, truncated: bounded.truncated };
   }
 
-  async function interactPage(record, page, payload) {
+  async function interactPage(record, page, payload, options = {}) {
     assertAiControl(record, 'interact');
     const interaction = String(payload.interaction || '').trim();
     const timeoutMs = timeoutFor(payload.timeoutMs);
     if (interaction === 'wait') {
-      await waitForTarget(page.webContents, payload.target, payload.state, timeoutMs);
+      await waitForTarget(page.webContents, payload.target, payload.state, timeoutMs, options.signal);
     } else if (interaction === 'press') {
-      await focusTarget(page.webContents, payload.target);
       const key = String(payload.key || '').trim();
       if (!key) throw new Error('browser interact press requires key.');
+      await waitForTarget(page.webContents, payload.target, 'visible', timeoutMs, options.signal);
+      await focusTarget(page.webContents, payload.target);
+      throwIfAborted(options.signal);
       await withAiInput(page, async () => sendKey(page.webContents, key));
     } else {
+      if (interaction === 'select' && payload.selectValue == null) throw new Error('browser interact select requires selectValue.');
+      await waitForTarget(page.webContents, payload.target, 'visible', timeoutMs, options.signal);
+      throwIfAborted(options.signal);
       await runDomInteraction(page.webContents, interaction, payload);
     }
     publishState();
@@ -188,32 +210,33 @@ function createBrowserSurfaceHost(options = {}) {
     };
   }
 
-  async function screenshotPage(_record, page, payload) {
+  async function screenshotPage(_record, page, payload, options = {}) {
+    throwIfAborted(options.signal);
     let data;
     let width;
     let height;
     if (payload.fullPage === true) {
       const debuggerApi = await attachedDebugger(page.webContents);
-      const metrics = await debuggerApi.sendCommand('Page.getLayoutMetrics');
+      const metrics = await withAbort(debuggerApi.sendCommand('Page.getLayoutMetrics'), options.signal);
       const size = metrics?.cssContentSize || metrics?.contentSize || {};
-      const shot = await debuggerApi.sendCommand('Page.captureScreenshot', {
+      const shot = await withAbort(debuggerApi.sendCommand('Page.captureScreenshot', {
         format: 'png',
         fromSurface: true,
         captureBeyondViewport: true
-      });
+      }), options.signal);
       data = String(shot?.data || '');
-      width = Math.max(1, Math.ceil(Number(size.width || surfaceBounds.width || 1)));
-      height = Math.max(1, Math.ceil(Number(size.height || surfaceBounds.height || 1)));
+      width = Math.max(1, Math.ceil(Number(size.width || page.bounds.width || 1)));
+      height = Math.max(1, Math.ceil(Number(size.height || page.bounds.height || 1)));
     } else {
       const debuggerApi = await attachedDebugger(page.webContents);
-      const shot = await debuggerApi.sendCommand('Page.captureScreenshot', {
+      const shot = await withAbort(debuggerApi.sendCommand('Page.captureScreenshot', {
         format: 'png',
         fromSurface: true,
         captureBeyondViewport: false
-      });
+      }), options.signal);
       data = String(shot?.data || '');
-      width = Math.max(1, surfaceBounds.width);
-      height = Math.max(1, surfaceBounds.height);
+      width = Math.max(1, page.bounds.width);
+      height = Math.max(1, page.bounds.height);
     }
     const bytes = Buffer.byteLength(data, 'base64');
     if (bytes > MAX_SCREENSHOT_BYTES) {
@@ -221,18 +244,19 @@ function createBrowserSurfaceHost(options = {}) {
     }
     return {
       ...describePage(null, page),
-      viewport: { width: Math.max(1, surfaceBounds.width), height: Math.max(1, surfaceBounds.height) },
+      viewport: { width: Math.max(1, page.bounds.width), height: Math.max(1, page.bounds.height) },
       image: { mimeType: 'image/png', data, bytes, width, height, fullPage: payload.fullPage === true }
     };
   }
 
-  async function uploadFile(record, page, payload) {
+  async function uploadFile(record, page, payload, options = {}) {
     assertAiControl(record, 'upload');
     const filePath = path.resolve(String(payload.filePath || ''));
     let file;
     try { file = fs.statSync(filePath); } catch { file = null; }
     if (!file?.isFile()) throw new Error('Browser upload file is unavailable.');
     const marker = `relai-upload-${crypto.randomBytes(10).toString('hex')}`;
+    await waitForTarget(page.webContents, payload.target, 'attached', timeoutFor(payload.timeoutMs), options.signal);
     await markTarget(page.webContents, payload.target, marker);
     const debuggerApi = await attachedDebugger(page.webContents);
     try {
@@ -250,15 +274,17 @@ function createBrowserSurfaceHost(options = {}) {
     return { ...describePage(record, page), interaction: 'upload', target: publicTarget(payload.target) };
   }
 
-  async function beginDownload(record, page, payload) {
+  async function beginDownload(record, page, payload, options = {}) {
     assertAiControl(record, 'download');
     await fs.promises.mkdir(DOWNLOAD_TEMP_ROOT, { recursive: true, mode: 0o700 });
     const pending = createPendingDownload(record, page, timeoutFor(payload.timeoutMs));
+    void pending.promise.catch(() => {});
     try {
-      await interactPage(record, page, payload);
-      return await pending.promise;
+      await interactPage(record, page, payload, options);
+      return await withAbort(pending.promise, options.signal, () => pending.cancel(cancelledError()));
     } catch (error) {
       pending.cancel(error);
+      await pending.promise.catch(() => {});
       throw error;
     }
   }
@@ -354,6 +380,19 @@ function createBrowserSurfaceHost(options = {}) {
   function getState() {
     const record = visibleRecord();
     const page = record ? activePage(record) : null;
+    const sessionSummaries = [...sessions.values()].map(candidate => {
+      const candidatePage = activePage(candidate);
+      return {
+        nativeSessionId: candidate.nativeSessionId,
+        active: candidate.nativeSessionId === record?.nativeSessionId,
+        control: candidate.control,
+        headless: candidate.headless === true,
+        pageCount: candidate.pages.size,
+        url: candidatePage ? publicPageUrl(candidatePage.webContents.getURL()) : '',
+        title: candidatePage ? String(candidatePage.webContents.getTitle?.() || '') : '',
+        createdAt: candidate.createdAt
+      };
+    });
     const tabs = record ? [...record.pages.values()].map(candidate => ({
       nativePageId: candidate.nativePageId,
       active: candidate.nativePageId === record.activePageId,
@@ -367,7 +406,9 @@ function createBrowserSurfaceHost(options = {}) {
       available: true,
       active: Boolean(record),
       activeSessionCount: sessions.size,
+      sessions: sessionSummaries,
       control: record?.control || 'ai',
+      headless: record?.headless === true,
       nativeSessionId: record?.nativeSessionId || '',
       nativePageId: page?.nativePageId || '',
       pageCount: tabs.length,
@@ -377,6 +418,17 @@ function createBrowserSurfaceHost(options = {}) {
       loading: page?.loading === true,
       visible: surfaceBounds.visible === true && Boolean(attached)
     };
+  }
+
+  function selectSession(value) {
+    if (pinnedSessionId && pinnedSessionId !== String(value || '')) {
+      throw browserError('BROWSER_USER_CONTROL_ACTIVE', 'Return control to AI before switching browser sessions.');
+    }
+    const record = requireSession(value);
+    activeSessionId = record.nativeSessionId;
+    attachActiveView();
+    publishState();
+    return getState();
   }
 
   function selectTab(value) {
@@ -443,13 +495,12 @@ function createBrowserSurfaceHost(options = {}) {
 
   function handleWillDownload(record, event, item, webContents) {
     const queue = record.pendingDownloads.get(webContents?.id);
-    const pending = queue?.shift();
-    if (queue && queue.length === 0) record.pendingDownloads.delete(webContents.id);
+    const pending = queue?.find(entry => entry.started !== true);
     if (!pending) {
       event.preventDefault();
       return;
     }
-    clearTimeout(pending.timer);
+    pending.started = true;
     const suggestedFilename = String(item.getFilename?.() || 'download');
     const tempPath = path.join(DOWNLOAD_TEMP_ROOT, `${Date.now()}-${crypto.randomBytes(12).toString('hex')}.download`);
     item.setSavePath(tempPath);
@@ -484,6 +535,7 @@ function createBrowserSurfaceHost(options = {}) {
         bindCancel: fn => { entry.cancelItem = fn; },
         cancelItem: () => {},
         timer: null,
+        started: false,
         cancel: error => {
           if (entry.settled) return;
           entry.settled = true;
@@ -508,7 +560,7 @@ function createBrowserSurfaceHost(options = {}) {
         removePending(record, page, entry);
         reject(error);
       };
-      entry.timer = setTimeout(() => entry.cancel(browserError('BROWSER_DOWNLOAD_TIMEOUT', 'Browser download did not start before the timeout.')), timeoutMs);
+      entry.timer = setTimeout(() => entry.cancel(browserError('BROWSER_DOWNLOAD_TIMEOUT', 'Browser download did not complete before the timeout.')), timeoutMs);
       entry.timer.unref?.();
       const queue = record.pendingDownloads.get(page.webContents.id) || [];
       queue.push(entry);
@@ -557,16 +609,18 @@ function createBrowserSurfaceHost(options = {}) {
     const record = visibleRecord();
     const page = record ? activePage(record) : null;
     const win = getDashboardWindow();
-    if (!surfaceBounds.visible || !page || !win || win.isDestroyed?.()) {
+    if (!surfaceBounds.visible || record?.headless === true || !page || !win || win.isDestroyed?.()) {
       detachAttached();
       return;
     }
     if (attached?.page === page && attached.window === win) {
-      page.view.setBounds(publicBounds(surfaceBounds));
+      page.bounds = publicBounds(surfaceBounds);
+      page.view.setBounds(page.bounds);
       return;
     }
     detachAttached();
-    page.view.setBounds(publicBounds(surfaceBounds));
+    page.bounds = publicBounds(surfaceBounds);
+    page.view.setBounds(page.bounds);
     win.contentView.addChildView(page.view);
     attached = { page, window: win };
     if (record.control === 'user') page.webContents.focus?.();
@@ -621,7 +675,7 @@ function createBrowserSurfaceHost(options = {}) {
     throw browserError('BROWSER_USER_CONTROL_ACTIVE', `The user currently controls this browser session. Return control to AI before ${action.replaceAll('_', ' ')}.`);
   }
 
-  return Object.freeze({ run, getState, setBounds, setControl, selectTab, closeTab, stopActiveSession, closeAll });
+  return Object.freeze({ run, getState, setBounds, setControl, selectSession, selectTab, closeTab, stopActiveSession, closeAll });
 }
 
 async function runDomInteraction(webContents, interaction, payload) {
@@ -656,17 +710,18 @@ async function focusTarget(webContents, target) {
   return webContents.executeJavaScript(`(() => { const el = (${targetResolverSource()})(${encoded}); if (!el) throw new Error('Browser interaction target was not found.'); el.focus(); return true; })()`, true);
 }
 
-async function waitForTarget(webContents, target, stateValue, timeoutMs) {
+async function waitForTarget(webContents, target, stateValue, timeoutMs, signal) {
   const state = ['visible', 'hidden', 'attached', 'detached'].includes(String(stateValue || '')) ? String(stateValue) : 'visible';
   const encoded = JSON.stringify(normalizeTarget(target));
   const deadline = Date.now() + timeoutMs;
   while (true) {
-    const result = await webContents.executeJavaScript(`(() => {
+    throwIfAborted(signal);
+    const result = await withAbort(webContents.executeJavaScript(`(() => {
       const el = (${targetResolverSource()})(${encoded});
       if (!el) return { attached: false, visible: false };
       const style = getComputedStyle(el); const rect = el.getBoundingClientRect();
       return { attached: el.isConnected, visible: style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) !== 0 && rect.width > 0 && rect.height > 0 };
-    })()`, true);
+    })()`, true), signal);
     if (
       (state === 'visible' && result.visible) ||
       (state === 'hidden' && !result.visible) ||
@@ -674,7 +729,7 @@ async function waitForTarget(webContents, target, stateValue, timeoutMs) {
       (state === 'detached' && !result.attached)
     ) return;
     if (Date.now() >= deadline) throw new Error(`Browser wait timed out waiting for target to become ${state}.`);
-    await delay(50);
+    await delay(50, signal);
   }
 }
 
@@ -696,15 +751,36 @@ function targetResolverSource() {
     const exact = target.exact === true;
     const wanted = normalize(target.value);
     const matches = actual => exact ? normalize(actual) === wanted : normalize(actual).toLowerCase().includes(wanted.toLowerCase());
-    const nameOf = el => normalize(el.getAttribute('aria-label') || el.alt || el.title || el.textContent || el.value || '');
+    const referencedText = ids => normalize(String(ids || '').split(/\\s+/).map(id => document.getElementById(id)?.textContent || '').join(' '));
+    const labelText = el => normalize(el.labels ? [...el.labels].map(label => label.textContent || '').join(' ') : '');
+    const nameOf = el => normalize(
+      referencedText(el.getAttribute('aria-labelledby')) ||
+      el.getAttribute('aria-label') ||
+      labelText(el) ||
+      el.alt ||
+      el.title ||
+      el.textContent ||
+      el.value ||
+      ''
+    );
     const roleOf = el => {
-      const explicit = el.getAttribute('role'); if (explicit) return explicit;
+      const explicit = normalize(el.getAttribute('role')).toLowerCase(); if (explicit) return explicit;
       const tag = el.tagName.toLowerCase();
       if (tag === 'button') return 'button';
       if (tag === 'a' && el.hasAttribute('href')) return 'link';
-      if (tag === 'select') return 'combobox';
+      if (tag === 'select') return el.multiple || el.size > 1 ? 'listbox' : 'combobox';
       if (tag === 'textarea') return 'textbox';
-      if (tag === 'input') { const type = (el.type || 'text').toLowerCase(); if (type === 'checkbox') return 'checkbox'; if (type === 'radio') return 'radio'; if (type === 'button' || type === 'submit' || type === 'reset') return 'button'; return 'textbox'; }
+      if (tag === 'img') return 'img';
+      if (tag === 'option') return 'option';
+      if (tag === 'input') {
+        const type = (el.type || 'text').toLowerCase();
+        if (type === 'checkbox') return 'checkbox';
+        if (type === 'radio') return 'radio';
+        if (type === 'button' || type === 'submit' || type === 'reset') return 'button';
+        if (type === 'range') return 'slider';
+        if (type === 'number') return 'spinbutton';
+        return 'textbox';
+      }
       if (/^h[1-6]$/.test(tag)) return 'heading';
       return '';
     };
@@ -712,8 +788,12 @@ function targetResolverSource() {
     if (target.by === 'css') nodes = [...document.querySelectorAll(target.value)];
     else if (target.by === 'testid') nodes = [...document.querySelectorAll('[data-testid]')].filter(el => el.getAttribute('data-testid') === target.value);
     else if (target.by === 'placeholder') nodes = [...document.querySelectorAll('[placeholder]')].filter(el => matches(el.getAttribute('placeholder')));
-    else if (target.by === 'label') nodes = [...document.querySelectorAll('label')].filter(label => matches(label.textContent)).map(label => label.control || (label.htmlFor ? document.getElementById(label.htmlFor) : label.querySelector('input,textarea,select,button'))).filter(Boolean);
-    else if (target.by === 'role') nodes = [...document.querySelectorAll('*')].filter(el => roleOf(el) === target.value && (!target.name || matches(nameOf(el))));
+    else if (target.by === 'label') nodes = [...document.querySelectorAll('input,textarea,select,button,meter,output,progress')].filter(el => matches(nameOf(el)));
+    else if (target.by === 'role') {
+      const role = normalize(target.value).toLowerCase();
+      const name = target.name == null ? '' : normalize(target.name);
+      nodes = [...document.querySelectorAll('*')].filter(el => roleOf(el) === role && (!name || (exact ? nameOf(el) === name : nameOf(el).toLowerCase().includes(name.toLowerCase()))));
+    }
     else if (target.by === 'text') nodes = [...document.querySelectorAll('body *')].filter(el => matches(el.textContent) && ![...el.children].some(child => matches(child.textContent)));
     else throw new Error('Unsupported target.by: ' + target.by);
     return nodes[Math.max(0, Number.isInteger(Number(target.index)) ? Number(target.index) : 0)] || null;
@@ -727,9 +807,22 @@ async function attachedDebugger(webContents) {
 }
 
 async function sendKey(webContents, key) {
-  const base = { keyCode: key };
+  const parts = String(key || '').split('+').map(part => part.trim()).filter(Boolean);
+  if (!parts.length) throw new Error('Browser key is required.');
+  const rawKey = parts.pop();
+  const modifiers = [];
+  for (const part of parts) {
+    const normalized = part.toLowerCase();
+    if (normalized === 'control' || normalized === 'ctrl') modifiers.push('control');
+    else if (normalized === 'alt') modifiers.push('alt');
+    else if (normalized === 'shift') modifiers.push('shift');
+    else if (normalized === 'meta' || normalized === 'command' || normalized === 'cmd') modifiers.push('meta');
+    else if (normalized === 'controlormeta') modifiers.push(process.platform === 'darwin' ? 'meta' : 'control');
+    else throw new Error(`Unsupported browser key modifier: ${part}.`);
+  }
+  const base = { keyCode: rawKey, ...(modifiers.length ? { modifiers } : {}) };
   webContents.sendInputEvent({ type: 'keyDown', ...base });
-  if (key.length === 1) webContents.sendInputEvent({ type: 'char', ...base });
+  if (rawKey.length === 1 && modifiers.length === 0) webContents.sendInputEvent({ type: 'char', ...base });
   webContents.sendInputEvent({ type: 'keyUp', ...base });
 }
 
@@ -812,7 +905,15 @@ function assertPageId(value) {
 
 function timeoutFor(value) {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(100, Math.min(30_000, Math.floor(parsed))) : 15_000;
+  return Number.isFinite(parsed) ? Math.max(100, Math.min(30_000, Math.floor(parsed))) : 10_000;
+}
+
+function normalizeViewport(value) {
+  const viewport = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    width: boundedInteger(viewport.width, 320, 3840, 1440),
+    height: boundedInteger(viewport.height, 240, 2160, 900)
+  };
 }
 
 function boundedInteger(value, min, max, fallback) {
@@ -846,8 +947,51 @@ function withTimeout(promise, timeoutMs, message) {
   });
 }
 
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function withAbort(promise, signal, onAbort = () => {}) {
+  if (!signal) return Promise.resolve(promise);
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener('abort', abort);
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      try { onAbort(); } catch {}
+      reject(cancelledError(signal.reason));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    Promise.resolve(promise).then(
+      value => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      error => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      }
+    );
+  });
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw cancelledError(signal.reason);
+}
+
+function cancelledError(reason) {
+  return browserError('BROWSER_OPERATION_CANCELLED', reason instanceof Error ? reason.message : String(reason || 'Browser operation cancelled.'));
+}
+
+function delay(ms, signal) {
+  if (!signal) return new Promise(resolve => setTimeout(resolve, ms));
+  return withAbort(new Promise(resolve => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  }), signal);
 }
 
 export { DOWNLOAD_TEMP_ROOT, createBrowserSurfaceHost };

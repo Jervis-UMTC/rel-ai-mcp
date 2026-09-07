@@ -21,6 +21,9 @@ app.whenReady().then(async () => {
   const targetUrl = `http://127.0.0.1:${address.port}/fixture`;
   const win = new BrowserWindow({
     show: false,
+    opacity: 0,
+    focusable: false,
+    skipTaskbar: true,
     width: 900,
     height: 700,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
@@ -35,8 +38,7 @@ app.whenReady().then(async () => {
     getDashboardWindow: () => win,
     openDashboard: async route => {
       if (route !== '#browser') throw new Error(`Unexpected dashboard route ${route}.`);
-      win.show();
-      win.focus();
+      win.showInactive();
     },
     onEvent: event => events.push(event),
     onStateChange: state => states.push(state)
@@ -111,6 +113,9 @@ app.whenReady().then(async () => {
       takeoverError,
       aiState,
       finalState,
+      windowVisible: win.isVisible(),
+      windowOpacity: win.getOpacity(),
+      windowFocused: win.isFocused(),
       stateCount: states.length,
       events
     }, null, 2));

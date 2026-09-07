@@ -25,7 +25,7 @@ for (const hostOwned of [
   'public-web/current-news research',
   'image generation',
   'ordinary writing',
-  'files already uploaded to the host',
+  'uploaded host files',
   'Gmail',
   'Calendar'
 ]) {
@@ -37,10 +37,10 @@ for (const localOwned of [
   'Git state',
   'CLI/processes',
   'localhost/LAN/intranet',
-  'native applications',
-  'machine-local browser sessions',
-  'local uploads/downloads',
-  'opening/revealing files'
+  'native apps',
+  'browser sessions',
+  'uploads/downloads',
+  'open/reveal'
 ]) {
   assert.match(STATIC_CONTEXT, new RegExp(escapeRegExp(localOwned), 'i'), `${localOwned} must remain inside the Rel.AI local boundary`);
 }
@@ -83,11 +83,11 @@ assert.match(computer, /not a substitute for host-native reasoning, public web s
 const decisions = [
   ['Research today\'s AI news', /public-web\/current-news research/i, /Do not use.*public/i],
   ['Check Gmail', /Gmail.*remain host-owned/i, null],
-  ['Run tests in C:\\repo', /local CLI\/processes/i, null],
-  ['Read D:\\contract.pdf', /authorized machine-local access: configured files\/repositories/i, null],
-  ['Open our internal 192.168.x.x dashboard', /localhost\/LAN\/intranet resources/i, /browser running on the user's local machine/i],
+  ['Run tests in C:\\repo', /CLI\/processes/i, null],
+  ['Read D:\\contract.pdf', /machine-local access: configured files\/repositories/i, null],
+  ['Open our internal 192.168.x.x dashboard', /localhost\/LAN\/intranet/i, /browser running on the user's local machine/i],
   ['Save a host-generated artifact into the local workspace', /configured files\/repositories/i, /native ChatGPT file import.*host-generated artifact.*stored locally/i],
-  ['Change a setting in a native desktop application', /native applications/i, /Prefer this over relai_computer/i]
+  ['Change a setting in a native desktop application', /native apps/i, /Prefer this over relai_computer/i]
 ];
 for (const [scenario, contextPattern, toolPattern] of decisions) {
   assert.match(STATIC_CONTEXT, contextPattern, `${scenario} must be decidable from the canonical host/local contract`);

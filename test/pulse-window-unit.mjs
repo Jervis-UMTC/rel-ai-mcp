@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { createPulseWindowManager, pulseBounds } from '../electron/pulse-window.js';
 import { projectPulseStatus } from '../electron/pulse-state.js';
@@ -54,6 +55,7 @@ assert.equal(working.contextTitle, 'Fix tests');
 assert.equal(working.workspace, 'repo');
 assert.equal(working.progressPercent, 42);
 assert.equal(working.progressLabel, 'Frontend tests');
+assert.equal(working.taskCount, 2);
 assert.equal(working.otherTaskCount, 1);
 
 const ordinaryWaiting = projectPulseStatus({
@@ -71,6 +73,20 @@ assert.equal(connectedIdle.visible, false, 'Pulse must stay out of the way when 
 assert.equal(connectedIdle.tone, 'idle');
 assert.equal(projectPulseStatus({ serverRunning: false }).visible, false);
 
+const pulseHtml = readFileSync(new URL('../electron/renderer/pulse.html', import.meta.url), 'utf8');
+const pulseCss = readFileSync(new URL('../electron/renderer/pulse.css', import.meta.url), 'utf8');
+const pulseRenderer = readFileSync(new URL('../electron/renderer/pulse.js', import.meta.url), 'utf8');
+assert.match(pulseHtml, /id="pulseTaskCount"/, 'compact Pulse markup must expose the active task count');
+assert.match(pulseCss, /\.pulse-mark\s*\{[^}]*-webkit-app-region:\s*drag/s, 'compact Pulse logo must remain a native drag handle without consuming the hover surface');
+assert.match(pulseCss, /transition:\s*width 170ms[^;]*height 170ms/s, 'Pulse shell geometry must animate instead of popping directly to expanded size');
+const nativeExpandIndex = pulseRenderer.indexOf('setExpanded?.(true)');
+const visualExpandIndex = pulseRenderer.indexOf('applyExpandedVisual(true)');
+assert.ok(nativeExpandIndex >= 0 && visualExpandIndex > nativeExpandIndex, 'native expansion must happen before the visible shell grows');
+const visualCollapseIndex = pulseRenderer.indexOf('applyExpandedVisual(false)');
+const nativeCollapseIndex = pulseRenderer.indexOf('setExpanded?.(false)');
+assert.ok(visualCollapseIndex >= 0 && nativeCollapseIndex > visualCollapseIndex, 'the visible shell must shrink before the native window contracts');
+assert.match(pulseRenderer, /taskCountElement\.textContent = taskCount === 1 \? '1 task' : `\$\{taskCount\} tasks`;/, 'compact Pulse must render the current task count');
+
 const workArea = { x: 100, y: 50, width: 1400, height: 900 };
 const displayListeners = new Map();
 const fakeScreen = {
@@ -85,6 +101,7 @@ const windows = [];
 class FakeWindow {
   constructor(options) {
     this.options = options;
+    this.currentBounds = { x: options.x, y: options.y, width: options.width, height: options.height };
     this.destroyed = false;
     this.visible = false;
     this.events = new Map();
@@ -113,22 +130,35 @@ class FakeWindow {
   showInactive() { this.visible = true; this.showInactiveCount = (this.showInactiveCount || 0) + 1; }
   show() { this.visible = true; this.showCount = (this.showCount || 0) + 1; }
   hide() { this.visible = false; this.hideCount = (this.hideCount || 0) + 1; }
-  setBounds(bounds) { this.boundsWrites.push({ ...bounds }); }
+  getBounds() { return { ...this.currentBounds }; }
+  setBounds(bounds) { this.currentBounds = { ...bounds }; this.boundsWrites.push({ ...bounds }); }
   setSize(width, height) { this.sizeWrites = [...(this.sizeWrites || []), { width, height }]; }
   destroy() { this.destroyed = true; this.visible = false; this.events.get('closed')?.(); }
 }
 
 const securityErrors = [];
 let protocolInstallCount = 0;
+let appReady = false;
+const guardedScreen = new Proxy(fakeScreen, {
+  get(target, property) {
+    assert.ok(appReady, 'Electron screen must not be accessed before app readiness');
+    return Reflect.get(target, property);
+  }
+});
 const manager = createPulseWindowManager({
   BrowserWindow: FakeWindow,
-  screen: fakeScreen,
+  screen: guardedScreen,
   preloadPath: 'preload.cjs',
   rendererUrl: 'relai-app://renderer/pulse.html',
   installProtocol: () => { protocolInstallCount += 1; },
   platform: 'win32',
   onSecurityError: error => securityErrors.push(error)
 });
+manager.setEnabled(true);
+manager.setThemePreference('system');
+manager.update({ serverRunning: true });
+assert.equal(manager.stop(), false);
+appReady = true;
 assert.equal(manager.start(), true);
 assert.equal(manager.start(), false, 'Pulse startup must be idempotent');
 manager.update({ serverRunning: true, tunnelStatus: 'running' });
@@ -167,6 +197,13 @@ assert.deepEqual(window.boundsWrites.at(-1), pulseBounds(fakeScreen, { expanded:
 assert.equal(manager.setExpanded(false), false);
 assert.deepEqual(window.boundsWrites.at(-1), pulseBounds(fakeScreen));
 
+window.currentBounds = { x: 500, y: 200, width: 286, height: 48 };
+window.events.get('move')?.();
+assert.equal(manager.setExpanded(true), true);
+assert.deepEqual(window.boundsWrites.at(-1), { x: 422, y: 200, width: 364, height: 288 }, 'expansion must preserve the right edge and top of a user-moved Pulse');
+assert.equal(manager.setExpanded(false), false);
+assert.deepEqual(window.boundsWrites.at(-1), { x: 500, y: 200, width: 286, height: 48 }, 'collapse must return to the user-moved compact position');
+
 manager.update({
   serverRunning: true, tunnelStatus: 'running',
   taskActivity: {
@@ -180,7 +217,7 @@ assert.equal(window.visible, false);
 manager.setEnabled(true);
 assert.equal(window.visible, true);
 displayListeners.get('display-metrics-changed')?.();
-assert.deepEqual(window.boundsWrites.at(-1), pulseBounds(fakeScreen));
+assert.deepEqual(window.boundsWrites.at(-1), { x: 500, y: 200, width: 286, height: 48 }, 'display changes must keep a valid user-moved Pulse position');
 assert.equal(securityErrors.length, 0);
 assert.equal(manager.stop(), true);
 assert.equal(manager.stop(), false, 'Pulse shutdown must be idempotent');

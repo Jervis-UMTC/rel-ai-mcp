@@ -76,6 +76,24 @@ function removeSession(directory: string, id: unknown): void {
   }, { transaction: true });
 }
 
+function removeWorkspaceSessions(config: TaskHistoryConfig = {}, workspaceValue: unknown): string[] {
+  const workspace = String(workspaceValue || '').trim();
+  if (!workspace) return [];
+  migrateLegacyTaskHistory(config);
+  return withStateDatabase(config, (db: DatabaseSync) => {
+    const rows = db.prepare('SELECT id,payload FROM task_history').all() as unknown as TaskHistoryRow[];
+    const removed: string[] = [];
+    const remove = db.prepare('DELETE FROM task_history WHERE id=?');
+    for (const row of rows) {
+      const session = parseStoredSession(row.payload);
+      if (!session || String(session.workspace || '').trim() !== workspace) continue;
+      remove.run(String(row.id));
+      removed.push(String(row.id));
+    }
+    return removed;
+  }, { transaction: true }) as string[];
+}
+
 function normalizeStoredSession(session: unknown, { forWrite = false }: { forWrite?: boolean } = {}): StoredTaskSession | null {
   if (!session || typeof session !== 'object' || Array.isArray(session)) return null;
   const input = session as Record<string, any>;
@@ -218,6 +236,7 @@ export {
   pruneSessions,
   readSession,
   removeSession,
+  removeWorkspaceSessions,
   resetTaskHistoryCaches,
   writeSession,
   writeSessionAsync

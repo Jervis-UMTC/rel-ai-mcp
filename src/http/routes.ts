@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { Hono, type Context } from 'hono';
 
 import { ERROR_CODES, errorPayload } from '../contracts/errors.ts';
 import { isDashboardAuthorized } from './auth.ts';
@@ -26,9 +27,12 @@ import { handleApiComputer, handleApiComputerAction } from './dashboardComputer.
 import { handleApiDiagnostics, handleApiDiagnosticsReset } from './dashboardDiagnostics.ts';
 import { handleApiProcessStop } from './dashboardProcesses.ts';
 import { getMcpAccess } from './mcp.ts';
-import { handleMcpDelete, handleMcpGetDiagnostic, handleMcpStreamable } from './mcpTransport.ts';
+import { handleMcpDelete, handleMcpGetDiagnostic, handleMcpStreamable, sendMcpTransportError } from './mcpTransport.ts';
 import { setBaseHeaders, sendJson } from './io.ts';
-import type { HttpRouteContext, ResolvedHttpServerOptions, RouteDefinition } from './types.ts';
+import { errorCodeForRequest } from './serverPolicy.ts';
+import type { HttpRequestError, HttpRouteContext, ResolvedHttpServerOptions, RouteDefinition } from './types.ts';
+
+const ALREADY_SENT_HEADER = 'x-hono-already-sent';
 
 const NOT_FOUND_PAYLOAD = {
   ok: false,
@@ -46,6 +50,12 @@ const NOT_FOUND_PAYLOAD = {
     streamableHttp: 'POST /mcp (MCP 2026-07-28; Authentication: private Bearer token)'
   }
 } as const;
+
+type NodeBindings = {
+  incoming: IncomingMessage;
+  outgoing: ServerResponse<IncomingMessage>;
+};
+type NodeContext = Context<{ Bindings: NodeBindings }>;
 
 function authDashboard(ctx: HttpRouteContext): boolean {
   if (isDashboardAuthorized(ctx.req, ctx.parsed, ctx.options, ctx.res)) return true;
@@ -88,61 +98,88 @@ const POST_ROUTES: Readonly<Record<string, RouteDefinition>> = Object.freeze({
   '/api/processes/stop': { auth: authDashboard, handler: handleApiProcessStop }
 });
 
-async function routeHttpRequest(
-  req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>,
-  options: ResolvedHttpServerOptions
-): Promise<void> {
-  setBaseHeaders(req, res, options);
+function createHttpApp(options: ResolvedHttpServerOptions) {
+  const app = new Hono<{ Bindings: NodeBindings }>();
+
+  app.use('*', async (c, next) => {
+    const ctx = routeContext(c, options);
+    setBaseHeaders(ctx.req, ctx.res, options);
+    if (ctx.mcpAccess.kind !== 'none' && blockMcpForRuntimeAccess(ctx.res, options.getRuntimeAccess)) {
+      return alreadySentResponse();
+    }
+    await next();
+  });
+
+  app.options('*', c => {
+    c.env.outgoing.writeHead(204);
+    c.env.outgoing.end();
+    return alreadySentResponse();
+  });
+
+  for (const [route, definition] of Object.entries(GET_ROUTES)) {
+    app.get(route, c => dispatchRoute(c, options, definition));
+  }
+  for (const [route, definition] of Object.entries(POST_ROUTES)) {
+    app.post(route, c => dispatchRoute(c, options, definition));
+  }
+
+  for (const route of ['/ui/*', '/public/*', '/vendor/monaco/*']) {
+    app.get(route, c => dispatchDirect(c, options, handleStaticAsset));
+  }
+
+  app.get('/mcp', c => dispatchDirect(c, options, handleMcpGetDiagnostic));
+  app.post('/mcp', c => dispatchDirect(c, options, handleMcpStreamable));
+  app.delete('/mcp', c => dispatchDirect(c, options, handleMcpDelete));
+
+  app.notFound(c => {
+    sendJson(c.env.outgoing, 404, NOT_FOUND_PAYLOAD);
+    return alreadySentResponse();
+  });
+
+  app.onError((error, c) => {
+    const requestError = error as HttpRequestError;
+    const status = Number(requestError?.status || 500);
+    const ctx = routeContext(c, options);
+    if (ctx.mcpAccess.kind !== 'none') {
+      sendMcpTransportError(ctx.res, { status });
+      return alreadySentResponse();
+    }
+    const code = requestError?.errorCode || errorCodeForRequest(ctx.req);
+    sendJson(ctx.res, status, errorPayload(code, error instanceof Error ? error.message : String(error)));
+    return alreadySentResponse();
+  });
+
+  return app;
+}
+
+async function dispatchRoute(c: NodeContext, options: ResolvedHttpServerOptions, definition: RouteDefinition): Promise<Response> {
+  const ctx = routeContext(c, options);
+  if (!definition.auth(ctx)) return alreadySentResponse();
+  await definition.handler(ctx);
+  return alreadySentResponse();
+}
+
+async function dispatchDirect(c: NodeContext, options: ResolvedHttpServerOptions, handler: RouteDefinition['handler']): Promise<Response> {
+  await handler(routeContext(c, options));
+  return alreadySentResponse();
+}
+
+function routeContext(c: NodeContext, options: ResolvedHttpServerOptions): HttpRouteContext {
+  const req = c.env.incoming as HttpRouteContext['req'];
+  const res = c.env.outgoing;
   const parsed = new URL(req.url || '/', 'http://127.0.0.1');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-
-  const mcpAccess = getMcpAccess(parsed.pathname);
-  if (mcpAccess.kind !== 'none' && blockMcpForRuntimeAccess(res, options.getRuntimeAccess)) return;
-  const ctx: HttpRouteContext = { req, res, options, parsed, mcpAccess, p: parsed.pathname };
-
-  if (req.method === 'GET') {
-    if (await dispatchExact(GET_ROUTES, ctx)) return;
-    if (tryStaticAsset(ctx)) return;
-    if (ctx.mcpAccess.kind === 'streamable-http') {
-      await handleMcpGetDiagnostic(ctx);
-      return;
-    }
-  } else if (req.method === 'POST') {
-    if (await dispatchExact(POST_ROUTES, ctx)) return;
-    if (ctx.mcpAccess.kind === 'streamable-http') {
-      await handleMcpStreamable(ctx);
-      return;
-    }
-  } else if (req.method === 'DELETE' && ctx.mcpAccess.kind === 'streamable-http') {
-    await handleMcpDelete(ctx);
-    return;
-  }
-
-  sendJson(res, 404, NOT_FOUND_PAYLOAD);
+  return {
+    req,
+    res,
+    options,
+    parsed,
+    mcpAccess: getMcpAccess(parsed.pathname),
+    p: parsed.pathname
+  };
 }
 
-async function dispatchExact(
-  routes: Readonly<Record<string, RouteDefinition>>,
-  ctx: HttpRouteContext
-): Promise<boolean> {
-  const entry = routes[ctx.p];
-  if (!entry) return false;
-  if (!entry.auth(ctx)) return true;
-  await entry.handler(ctx);
-  return true;
-}
-
-function tryStaticAsset(ctx: HttpRouteContext): boolean {
-  const p = ctx.p;
-  if (!p.startsWith('/ui/') && !p.startsWith('/public/') && !p.startsWith('/vendor/monaco/')) return false;
-  handleStaticAsset(ctx);
-  return true;
+function alreadySentResponse(): Response {
+  return new Response(null, { headers: { [ALREADY_SENT_HEADER]: '1' } });
 }
 
 function blockMcpForRuntimeAccess(
@@ -164,4 +201,4 @@ function blockMcpForRuntimeAccess(
   return true;
 }
 
-export { routeHttpRequest };
+export { createHttpApp };

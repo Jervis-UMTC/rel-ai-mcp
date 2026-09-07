@@ -1,13 +1,11 @@
 import * as http from "node:http";
-import { URL } from "node:url";
+import { getRequestListener } from '@hono/node-server';
 import * as connection from "./connectionProfile.js";
-import { DEFAULT_MAX_BODY_BYTES, normalizeMaxBodyBytes, sendJson } from './http/io.ts';
-import { errorPayload } from './contracts/errors.ts';
-import { errorCodeForRequest, isLoopbackHost } from './http/serverPolicy.ts';
-import { getMcpAccess } from './http/mcp.ts';
-import { sendMcpTransportError, shutdownMcpTransport } from './http/mcpTransport.ts';
-import { routeHttpRequest } from './http/routes.ts';
-import type { HttpRequestError, HttpServerOptions, RelaiHttpServer, ResolvedHttpServerOptions } from './http/types.ts';
+import { DEFAULT_MAX_BODY_BYTES, normalizeMaxBodyBytes } from './http/io.ts';
+import { isLoopbackHost } from './http/serverPolicy.ts';
+import { shutdownMcpTransport } from './http/mcpTransport.ts';
+import { createHttpApp } from './http/routes.ts';
+import type { HttpServerOptions, RelaiHttpServer, ResolvedHttpServerOptions } from './http/types.ts';
 import { createRelaiCoreRuntime } from './core/runtime.ts';
 import { pruneManagedProcesses } from "./processManager.js";
 import { ensureConfig, getConfigPath } from './config.js';
@@ -98,30 +96,32 @@ function startHttpServer(options: HttpServerOptions = {}): RelaiHttpServer {
     ...(onRuntimeLogChange ? { onRuntimeLogChange } : {})
   };
 
-  const server = http.createServer(async (req, res) => {
-    try {
-      await routeHttpRequest(req, res, routeOptions);
-    } catch (error) {
-      const requestError = error as HttpRequestError;
-      const status = Number(requestError?.status || 500);
-      const pathname = safeRequestPath(req.url);
-      if (getMcpAccess(pathname).kind !== 'none') {
-        sendMcpTransportError(res, { status });
-        return;
-      }
-      const code = requestError?.errorCode || errorCodeForRequest(req);
-      sendJson(res, status, errorPayload(code, error instanceof Error ? error.message : String(error)));
-    }
-  }) as RelaiHttpServer;
+  const app = createHttpApp(routeOptions);
+  const requestListener = getRequestListener(app.fetch, {
+    hostname: host,
+    overrideGlobalObjects: false,
+    autoCleanupIncoming: false
+  });
+  const server = http.createServer(requestListener) as RelaiHttpServer;
 
-  let shutdownPromise = Promise.resolve();
+  let shutdownPromise: Promise<unknown> = Promise.resolve();
   server.on('close', () => {
     shutdownPromise = (async () => {
-      await Promise.allSettled([
+      const transportCleanup = await Promise.allSettled([
         shutdownMcpTransport(),
         mcpConnectionManager.shutdown('http_server_closed')
       ]);
-      await coreRuntime.shutdown();
+      const runtimeCleanup = await coreRuntime.shutdown();
+      const errors = [...runtimeCleanup.errors];
+      if (transportCleanup[0]?.status === 'rejected') {
+        errors.push({ step: 'mcpTransport', error: shutdownErrorMessage(transportCleanup[0].reason) });
+      }
+      if (transportCleanup[1]?.status === 'rejected') {
+        errors.push({ step: 'mcpConnectionManager', error: shutdownErrorMessage(transportCleanup[1].reason) });
+      }
+      return errors.length === runtimeCleanup.errors.length
+        ? runtimeCleanup
+        : { ...runtimeCleanup, clean: false, errors };
     })();
   });
   server.waitForShutdown = () => shutdownPromise;
@@ -172,12 +172,8 @@ function startHttpServer(options: HttpServerOptions = {}): RelaiHttpServer {
   return server;
 }
 
-function safeRequestPath(value: string | undefined): string {
-  try {
-    return new URL(value || '/', 'http://127.0.0.1').pathname;
-  } catch {
-    return '/';
-  }
+function shutdownErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || 'Unknown error');
 }
 
 export { resolveHttpRequestTimeoutMs, startHttpServer };

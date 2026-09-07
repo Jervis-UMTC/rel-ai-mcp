@@ -63,10 +63,8 @@
 .task-detail-header h2 { @apply mt-1 text-lg font-bold leading-tight; scroll-margin-top: 84px; }
 .task-detail-header p { @apply mt-1.5 text-[13px] leading-5; color: var(--ui-text-secondary); }
 .task-detail-current { @apply grid gap-1 rounded-lg p-3; background: var(--ui-surface-raised); border: 1px solid var(--ui-border-subtle); }
-.task-detail-current.attention { background: var(--ui-status-danger-background); border-color: var(--ui-status-danger-border); }
 .task-detail-current strong { @apply text-[12px] font-bold; color: var(--ui-text-primary); }
 .task-detail-current span { @apply text-[13px] leading-5; color: var(--ui-text-secondary); }
-.task-detail-current.attention strong, .task-detail-current.attention span { color: var(--ui-status-danger-foreground); }
 .task-detail-grid { @apply grid gap-1.5; grid-template-columns: repeat(2,minmax(0,1fr)); }
 .task-detail-facts { grid-template-columns: repeat(auto-fit,minmax(110px,1fr)); }
 .task-detail-grid > div { @apply grid min-w-0 gap-1 rounded-md px-2.5 py-2; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
@@ -86,11 +84,14 @@
 
 .task-file-list { @apply m-0 grid list-none gap-1 p-0; }
 .task-file-list li { @apply min-w-0 rounded-md px-2.5 py-2; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
-.task-file-list li.task-file-link-row { padding: 0; }
+.task-file-list li.task-file-link-row, .task-file-list li.task-file-more-row { padding: 0; }
 .task-file-list code { @apply block break-all text-[11px] leading-5; color: var(--ui-text-primary); }
 .task-file-link { @apply block rounded-md px-2.5 py-2 no-underline; color: inherit; }
 .task-file-link:hover { background: var(--ui-surface-raised); }
 .task-file-link:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
+.task-file-more { @apply flex min-h-11 w-full cursor-pointer items-center rounded-md border-0 px-2.5 text-left text-[12px] font-semibold; background: transparent; color: var(--ui-text-secondary); }
+.task-file-more:hover { background: var(--ui-surface-raised); color: var(--ui-text-primary); }
+.task-file-more:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
 .task-event-list { @apply grid gap-1; }
 .task-event { @apply grid min-w-0 items-center gap-3 rounded-md px-2.5 py-2 text-left; grid-template-columns: 72px minmax(0,1fr) auto; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); color: var(--ui-text-primary); text-decoration: none; }
 .task-event > span { @apply whitespace-nowrap text-[11px]; color: var(--ui-text-tertiary); }
@@ -102,10 +103,6 @@
 .task-event-command code { @apply block break-all rounded-md px-2 py-1.5 text-[11px] leading-5; overflow: visible; text-overflow: clip; white-space: pre-wrap; background: var(--ui-surface-raised); color: var(--ui-text-primary); }
 .task-event-link:hover { background: var(--ui-surface-raised); border-color: var(--ui-border-default); }
 .task-event-more { @apply min-h-10 w-full justify-center; }
-.task-detail-overflow { @apply overflow-hidden rounded-md; background: color-mix(in srgb, var(--ui-surface-secondary) 65%, transparent); border: 1px solid var(--ui-border-default); }
-.task-detail-overflow > summary { @apply flex min-h-11 cursor-pointer items-center px-3 text-[12px] font-semibold; color: var(--ui-text-secondary); }
-.task-detail-overflow[open] > summary { border-bottom: 1px solid var(--ui-border-default); }
-.task-detail-overflow > .task-file-list, .task-detail-overflow > .task-event-list { @apply p-2; }
 
 .task-detail-technical { @apply border-t pt-3; border-color: var(--ui-border-default); }
 .task-detail-technical.is-expanded { border-top: 0; padding-top: 0; }

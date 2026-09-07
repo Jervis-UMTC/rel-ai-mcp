@@ -8,16 +8,20 @@ import { ensureConfig, getConfigPath, readConfig } from '../config.js';
 import * as connection from '../connectionProfile.js';
 import { DASHBOARD_LIVE_EVENTS, createEmptyDashboardRevisions } from '../contracts/events.ts';
 import { createWorkspaceUpdatePayload, type WorkspaceStateDto } from '../contracts/workspaces.ts';
+import { clearWorkspaceValidationAffinity } from '../knowledgeStore.js';
+import { removeWorkspaceLocalAnalytics } from '../localAnalytics.js';
 import { readMcpAuthenticationStatus } from '../mcp/authenticationStatus.js';
 import { mcpConnectionManager } from '../mcp/connectionManager.js';
 import { buildToolManifest } from '../mcp/toolManifest.js';
 import { getOnboardingStatus, writeOnboardingState } from '../onboardingState.js';
+import { resolvePolicy } from '../policyResolver.js';
 import * as productUx from '../productUx.js';
 import * as release from '../release.js';
 import { getReleaseNotes } from '../releaseNotes.js';
 import { repositoryIntelligence } from '../repository/intelligence/service.js';
-import { readTaskHistory, readTaskHistorySession } from '../taskHistoryStore.ts';
-import { onToolActivity } from '../toolActivity.js';
+import { withStateDatabase } from '../stateDatabase.ts';
+import { clearWorkspaceTaskHistory, readTaskHistory, readTaskHistorySession } from '../taskHistoryStore.ts';
+import { getToolActivity, onToolActivity } from '../toolActivity.js';
 import { getToolMetadata } from '../tools.js';
 import { listManagedProcesses, managedProcessStateRevision, onManagedProcessChange } from '../processManager.js';
 import { onWorkspaceStateChange, workspaceStateRevision } from '../workspaceState.js';
@@ -146,6 +150,19 @@ export async function updateDashboardWorkspace(payload: JsonRecord): Promise<Jso
   const previousWorkspace = current.workspaces?.[originalAlias]
     ? { alias: originalAlias, ...current.workspaces[originalAlias] }
     : null;
+  const deleting = previousWorkspace && ['delete', 'clear'].includes(action);
+  if (deleting) {
+    if (payload.confirmDelete !== true && payload.confirmClear !== true) {
+      throw new Error('Workspace removal requires confirmDelete=true (or confirmClear=true).');
+    }
+    const policyActive = Math.max(0, Number(resolvePolicy(previousWorkspace, current).activeTaskCount || 0));
+    const liveActive = getToolActivity().tasks.filter((task: JsonRecord) => String(task.workspace || '').trim() === originalAlias).length;
+    const active = Math.max(policyActive, liveActive);
+    if (active > 0) {
+      throw new Error(`Cannot delete project '${originalAlias}' while ${active} Rel.AI ${active === 1 ? 'task is' : 'tasks are'} still active in it.`);
+    }
+    if (payload.forgetLocalData !== false) await clearDashboardWorkspaceLocalData(current, originalAlias);
+  }
   const result = configEditor.updateWorkspace(current, payload);
   if (previousWorkspace && ['upsert', 'delete', 'clear'].includes(action)) {
     await Promise.allSettled([
@@ -154,6 +171,39 @@ export async function updateDashboardWorkspace(payload: JsonRecord): Promise<Jso
   }
   await refreshMcpManifest('workspaces_changed');
   return result;
+}
+
+async function clearDashboardWorkspaceLocalData(config: JsonRecord, workspace: string): Promise<void> {
+  const history = await clearWorkspaceTaskHistory(config, workspace);
+  withStateDatabase(config, db => {
+    db.prepare('DELETE FROM session_policies WHERE workspace=?').run(workspace);
+
+    const taskIds = new Set(history.taskIds);
+    const taskRows = db.prepare('SELECT task_id,payload FROM task_integrity_tasks').all() as Array<{ task_id?: unknown; payload?: unknown }>;
+    for (const row of taskRows) {
+      try {
+        const payload = JSON.parse(String(row.payload || '')) as JsonRecord;
+        if (String(payload.workspace || '').trim() === workspace) taskIds.add(String(row.task_id || ''));
+      } catch {}
+    }
+    const removeTaskIntegrity = db.prepare('DELETE FROM task_integrity_tasks WHERE task_id=?');
+    for (const taskId of taskIds) if (taskId) removeTaskIntegrity.run(taskId);
+
+    const workspaceRows = db.prepare('SELECT workspace,payload FROM workspace_integrity').all() as Array<{ workspace?: unknown; payload?: unknown }>;
+    const removeWorkspaceIntegrity = db.prepare('DELETE FROM workspace_integrity WHERE workspace=?');
+    for (const row of workspaceRows) {
+      let matches = String(row.workspace || '').trim() === workspace;
+      if (!matches) {
+        try {
+          const payload = JSON.parse(String(row.payload || '')) as JsonRecord;
+          matches = String(payload.workspace || '').trim() === workspace;
+        } catch {}
+      }
+      if (matches) removeWorkspaceIntegrity.run(String(row.workspace || ''));
+    }
+  }, { transaction: true });
+  removeWorkspaceLocalAnalytics(config, workspace);
+  clearWorkspaceValidationAffinity(config, workspace);
 }
 
 export function dashboardTaskSession(taskId: string): JsonRecord | null {
