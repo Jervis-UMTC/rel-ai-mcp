@@ -696,6 +696,13 @@ async function drainLogWrites(config: ManagedProcessConfig, record: ManagedProce
   await Promise.all([record.logWritePromises.stdout, record.logWritePromises.stderr]);
 }
 
+async function flushManagedProcessPersistence(config: ManagedProcessConfig, record: ManagedProcessRecord): Promise<void> {
+  clearScheduledPersist(record);
+  await drainLogWrites(config, record);
+  if (record.discarded || record.persistenceFailureHandled) return;
+  await queueMetadataPersist(config, record);
+}
+
 function readManagedProcess(config: ManagedProcessConfig, args: ManagedProcessArgs = {}, context: ManagedProcessContext = {}) {
   const record = requireProcess(config, args.processId);
   assertProcessAccess(config, record, args, context, { requireSession: false });
@@ -790,7 +797,7 @@ async function stopRecordInternal(config: ManagedProcessConfig, record: ManagedP
         signal: record.signal || 'unobserved'
       });
     }
-    await drainLogWrites(config, record);
+    await flushManagedProcessPersistence(config, record);
     return processSnapshot(record);
   }
 
@@ -814,7 +821,7 @@ async function stopRecordInternal(config: ManagedProcessConfig, record: ManagedP
       signal: outcome.forced ? 'SIGKILL' : 'SIGTERM'
     });
   }
-  await drainLogWrites(config, record);
+  await flushManagedProcessPersistence(config, record);
   return processSnapshot(record);
 }
 
@@ -1382,6 +1389,7 @@ async function stopAllManagedProcesses(config: ManagedProcessConfig): Promise<{ 
     processId: item.processId,
     graceMs: 1000
   }, { internal: true }).catch(() => null)));
+  await Promise.all([...processes.values()].map(item => flushManagedProcessPersistence(config, item)));
   return {
     stopped: results.filter(item => item && TERMINAL_STATUSES.has(item.status)).length,
     attempted: active.length,

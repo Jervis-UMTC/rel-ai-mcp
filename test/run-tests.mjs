@@ -52,6 +52,7 @@ const files = [
   'electron-dev-watch-unit.mjs',
   'test-rigidity-audit-unit.mjs',
   'audit-production-unit.mjs',
+  'color-token-staleness-unit.mjs',
   'generated-assets-check-unit.mjs',
   'http-auth-smoke.mjs',
   'mcp-app-ui-unit.mjs',

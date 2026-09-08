@@ -9,11 +9,14 @@ import viteConfig from '../vite.config.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const generatedFiles = Object.freeze(['dashboard-app.js', 'dashboard-react.js', 'dashboard.css']);
 const generatedDirectories = Object.freeze(['dashboard-chunks', 'dashboard-assets']);
+const publicRoot = process.env.REL_AI_GENERATED_PUBLIC_ROOT
+  ? path.resolve(process.env.REL_AI_GENERATED_PUBLIC_ROOT)
+  : path.join(root, 'public');
 
 try {
   verifyColorTokens();
   verifyUiContracts();
-  await verifyDashboardAssets();
+  await verifyDashboardAssets(publicRoot);
   console.log('Generated dashboard assets are current.');
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
@@ -40,7 +43,7 @@ function verifyGenerator(name, message) {
   if (result.status !== 0) throw new Error(message);
 }
 
-async function verifyDashboardAssets() {
+async function verifyDashboardAssets(currentPublicRoot) {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-dashboard-vite-'));
   try {
     await build(mergeConfig(viteConfig, {
@@ -49,7 +52,7 @@ async function verifyDashboardAssets() {
         emptyOutDir: true
       }
     }));
-    const current = readGeneratedAssets(path.join(root, 'public'));
+    const current = readGeneratedAssets(currentPublicRoot);
     const generated = readGeneratedAssets(tempRoot);
     const currentNames = [...current.keys()].sort();
     const generatedNames = [...generated.keys()].sort();

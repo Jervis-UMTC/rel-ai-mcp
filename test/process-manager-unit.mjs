@@ -308,7 +308,23 @@ try {
   assert.equal(await waitForChildExit(externalChild, 3000), true);
   externalChild = null;
 
-  console.log('Managed process identity, ownership, persistence, bounded output, restart, cancellation, and idempotent stop tests passed.');
+  const shutdownPersistence = await startManagedProcess(workspace, config, {
+    executable: process.execPath,
+    argv: [persistentScript],
+    startupWaitMs: 100,
+    label: 'shutdown-persistence',
+    kind: 'service',
+    purpose: 'Verify shutdown drains managed process persistence.'
+  }, ownerLater);
+  const shutdownDirectory = path.join(stateDir, 'processes', shutdownPersistence.processId);
+  const shutdownResult = await stopAllManagedProcesses(config);
+  assert.ok(shutdownResult.stopped >= 1, 'shutdown must stop the active persistence probe');
+  fs.rmSync(shutdownDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
+  await sleep(150);
+  assert.equal(fs.existsSync(shutdownDirectory), false,
+    'managed process shutdown must not return while a late metadata write can recreate removed state');
+
+  console.log('Managed process identity, ownership, persistence, bounded output, restart, cancellation, shutdown durability, and idempotent stop tests passed.');
 } finally {
   await stopAllManagedProcesses(config).catch(() => {});
   if (externalChild) {
