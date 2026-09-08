@@ -37,4 +37,4 @@ Cross-feature infrastructure remains in `src/ui/`: routing, API access, canonica
 6. Preserve accessibility contracts: semantic navigation/current state, keyboard operation, focus restoration/containment, live announcements, reduced motion, forced colors, and responsive reachability.
 7. Desktop-only authority must use the approved preload bridge (`window.relaiDesktop`); feature code must not import Electron or expose new privileged renderer behavior without an IPC contract.
 8. Add focused tests for the feature/model/store boundary that changed and browser/Electron acceptance only where the real interaction crosses those boundaries.
-9. Keep `public/dashboard-react.js`, `public/dashboard.css`, and `public/dashboard-chunks/` generated. Edit source under `src/ui/`, then run `npm run build:frontend` and `npm run verify:generated`.
+9. Keep `public/dashboard-app.js`, `public/dashboard-react.js`, `public/dashboard.css`, and `public/dashboard-chunks/` generated. Edit source under `src/ui/` or the production dashboard entry, then run `npm run build:frontend` and `npm run verify:generated`.

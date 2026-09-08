@@ -25,13 +25,6 @@ import { renderDashboardShellBootstrap } from './dashboardShellChrome.ts';
 import { contentTypeForStaticAsset, jsonForHtmlScript, readJsonBody, sendHtml, sendJson, sendSse } from './io.ts';
 import type { HttpRouteContext, HttpServerOptions } from './types.ts';
 
-const DASHBOARD_SHARED_MODULES: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  '/public/analyticsFailureCategory.js': Object.freeze(['src', 'analyticsFailureCategory.js']),
-  '/public/taskEvents.js': Object.freeze(['src', 'taskEvents.js']),
-  '/public/taskSemanticProgress.js': Object.freeze(['src', 'taskSemanticProgress.js']),
-  '/public/taskState.js': Object.freeze(['src', 'taskState.js'])
-});
-
 async function handleFavicon(ctx: HttpRouteContext): Promise<void> {
   try {
     const content = readCachedStaticAsset(resolvePackagePath('public', 'assets', 'favicon.ico'));
@@ -55,9 +48,7 @@ function handleStaticAsset(ctx: HttpRouteContext): void {
     return;
   }
   let filePath: string;
-  if (Object.hasOwn(DASHBOARD_SHARED_MODULES, safePath)) {
-    filePath = resolvePackagePath(...DASHBOARD_SHARED_MODULES[safePath]!);
-  } else if (safePath.startsWith('/ui/')) {
+  if (safePath.startsWith('/ui/')) {
     filePath = resolvePackagePath('src', 'ui', safePath.slice(4));
   } else if (safePath.startsWith('/public/ui/')) {
     filePath = resolvePackagePath('src', 'ui', safePath.slice(11));
@@ -202,7 +193,7 @@ function renderDashboardHtml(options: HttpServerOptions, nonce: string): string 
 <body>
 <div id="dashboardRoot"></div>
 <script type="application/json" id="initialDashboardData" nonce="${nonce}">${initialDashboardJson}</script>
-<script type="module" src="/public/dashboard.js"></script>
+<script type="module" src="/public/dashboard-app.js"></script>
 </body>
 </html>`;
 }

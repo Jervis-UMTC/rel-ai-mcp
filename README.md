@@ -424,7 +424,7 @@ See [Development](docs/DEVELOPMENT.md) for source architecture, generated assets
 
 Focused fixes, product improvements, documentation updates, and regression coverage are welcome.
 
-Keep changes scoped. Preserve the repository's security and compatibility boundaries. Prefer direct code and the smallest useful abstraction. The routine dashboard is React-owned: add feature UI under `src/ui/features/`, consume backend-owned projections through the revision-aware dashboard store, reuse shared components only after real reuse exists, and do not hand-edit generated `public/dashboard-react.js` or `public/dashboard.css`. Treat tests as risk controls rather than a reason to duplicate coverage. If a change affects runtime ownership, protocol behavior, security boundaries, or packaging, review the relevant architecture documentation before adding another layer.
+Keep changes scoped. Preserve the repository's security and compatibility boundaries. Prefer direct code and the smallest useful abstraction. The routine dashboard is React-owned: add feature UI under `src/ui/features/`, consume backend-owned projections through the revision-aware dashboard store, reuse shared components only after real reuse exists, and do not hand-edit generated `public/dashboard-app.js`, `public/dashboard-react.js`, or `public/dashboard.css`. Treat tests as risk controls rather than a reason to duplicate coverage. If a change affects runtime ownership, protocol behavior, security boundaries, or packaging, review the relevant architecture documentation before adding another layer.
 
 ## Support
 

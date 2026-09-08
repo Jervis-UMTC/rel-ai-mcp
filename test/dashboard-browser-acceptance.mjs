@@ -279,11 +279,12 @@ function seedSessions(directory) {
 }
 
 async function waitForHealth(url) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
     try { if ((await fetch(url)).ok) return; } catch {}
     await new Promise(resolve => setTimeout(resolve, 50));
   }
-  throw new Error(`HTTP server did not become healthy. ${serverError}`);
+  throw new Error(`HTTP server did not become healthy within 15s. ${serverError}`);
 }
 
 async function waitForProbeStage(file, expectedStage, timeoutMs) {

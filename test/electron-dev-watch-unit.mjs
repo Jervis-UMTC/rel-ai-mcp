@@ -18,7 +18,8 @@ assert.equal(shouldRestartForPath('src', 'ui/styles/app.css'), false, 'UI style 
 assert.equal(shouldRestartForPath('public', 'app.js'), true);
 assert.equal(shouldRestartForPath('public', 'dashboard.css'), true, 'rebuilt dashboard CSS must restart Electron after Vite finishes');
 assert.equal(shouldRestartForPath('src', 'ui/react/main.js'), false, 'React source changes restart only after the generated browser bundle is ready');
-assert.equal(shouldRestartForPath('public', 'dashboard-react.js'), true, 'a rebuilt React entry must restart Electron after Vite finishes');
+assert.equal(shouldRestartForPath('public', 'dashboard-app.js'), true, 'a rebuilt production dashboard entry must restart Electron after Vite finishes');
+assert.equal(shouldRestartForPath('public', 'dashboard-react.js'), true, 'a rebuilt React probe entry must restart Electron after Vite finishes');
 assert.equal(shouldRestartForPath('public', 'dashboard-chunks/route-test.js'), true, 'a rebuilt lazy React chunk must restart Electron after Vite finishes');
 assert.match(String(manifest.scripts['build:frontend'] || ''), /vite build/, 'the canonical production frontend build must use Vite');
 assert.match(String(manifest.scripts['dev:frontend'] || ''), /\bvite\b/, 'the browser dev loop must expose the Vite HMR server');

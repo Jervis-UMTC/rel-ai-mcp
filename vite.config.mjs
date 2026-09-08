@@ -46,10 +46,13 @@ export default defineConfig({
     sourcemap: false,
     cssCodeSplit: false,
     rollupOptions: {
-      input: dashboardEntry,
+      input: {
+        dashboardApp: dashboardSource,
+        dashboardReact: dashboardEntry
+      },
       preserveEntrySignatures: 'strict',
       output: {
-        entryFileNames: 'dashboard-react.js',
+        entryFileNames: chunk => chunk.name === 'dashboardApp' ? 'dashboard-app.js' : 'dashboard-react.js',
         chunkFileNames: 'dashboard-chunks/[name]-[hash].js',
         assetFileNames: assetInfo => assetInfo.name?.endsWith('.css') ? 'dashboard.css' : 'dashboard-assets/[name]-[hash][extname]'
       }

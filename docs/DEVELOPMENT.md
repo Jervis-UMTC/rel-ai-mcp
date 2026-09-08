@@ -43,7 +43,7 @@ The default loopback service commonly uses `http://127.0.0.1:3333`. Health and d
 
 The routine dashboard is built through one Vite pipeline:
 
-- `src/ui/react/main.js` is bundled to `public/dashboard-react.js` with lazy chunks under `public/dashboard-chunks/`;
+- the production `public/dashboard.js` entry and its `src/ui/` dependency graph are bundled to `public/dashboard-app.js`; `src/ui/react/main.js` is also retained as `public/dashboard-react.js` for focused runtime probes, with lazy chunks under `public/dashboard-chunks/`;
 - Tailwind runs through `@tailwindcss/vite` from `src/ui/styles/app.css` and emits `public/dashboard.css`.
 
 Build the production assets with:
@@ -67,7 +67,7 @@ npm run generate:color-tokens
 npm run verify:color-tokens
 ```
 
-`npm run verify:generated` rebuilds the Vite dashboard into a temporary output and compares it byte-for-byte with the tracked generated assets. Do not hand-edit `public/dashboard-react.js`, `public/dashboard.css`, `public/dashboard-chunks/`, or other Vite output.
+`npm run verify:generated` rebuilds the Vite dashboard into a temporary output and compares it byte-for-byte with the tracked generated assets. Do not hand-edit `public/dashboard-app.js`, `public/dashboard-react.js`, `public/dashboard.css`, `public/dashboard-chunks/`, or other Vite output.
 
 ## Validation
 
@@ -176,7 +176,7 @@ npm run electron:size:windows
 npm run electron:size:linux
 ```
 
-Electron packaging runs the same Vite production build before electron-builder, so packaged `public/dashboard-react.js`, `public/dashboard.css`, and dashboard chunks must come from the current React/CSS sources rather than manual `public/` edits.
+Electron packaging runs the same Vite production build before electron-builder, so packaged `public/dashboard-app.js`, `public/dashboard-react.js`, `public/dashboard.css`, and dashboard chunks must come from the current dashboard/React/CSS sources rather than manual generated-asset edits.
 
 Electron runtime resources are fail-closed against packaging drift. Runtime roots listed by the root package (`src/`, `bin/`, `public/`, and `skills/`) are copied as complete trees instead of extension allowlists. `examples/` and `types/` are the explicit non-Electron package roots. `test/electron-launcher-smoke.mjs` requires every runtime root to have an Electron resource mapping, and `scripts/verify-packaged-app.mjs` recursively compares the built artifact's file list and SHA-256 content with source. Adding a new root runtime directory therefore fails verification until it is packaged or deliberately classified as non-Electron.
 

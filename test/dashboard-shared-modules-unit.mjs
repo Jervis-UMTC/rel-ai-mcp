@@ -26,19 +26,17 @@ try {
   assert.ok(address && typeof address !== 'string');
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
-  for (const [pathname, expectedExport] of [
-    ['/public/analyticsFailureCategory.js', 'normalizeFailureCategory'],
-    ['/public/taskState.js', 'isTerminalDashboardTaskStatus'],
-    ['/public/taskEvents.js', 'eventTimestampMs']
+  for (const pathname of [
+    '/public/analyticsFailureCategory.js',
+    '/public/taskState.js',
+    '/public/taskEvents.js',
+    '/public/taskSemanticProgress.js'
   ]) {
     const response = await fetch(`${baseUrl}${pathname}`);
-    const source = await response.text();
-    assert.equal(response.status, 200, `${pathname} must be served for browser-relative imports`);
-    assert.match(response.headers.get('content-type') || '', /^application\/javascript/);
-    assert.match(source, new RegExp(`\\b${expectedExport}\\b`));
+    assert.equal(response.status, 404, `${pathname} must not expose unbundled source modules to Chromium`);
   }
 
-  console.log('Dashboard shared browser modules are served from browser-resolved public URLs.');
+  console.log('Dashboard source helpers are bundled instead of exposed as raw browser modules.');
 } finally {
   server.closeAllConnections?.();
   await new Promise(resolve => server.close(resolve));

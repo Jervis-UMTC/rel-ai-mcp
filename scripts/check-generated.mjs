@@ -7,7 +7,7 @@ import { build, mergeConfig } from 'vite';
 import viteConfig from '../vite.config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const generatedFiles = Object.freeze(['dashboard-react.js', 'dashboard.css']);
+const generatedFiles = Object.freeze(['dashboard-app.js', 'dashboard-react.js', 'dashboard.css']);
 const generatedDirectories = Object.freeze(['dashboard-chunks', 'dashboard-assets']);
 
 try {
@@ -91,5 +91,5 @@ function listFiles(directory) {
 }
 
 function staleDashboardError() {
-  return new Error('Generated dashboard assets are stale. Run npm run build:frontend and keep public/dashboard-react.js, public/dashboard.css, and generated dashboard chunks with the source change.');
+  return new Error('Generated dashboard assets are stale. Run npm run build:frontend and keep public/dashboard-app.js, public/dashboard-react.js, public/dashboard.css, and generated dashboard chunks with the source change.');
 }
