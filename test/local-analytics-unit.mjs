@@ -64,6 +64,18 @@ try {
   assert.equal(cleared.ok, true);
   assert.ok(cleared.removedFiles >= 1);
   assert.equal(readLocalUsageSnapshot(config, '2026-08').totals.toolCalls, 0, 'clearing analytics must clear the SQLite analytics rows');
+
+  const flushRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-local-analytics-flush-'));
+  try {
+    const flushConfig = { stateDir: flushRoot };
+    assert.equal(recordLocalToolOutcome(flushConfig, { tool: 'relai_read', workspace: 'repo', ok: true, durationMs: 1 }), true);
+    await flushLocalAnalytics(flushConfig);
+    fs.rmSync(flushRoot, { recursive: true, force: true });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(fs.existsSync(flushRoot), false, 'analytics flush must drain scheduled retention work before cleanup');
+  } finally {
+    fs.rmSync(flushRoot, { recursive: true, force: true });
+  }
 } finally {
   fs.rmSync(stateDir, { recursive: true, force: true });
 }

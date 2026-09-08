@@ -135,6 +135,16 @@ function createHarness({ failOpen = false } = {}) {
     () => host.run({ action: 'navigate', nativeSessionId: started.nativeSessionId, nativePageId: opened.nativePageId, url: 'https://example.test/' }),
     error => error?.code === 'BROWSER_USER_CONTROL_ACTIVE'
   );
+  await assert.rejects(
+    () => host.run({ action: 'close_page', nativeSessionId: started.nativeSessionId, nativePageId: opened.nativePageId }),
+    error => error?.code === 'BROWSER_USER_CONTROL_ACTIVE',
+    'AI tool calls must not close a page while the user owns the browser session'
+  );
+  await assert.rejects(
+    () => host.run({ action: 'close_session', nativeSessionId: started.nativeSessionId }),
+    error => error?.code === 'BROWSER_USER_CONTROL_ACTIVE',
+    'AI tool calls must not close a session while the user owns the browser session'
+  );
   assert.equal((await host.run({ action: 'describe', nativeSessionId: started.nativeSessionId, nativePageId: opened.nativePageId })).url, 'about:blank');
 
   const concurrent = await host.run({ action: 'start', viewport: { width: 640, height: 480 } });

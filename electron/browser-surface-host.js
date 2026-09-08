@@ -48,7 +48,7 @@ function createBrowserSurfaceHost(options = {}) {
       case 'upload': return withPage(payload, action, uploadFile, options);
       case 'begin_download': return withPage(payload, action, beginDownload, options);
       case 'close_page': return closePage(payload);
-      case 'close_session': return closeSession(payload.nativeSessionId, { emit: false });
+      case 'close_session': return closeSessionFromTool(payload.nativeSessionId);
       default: throw new Error(`Unsupported embedded browser action '${action || '(missing)'}.`);
     }
   }
@@ -291,10 +291,18 @@ function createBrowserSurfaceHost(options = {}) {
 
   async function closePage(payload = {}) {
     const record = requireSession(payload.nativeSessionId);
+    assertAiControl(record, 'close_page');
     const page = requirePage(record, payload.nativePageId);
     await destroyPage(record, page, { emit: false });
     publishState();
     return { ok: true, nativeSessionId: record.nativeSessionId, nativePageId: page.nativePageId, status: 'closed' };
+  }
+
+  async function closeSessionFromTool(value) {
+    const nativeSessionId = assertSessionId(value);
+    const record = sessions.get(nativeSessionId);
+    if (record) assertAiControl(record, 'close_session');
+    return closeSession(nativeSessionId, { emit: false });
   }
 
   async function closeSession(value, options = {}) {

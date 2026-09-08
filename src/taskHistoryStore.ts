@@ -666,6 +666,12 @@ async function flushTaskHistoryPersistence(): Promise<{ ok: boolean; failed: num
     const retryDelay = Math.min(TASK_HISTORY_RETRY_MAX_MS, TASK_HISTORY_RETRY_BASE_MS * (2 ** Math.min(retryCount - 1, 4)));
     schedulePendingDirectoryFlush(directory, retryDelay);
   }
+  for (const [directory, timer] of [...pendingPrunes.entries()]) {
+    clearTimeout(timer);
+    pendingPrunes.delete(directory);
+    try { pruneSessions(directory, MAX_SESSIONS); }
+    catch (error) { if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] task history prune flush:', error); }
+  }
   return { ok: failed.size === 0, failed: failed.size, pending: pendingSessions.size };
 }
 

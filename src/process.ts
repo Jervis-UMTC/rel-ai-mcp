@@ -1,6 +1,7 @@
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { execa, type Options as ExecaOptions } from 'execa';
 import { resolveGitExecutable } from './gitExecutable.js';
 import { makeProcessEnvironment } from './processEnvironment.js';
@@ -408,10 +409,10 @@ async function runProcess(command: string, args: readonly string[] = [], options
     const stdoutSpillResult = stdoutSpill.finish();
     const stderrSpillResult = stderrSpill.finish();
     const spawnError = result.failed
-      && result.exitCode == null
       && !result.signal
       && !result.timedOut
-      && !result.isCanceled;
+      && !result.isCanceled
+      && (result.exitCode == null || (process.platform === 'win32' && !shell && !windowsExecutableExists(executable, options.cwd, childEnvironment)));
     const error = result.timedOut
       ? `Timed out after ${timeoutMs}ms`
       : result.isCanceled
@@ -565,6 +566,29 @@ function summarizeCommand(result: Partial<RunProcessResult> & Pick<RunProcessRes
     ...(result.stdout ? { stdout: result.stdout } : {}),
     ...(result.stderr ? { stderr: result.stderr } : {})
   };
+}
+
+function windowsExecutableExists(executable: string, cwd: string | undefined, env: NodeJS.ProcessEnv): boolean {
+  const value = String(executable || '').trim();
+  if (!value) return false;
+  if (path.isAbsolute(value) || /[\\/]/.test(value)) {
+    const candidate = path.isAbsolute(value) ? value : path.resolve(cwd || process.cwd(), value);
+    if (fs.existsSync(candidate)) return true;
+  }
+  const systemRoot = String(process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows');
+  const whereExe = path.join(systemRoot, 'System32', 'where.exe');
+  try {
+    const lookup = spawnSync(whereExe, [value], {
+      cwd,
+      env,
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: 'ignore'
+    });
+    return lookup.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 function clampMilliseconds(value: unknown, min: number, max: number, fallback: number): number {

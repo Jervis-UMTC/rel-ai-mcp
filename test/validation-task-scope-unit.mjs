@@ -123,7 +123,12 @@ try {
   resetToolActivity();
   if (previousConfig == null) delete process.env.REL_AI_MCP_CONFIG;
   else process.env.REL_AI_MCP_CONFIG = previousConfig;
-  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(root, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === 'win32' ? 10 : 2,
+    retryDelay: 50
+  });
 }
 
 console.log('Task-owned validation scope ignores unrelated dirty baseline files.');

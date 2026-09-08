@@ -27,6 +27,7 @@ const LOCAL_ANALYTICS_RETENTION_DAYS = 180;
 const RETENTION_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const LEGACY_MIGRATION_KEY = 'local_analytics_legacy_migrated_v1';
 const retentionPruneTimes = new Map<string, number>();
+const retentionPruneTimers = new Map<string, { timer: NodeJS.Timeout; config: AnalyticsConfig }>();
 
 interface AnalyticsConfig extends TelemetryConfig {
   stateDir?: string;
@@ -309,6 +310,13 @@ function migrateLegacyLocalAnalytics(config: AnalyticsConfig = {}): void {
 }
 
 async function flushLocalAnalytics(): Promise<{ ok: true; failed: 0; pending: 0 }> {
+  const pending = [...retentionPruneTimers.values()];
+  retentionPruneTimers.clear();
+  for (const { timer, config } of pending) {
+    clearTimeout(timer);
+    try { await pruneLocalAnalytics(config); }
+    catch (error) { if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] local analytics retention prune flush:', error); }
+  }
   return { ok: true, failed: 0, pending: 0 };
 }
 
@@ -318,11 +326,13 @@ function scheduleRetentionPrune(config: AnalyticsConfig = {}): boolean {
   if (now - Number(retentionPruneTimes.get(key) || 0) < RETENTION_PRUNE_INTERVAL_MS) return false;
   retentionPruneTimes.set(key, now);
   const timer = setTimeout(() => {
+    retentionPruneTimers.delete(key);
     void pruneLocalAnalytics(config).catch(error => {
       if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] local analytics retention prune:', error);
     });
   }, 0);
   timer.unref?.();
+  retentionPruneTimers.set(key, { timer, config: { ...config } });
   return true;
 }
 
