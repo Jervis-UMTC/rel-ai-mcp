@@ -46,6 +46,8 @@ function exerciseRuntimeLogDelta(runtime, change) {
 }
 
 assert.doesNotMatch(dashboard, /syncLiveView|updateLiveView|renderViewIfChanged|viewRevisionKey|scheduleLiveViewSync|ensureRouteRoot/, 'dashboard bootstrap must not retain a second route rendering coordinator');
+assert.doesNotMatch(dashboard, /from ['"]\.\/ui\/store\.js['"]/, 'the production dashboard bootstrap must not load the Zustand-backed store outside the Vite bundle');
+assert.match(reactMain, /from ['"]\.\.\/store\.js['"]/, 'the Vite-built dashboard entry must own the canonical store dependency');
 assert.match(reactMain, /function RouteOutlet\(/, 'the React shell must own the active route outlet');
 assert.match(reactMain, /reactRouteComponents\.get\(route\.section\)/, 'the active React feature must be selected directly from the canonical route registry');
 assert.doesNotMatch(reactMain, /bridgeRouteSections|getReactSections|routeRoots|createReactSection|unmountReactSection|LegacyRouteOutlet/, 'React must not retain the migration bridge or per-route React roots');

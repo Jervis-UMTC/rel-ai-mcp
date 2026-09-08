@@ -1,6 +1,5 @@
 import { fetchJson, invalidateCache, DASHBOARD_DATA_URL } from './ui/api.js';
-import { init as initStore, getSnapshot as getStore, subscribe as subscribeStore, applyLiveEvent, patchLocalConnection } from './ui/store.js';
-import { clearShellDashboardState, clearShellRecoveryNotice, initConnectorRefreshModal, initUpdateAvailableModal, mountReactFoundation, setShellConnectionOverride, setShellLastEventAt, setShellNow, showShellDashboardState, showShellRecoveryNotice } from './dashboard-react.js';
+import { applyLiveEvent, clearShellDashboardState, clearShellRecoveryNotice, getSnapshot as getStore, init as initStore, initConnectorRefreshModal, initUpdateAvailableModal, mountReactFoundation, patchLocalConnection, setShellConnectionOverride, setShellLastEventAt, setShellNow, showShellDashboardState, showShellRecoveryNotice, subscribe as subscribeStore } from './dashboard-react.js';
 import { initRouter } from './ui/router.js';
 import { initEvents, startSSE } from './ui/events.js';
 import { initUiPreferences } from './ui/preferences.js';

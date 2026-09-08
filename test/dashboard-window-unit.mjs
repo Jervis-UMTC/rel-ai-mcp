@@ -123,6 +123,31 @@ const dependencies = {
 };
 
 try {
+  let releaseDashboardLoad;
+  let markDashboardLoadStarted;
+  const dashboardLoadStarted = new Promise(resolve => { markDashboardLoadStarted = resolve; });
+  const dashboardLoadGate = new Promise(resolve => { releaseDashboardLoad = resolve; });
+  class DelayedDashboardWindow extends FakeWindow {
+    async loadURL(url) {
+      this.loadCount += 1;
+      this.webContents.url = url;
+      markDashboardLoadStarted();
+      await dashboardLoadGate;
+    }
+  }
+  const delayedManager = createDashboardWindowManager({ ...dependencies, BrowserWindow: DelayedDashboardWindow });
+  const delayedOpen = delayedManager.open();
+  await dashboardLoadStarted;
+  const delayedWindow = delayedManager.getWindow();
+  assert.ok(delayedWindow, 'dashboard window must exist while its authenticated navigation is loading');
+  delayedWindow.emit('ready-to-show');
+  assert.notEqual(delayedWindow.shown, true, 'ready-to-show must not expose the dark bootstrap canvas before dashboard navigation completes');
+  releaseDashboardLoad();
+  await delayedOpen;
+  assert.equal(delayedWindow.shown, true, 'dashboard must become visible after its authenticated navigation finishes');
+  await delayedManager.close();
+  windows.length = 0;
+
   const manager = createDashboardWindowManager(dependencies);
   const [win, concurrentWin] = await Promise.all([manager.open(), manager.open()]);
   assert.equal(concurrentWin, win, 'concurrent dashboard opens must share one BrowserWindow');

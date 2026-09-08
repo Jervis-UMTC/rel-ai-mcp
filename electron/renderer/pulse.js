@@ -2,8 +2,11 @@ let currentModel = { route: '#home' };
 let expanded = false;
 let collapseTimer = null;
 let geometryTimer = null;
+let hoverOpenTimer = null;
+let suppressHoverOpen = false;
 
 const PULSE_TRANSITION_MS = 170;
+const PULSE_HOVER_OPEN_DELAY_MS = 500;
 
 const shell = document.getElementById('pulseShell');
 const toggle = document.getElementById('pulseToggle');
@@ -79,6 +82,8 @@ function setExpanded(next) {
   collapseTimer = null;
   clearTimeout(geometryTimer);
   geometryTimer = null;
+  clearTimeout(hoverOpenTimer);
+  hoverOpenTimer = null;
   if (expanded === value) return;
   expanded = value;
 
@@ -108,6 +113,16 @@ function applyExpandedVisual(value) {
   openButton.tabIndex = value ? 0 : -1;
 }
 
+function scheduleHoverOpen() {
+  clearTimeout(hoverOpenTimer);
+  hoverOpenTimer = null;
+  if (expanded || suppressHoverOpen) return;
+  hoverOpenTimer = setTimeout(() => {
+    hoverOpenTimer = null;
+    if (!suppressHoverOpen && shell.matches(':hover')) setExpanded(true);
+  }, PULSE_HOVER_OPEN_DELAY_MS);
+}
+
 function scheduleCollapse() {
   clearTimeout(collapseTimer);
   collapseTimer = setTimeout(() => {
@@ -115,13 +130,19 @@ function scheduleCollapse() {
   }, 260);
 }
 
-shell.addEventListener('pointerenter', () => setExpanded(true));
-shell.addEventListener('pointerleave', scheduleCollapse);
-shell.addEventListener('focusin', () => setExpanded(true));
+shell.addEventListener('pointerenter', scheduleHoverOpen);
+shell.addEventListener('pointerleave', () => {
+  clearTimeout(hoverOpenTimer);
+  hoverOpenTimer = null;
+  suppressHoverOpen = false;
+  scheduleCollapse();
+});
 shell.addEventListener('focusout', scheduleCollapse);
 toggle.addEventListener('click', event => {
   event.stopPropagation();
-  setExpanded(!expanded);
+  const next = !expanded;
+  if (!next) suppressHoverOpen = true;
+  setExpanded(next);
 });
 openButton.addEventListener('click', () => {
   Promise.resolve(window.relaiPulse?.openDashboard?.(currentModel.route || '#home')).catch(() => {});

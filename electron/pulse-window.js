@@ -112,6 +112,7 @@ function createPulseWindowManager(options = {}) {
       title: 'Rel.AI Pulse',
       icon: iconPath || undefined,
       transparent: true,
+      hasShadow: false,
       backgroundColor: '#00000000',
       webPreferences: localWindowWebPreferences(preloadPath, 'relai-pulse', 'pulse')
     });

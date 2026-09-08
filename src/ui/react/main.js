@@ -34,6 +34,7 @@ import { getOverlaySnapshot, removeToastOverlay, subscribeOverlay } from '../ove
 import { normalizeRouteKey } from '../route-policy.js';
 export { initConnectorRefreshModal } from '../connector-refresh-modal.js';
 export { initUpdateAvailableModal } from '../update-available-modal.js';
+export { applyLiveEvent, getSnapshot, init, patchLocalConnection, subscribe } from '../store.js';
 
 const h = React.createElement;
 const DashboardStoreContext = createContext(null);

@@ -105,7 +105,6 @@ function createDashboardWindowManager(deps) {
     });
     secureSession(dashboardWindow.webContents.session);
     configureNavigation(dashboardWindow);
-    dashboardWindow.once('ready-to-show', () => { dashboardWindow?.show(); sendWindowState(); });
     dashboardWindow.on('resize', schedulePersist);
     dashboardWindow.on('move', schedulePersist);
     bindWindowState(dashboardWindow);
