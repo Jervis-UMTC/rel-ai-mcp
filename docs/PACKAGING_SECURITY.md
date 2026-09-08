@@ -14,11 +14,11 @@ Rel.AI MCP separates runtime dependency security from release-tool dependency se
 
 ## Bundled OpenAI tunnel-client policy
 
-Rel.AI keeps the tunnel runtime inside the application package so the installed desktop does not depend on a separate tunnel-client installation.
+Rel.AI keeps the tunnel runtime inside the application package so the installed desktop does not depend on a separate tunnel-client installation. Rel.AI 1.0.0 reviews and pins OpenAI `tunnel-client` v0.0.14 using the **full** upstream distribution. The desktop still invokes only `tunnel-client run`; retaining the full distribution preserves upstream `doctor`, profile, tunnel-administration, and Codex integration commands for reviewed operator or desktop integration without bundling a Cloudflare companion runtime.
 
-`vendor/tunnel-client/manifest.json` pins the reviewed version, source repository, license, per-platform release URL, exact file size, and SHA-256. `scripts/fetch-tunnel-client.mjs` fetches only the pinned archive for supported platforms and refuses bytes that do not match the manifest. `scripts/verify-tunnel-client.mjs` verifies the extracted binary before packaging.
+`vendor/tunnel-client/manifest.json` pins the reviewed version, release tag, distribution, source repository, license, per-platform release URL, archive size and SHA-256, exact ZIP entry, and extracted executable size and SHA-256. `scripts/fetch-tunnel-client.mjs` fetches only the pinned archive, verifies the archive before parsing it, extracts only the exact declared ZIP entry with the in-process `yauzl` parser, and refuses archive-layout drift instead of falling back to a same-named executable elsewhere in the ZIP. `scripts/verify-tunnel-client.mjs` rechecks the extracted binary and, on the native build host, verifies the reported version, every `run` flag used by Rel.AI, and the full-distribution `doctor`, profiles, `admin tunnels`, and Codex command families.
 
-The same manifest and platform binary are copied outside ASAR under `resources/bin/tunnel-client/`. `scripts/verify-packaged-app.mjs` rechecks the packaged size and SHA-256. Runtime code does not accept a renderer-supplied executable path and does not silently replace the binary after installation; upgrades arrive through reviewed Rel.AI releases.
+The same manifest and platform binary are copied outside ASAR under `resources/bin/tunnel-client/`. `scripts/verify-packaged-app.mjs` rechecks the packaged manifest and executable size/SHA-256 and validates the native packaged executable version. Runtime code does not accept a renderer-supplied executable path and does not silently replace the binary after installation; upgrades arrive through reviewed Rel.AI releases. `cloudflared` and `tunnel-client-runtime-cloudflared` artifacts are not packaged by Rel.AI.
 
 ## Antivirus classification
 

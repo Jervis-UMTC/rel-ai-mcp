@@ -1,42 +1,48 @@
 {
-  "version": "0.0.11",
+  "version": "0.0.14",
+  "releaseTag": "v0.0.14",
+  "distribution": "full",
   "license": "Apache-2.0",
   "source": "https://github.com/openai/tunnel-client",
-  "baseUrl": "https://persistent.oaistatic.com/tunnel-client/v0.0.11",
+  "baseUrl": "https://persistent.oaistatic.com/tunnel-client/v0.0.14",
   "platforms": {
     "win32": {
-      "archive": "tunnel-client-v0.0.11-windows-amd64.zip",
-      "archiveSha256": "eb912c86c6ccde90cda805cb17009507176a656725cf86c36fabe1901a12e29b",
-      "archiveEntry": "64/tunnel-client.exe",
+      "archive": "tunnel-client-v0.0.14-windows-amd64.zip",
+      "archiveSize": 27824988,
+      "archiveSha256": "784ab8da7b5a88f0109f1fd8aaf0a1c86067430b896dddf307ef7e3cc49fa1a5",
+      "archiveEntry": "tunnel-client.exe",
       "file": "tunnel-client.exe",
-      "size": 20798464,
-      "sha256": "7d3c7d492ce84b52835e11865a835a8a5bcd4a669dee84e169aa11b314dc952a"
+      "size": 21826048,
+      "sha256": "fcc85a69ec0ad82518e4f8964f60c45e31787957782a0fc9c1b0c44e82d61b9b"
     },
     "linux": {
-      "archive": "tunnel-client-v0.0.11-linux-amd64.zip",
-      "archiveSha256": "29adfe5c1399dfb9fda9383f230c324355912f50dc36e2e416b1f1322317b3c4",
-      "archiveEntry": "64/tunnel-client",
+      "archive": "tunnel-client-v0.0.14-linux-amd64.zip",
+      "archiveSize": 27753708,
+      "archiveSha256": "15bd17e805cad39d412199115bb9e10a978dd35258a114cdf25dd2ae6681c7d3",
+      "archiveEntry": "tunnel-client",
       "file": "tunnel-client",
-      "size": 20246690,
-      "sha256": "c79ad91d929f50cb1676c4fcbce937c81b1854ec37ca758118c2d78a373c431f"
+      "size": 21307552,
+      "sha256": "472eb9dd9dd625b4e6023c3b4a5736b3a2e5a1b6dbe9338e001887a64ec992a6"
     },
     "darwin": {
       "architectures": {
         "x64": {
-          "archive": "tunnel-client-v0.0.11-darwin-amd64.zip",
-          "archiveSha256": "a48c8a37983d9bf9442309cb661cd2f14d7321cfacf72375d7fa31a6a7420db0",
-          "archiveEntry": "64/tunnel-client",
+          "archive": "tunnel-client-v0.0.14-darwin-amd64.zip",
+          "archiveSize": 28589343,
+          "archiveSha256": "75e10be774184fb42189e347b16eb6bc9fb0780135d8af714d34e30ce068dc53",
+          "archiveEntry": "tunnel-client",
           "file": "tunnel-client",
-          "size": 20794544,
-          "sha256": "e5ad5013e43d517a201e23cddff5fa3becf4dc6b1278aca8883b3aa00e16851d"
+          "size": 21877984,
+          "sha256": "89478d1d58350818275b852169745e1af0e18c02ff9b5b46d50df22018c95be9"
         },
         "arm64": {
-          "archive": "tunnel-client-v0.0.11-darwin-arm64.zip",
-          "archiveSha256": "3685443b057614ff932d2d477dab94be2082e60bcf4e8b4e378bebc89121b714",
-          "archiveEntry": "64/tunnel-client",
+          "archive": "tunnel-client-v0.0.14-darwin-arm64.zip",
+          "archiveSize": 26771198,
+          "archiveSha256": "b540493c5bdbcdbb755700c8e2e16597e28b1569e425007e0f73111047bd6a64",
+          "archiveEntry": "tunnel-client",
           "file": "tunnel-client",
-          "size": 19429170,
-          "sha256": "a916406d4fd5506aab9a593808ebd10ab23aa7d11e1675d33612632b9ead7e51"
+          "size": 20405442,
+          "sha256": "309fd85da5a8c2ca8dae920deea8ac10a4d7934ed18ac46e7df0c200139cc9c5"
         }
       }
     }

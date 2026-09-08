@@ -5,6 +5,21 @@ const electronPackage = JSON.parse(fs.readFileSync(new URL('../electron/package.
 const main = fs.readFileSync(new URL('../electron/main.js', import.meta.url), 'utf8');
 const rootPackage = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const electronPackager = fs.readFileSync(new URL('../scripts/electron-package.mjs', import.meta.url), 'utf8');
+const tunnelManifest = JSON.parse(fs.readFileSync(new URL('../vendor/tunnel-client/manifest.json', import.meta.url), 'utf8'));
+
+assert.equal(tunnelManifest.version, '0.0.14');
+assert.equal(tunnelManifest.releaseTag, 'v0.0.14');
+assert.equal(tunnelManifest.distribution, 'full');
+assert.equal(tunnelManifest.baseUrl.endsWith('/v0.0.14'), true);
+for (const spec of tunnelSpecs(tunnelManifest)) {
+  assert.match(spec.archive, /^tunnel-client-v0\.0\.14-/);
+  assert.doesNotMatch(spec.archive, /runtime|cloudflared/i);
+  assert.equal(spec.archiveEntry, spec.file, 'v0.0.14 full artifacts must use the reviewed root-level executable entry');
+  assert.equal(Number.isInteger(spec.archiveSize) && spec.archiveSize > 0, true);
+  assert.match(spec.archiveSha256, /^[a-f0-9]{64}$/);
+  assert.equal(Number.isInteger(spec.size) && spec.size > 0, true);
+  assert.match(spec.sha256, /^[a-f0-9]{64}$/);
+}
 
 assert.ok(electronPackage.build.files.includes('desktop-host.js'));
 assert.ok(electronPackage.build.files.includes('secure-tunnel-runtime.js'));
@@ -26,3 +41,12 @@ assert.match(electronPackager, /ensureTunnelClient\(platform, targetArch\)/);
 assert.match(electronPackager, /OpenAI tunnel-client is missing.*fetching the pinned/);
 assert.match(electronPackager, /OpenAI tunnel-client verification/);
 console.log('secure-tunnel-packaging-contract-unit: ok');
+
+function tunnelSpecs(manifest) {
+  const specs = [];
+  for (const platformSpec of Object.values(manifest.platforms || {})) {
+    if (platformSpec?.architectures) specs.push(...Object.values(platformSpec.architectures));
+    else specs.push(platformSpec);
+  }
+  return specs.filter(Boolean);
+}

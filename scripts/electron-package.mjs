@@ -27,7 +27,8 @@ const targetArch = normalizeElectronArch(process.env.REL_AI_TARGET_ARCH || proce
 const platformSpec = electronPlatformSpec(platform, targetArch);
 assertSupportedBuildHost(platformSpec, targetArch);
 const target = mode === 'release' ? path.join(root, 'dist') : path.join(root, 'dist', 'build-check');
-assertSafeControllerOperation({ operation: 'package', targetPaths: [target] });
+const safetyTargets = mode === 'release' ? releaseOutputSafetyTargets(target, platformSpec) : [target];
+assertSafeControllerOperation({ operation: 'package', targetPaths: safetyTargets });
 assertSafeBuilderArgs(options.builderArgs);
 
 const generateColorTokens = path.join(root, 'scripts', 'generate-color-tokens.mjs');
@@ -288,6 +289,30 @@ function collectArtifactFiles(sourceDirectory, destinationDirectory, names) {
   }
 }
 
+function releaseOutputSafetyTargets(destinationRoot, spec) {
+  const canonical = releaseArtifactNames(readVersion());
+  const canonicalNames = spec.platform === 'win32'
+    ? [canonical.installer, canonical.portable, canonical.blockmap, canonical.metadata]
+    : spec.platform === 'linux'
+      ? [canonical.linuxAppImage, canonical.linuxDeb, canonical.linuxMetadata]
+      : [targetArch === 'arm64' ? canonical.macDmgArm64 : canonical.macDmgX64];
+  const targets = new Set([
+    ...canonicalNames,
+    canonical.checksums,
+    canonical.sbom,
+    'release-assets.txt',
+    spec.markerName
+  ].map(name => path.join(destinationRoot, name)));
+  if (fs.existsSync(destinationRoot)) {
+    for (const entry of fs.readdirSync(destinationRoot, { withFileTypes: true })) {
+      if (entry.isFile() && isPlatformReleaseArtifact(entry.name, spec.platform)) {
+        targets.add(path.join(destinationRoot, entry.name));
+      }
+    }
+  }
+  return [...targets];
+}
+
 function promoteReleaseOutput({ stagingRoot, destinationRoot, spec, requiredArtifacts }) {
   const prepackaged = path.join(stagingRoot, spec.unpackedDirectory);
   assertPrepackagedApp(prepackaged, spec);
@@ -331,6 +356,7 @@ function promoteReleaseOutput({ stagingRoot, destinationRoot, spec, requiredArti
   const preferredUnpacked = path.join(destinationRoot, spec.unpackedDirectory);
   let unpackedPath = preferredUnpacked;
   try {
+    assertSafeControllerOperation({ operation: 'package', targetPaths: [preferredUnpacked] });
     removeDirectory(preferredUnpacked);
   } catch (error) {
     const buildId = `${spec.platform}-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}`;
@@ -365,6 +391,7 @@ function removeObsoleteUnpackedBuilds(directory, currentPath, platform) {
     const candidate = path.join(directory, entry.name);
     if (path.resolve(candidate) === current) continue;
     try {
+      assertSafeControllerOperation({ operation: 'package', targetPaths: [candidate] });
       removeDirectory(candidate);
     } catch (error) {
       console.warn(`[electron-package] Obsolete unpacked output is still locked and was preserved: ${path.relative(root, candidate)}. ${messageOf(error)}`);

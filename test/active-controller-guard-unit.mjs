@@ -27,6 +27,13 @@ const blockedBuild = evaluateControllerSafety({ operation: 'package', targetPath
 assert.equal(blockedBuild.ok, false, 'packaging must not replace files used by an active unpacked controller');
 assert.equal(blockedBuild.blockingControllers[0].pid, unpackedController.pid);
 
+const releaseArtifact = path.join(releaseTarget, 'Rel.AI-MCP-1.0.0.exe');
+const siblingUnpacked = path.join(releaseTarget, 'unpacked-builds', 'win32-new');
+assert.equal(evaluateControllerSafety({ operation: 'package', targetPaths: [releaseArtifact], controllers: [unpackedController] }).ok, true,
+  'an active unpacked controller must not block promotion of a sibling release artifact');
+assert.equal(evaluateControllerSafety({ operation: 'package', targetPaths: [siblingUnpacked], controllers: [unpackedController] }).ok, true,
+  'an active unpacked controller must not block creation of an isolated sibling unpacked build');
+
 const blockedInstall = evaluateControllerSafety({ operation: 'install', targetPaths: [], controllers: [installedController] });
 assert.equal(blockedInstall.ok, false, 'production-identity install operations must stop when any Rel.AI controller is active');
 

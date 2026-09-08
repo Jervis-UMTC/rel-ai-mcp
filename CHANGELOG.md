@@ -7,6 +7,8 @@
 - **Modernized Electron into a thinner desktop shell while preserving secure IPC, updater, task, process, and repository behavior.**
 - **Reworked computer and web automation around Midscene and fixed Windows packaged dependency inclusion for yallist.**
 - **Consolidated release, validation, observability, and hard-cutover checks for the 1.0.0 candidate.**
+- **Upgrade the bundled OpenAI Secure MCP Tunnel client from v0.0.11 to the full v0.0.14 release.** Rel.AI keeps its existing Electron-owned lifecycle and recovery behavior while gaining the upstream v0.0.14 transport/OAuth/Harpoon fixes and retaining the full `doctor`, profile, tunnel-administration, and Codex command surface for future reviewed integration; Cloudflare companion artifacts remain excluded.
+- **Harden tunnel-client provenance and compatibility validation.** Vendor acquisition now verifies pinned archive size/SHA-256, extracts only the reviewed root-level ZIP entry with an in-process parser, verifies executable size/SHA-256, checks the native binary version and every `run` flag Rel.AI depends on, and proves the expected full-distribution command families before packaging.
 
 Bump root/electron/status UI/lockfiles to 1.0.0.
 
