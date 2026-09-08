@@ -339,6 +339,7 @@ try {
 
   assert.equal(validateConnection({ url: 'http://localhost:3333/dashboard' }).pathname, '/dashboard');
   assert.equal(normalizeRouteHash('settings/connection'), '#settings/connection');
+  assert.equal(normalizeRouteHash('#tasks?workspace=repo&task=task-1'), '#tasks?workspace=repo&task=task-1');
   assert.throws(() => normalizeRouteHash('settings/connection?token=secret'), /Invalid dashboard route/);
   assert.throws(() => validateConnection({ url: 'https://example.com/dashboard' }), /local loopback/);
   assert.throws(() => validateConnection({ url: 'http://127.0.0.1:3333/health' }), /local loopback/);

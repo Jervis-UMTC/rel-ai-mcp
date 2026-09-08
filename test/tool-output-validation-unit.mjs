@@ -161,7 +161,25 @@ await assert.doesNotReject(() => validateToolOutput({}, 'relai_exec', {
   executed: true,
   commandSucceeded: true,
   exitCode: 0,
-  durationMs: 1
+  durationMs: 1,
+  queueWaitMs: 0,
+  queueTimedOut: false
+}));
+
+await assert.doesNotReject(() => validateToolOutput({}, 'relai_process', {
+  action: 'start',
+  workspace: 'repo',
+  work_id: 'work_output',
+  kind: 'service',
+  purpose: 'Serve test fixture',
+  command: 'node server.js'
+}, {
+  ok: true,
+  work_id: 'work_output',
+  processId: 'proc_abcdefghijklmnopqrst',
+  status: 'running',
+  lifecycle: 'persistent',
+  queueWaitMs: 12
 }));
 
 await assert.doesNotReject(() => validateToolOutput({}, 'relai_exec', {
@@ -174,6 +192,30 @@ await assert.doesNotReject(() => validateToolOutput({}, 'relai_exec', {
   commandSucceeded: true,
   exitCode: 0,
   durationMs: 1
+}));
+
+for (const [action, args, result] of [
+  ['status', {}, { ok: true, workspace: 'repo', action: 'status', platform: 'win32', enabled: true, available: true, engine: '@midscene/computer', displays: 2 }],
+  ['displays', {}, { ok: true, workspace: 'repo', action: 'displays', platform: 'win32', engine: '@midscene/computer', displays: [{ id: 'display-1', width: 1920, height: 1080 }], count: 1 }],
+  ['screenshot', { displayId: 'display-1' }, { ok: true, workspace: 'repo', action: 'screenshot', platform: 'win32', engine: '@midscene/computer', displayId: 'display-1', image: { mimeType: 'image/png', data: 'fixture' } }],
+  ['click', { x: 10, y: 20, displayId: 'display-1' }, { ok: true, workspace: 'repo', action: 'click', platform: 'win32', displayId: 'display-1', x: 10, y: 20, executed: true }]
+]) {
+  await assert.doesNotReject(() => validateToolOutput({}, 'relai_computer', { action, workspace: 'repo', ...args }, result));
+}
+
+await assert.doesNotReject(() => validateToolOutput({}, 'relai_changes', {
+  action: 'restore',
+  workspace: 'repo',
+  paths: ['README.md']
+}, {
+  ok: true,
+  workspace: 'repo',
+  mode: 'paths',
+  paths: ['README.md'],
+  exitCode: 0,
+  durationMs: 8,
+  queueWaitMs: 3,
+  queueTimedOut: false
 }));
 
 await assert.doesNotReject(() => validateToolOutput({}, 'relai_publish', {

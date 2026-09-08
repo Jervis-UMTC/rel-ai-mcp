@@ -175,7 +175,7 @@ async function performRefresh(options = {}) {
       clearShellDashboardState();
       _lastEventAt = Date.now();
       setShellLastEventAt(_lastEventAt);
-      clearRecoveryNotice({ announce: true });
+      clearRecoveryNotice({ announce: options.announceRecovery === true });
       return refreshed;
     }
     return options.quietFailure === true ? data : renderRefreshFailure(data);
@@ -193,7 +193,12 @@ async function recoverDashboard(options = {}) {
   for (let attempt = 0; attempt < AUTO_RECOVERY_DELAYS_MS.length; attempt += 1) {
     const delay = AUTO_RECOVERY_DELAYS_MS[attempt];
     if (delay) await wait(delay);
-    latest = await doRefresh({ ...options, source: options.source || 'automatic-recovery', quietFailure: true });
+    latest = await doRefresh({
+      ...options,
+      source: options.source || 'automatic-recovery',
+      quietFailure: true,
+      announceRecovery: true
+    });
     if (latest?.ok !== false) return latest;
     if (latest?.status === 401) break;
   }

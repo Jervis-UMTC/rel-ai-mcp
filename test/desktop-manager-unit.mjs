@@ -114,6 +114,31 @@ try {
   );
   assert.equal(calls.length, callsBeforeCancellation, 'pre-cancelled structured actions must not reach the native bridge');
 
+  let markBridgeStarted;
+  let releaseBridge;
+  const bridgeStarted = new Promise(resolve => { markBridgeStarted = resolve; });
+  const bridgeRelease = new Promise(resolve => { releaseBridge = resolve; });
+  configureDesktopNativeBridge(async payload => {
+    calls.push(payload);
+    markBridgeStarted();
+    await bridgeRelease;
+    return { ok: true, platform: 'win32' };
+  });
+  const midflightController = new AbortController();
+  const dispatched = runDesktopAction(
+    workspace,
+    enabledConfig,
+    { action: 'open_uri', uri: 'https://example.com/dispatched' },
+    { signal: midflightController.signal }
+  );
+  await bridgeStarted;
+  midflightController.abort();
+  releaseBridge();
+  const dispatchedResult = await dispatched;
+  assert.equal(dispatchedResult.uri, 'https://example.com/dispatched');
+  assert.deepEqual(calls.at(-1), { action: 'open_uri', uri: 'https://example.com/dispatched' },
+    'a native side effect already dispatched before cancellation must report its completed result');
+
   configureDesktopNativeBridge(null);
   await assert.rejects(
     () => runDesktopAction(workspace, enabledConfig, { action: 'clipboard_read' }),

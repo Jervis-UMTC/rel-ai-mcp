@@ -113,7 +113,7 @@ export function createUsageRoute(useDashboardSlices) {
 
     const changeWorkspace = value => {
       setWorkspace(value);
-      replaceRouteParams({ workspace: value || null, device: null });
+      replaceRouteParams({ workspace: value || null });
     };
     const changeRange = value => {
       setRange(value);
@@ -280,7 +280,6 @@ function Metric({ metric }) {
   const [open, setOpen] = useState(false);
   const helpId = `usage-metric-help-${metric.key}`;
   const sparkValues = Array.isArray(metric.values) ? metric.values : [];
-  const sparkMode = ['toolCalls', 'infrastructureFailures', 'recoverableFailures'].includes(metric.key) ? 'bar' : 'line';
   return h('article', { className: `usage-metric ${metric.tone}${open ? ' help-open' : ''}`.trim() },
     h('div', { className: 'usage-metric-label-row' },
       h('span', { className: 'usage-metric-label-main' },
@@ -317,7 +316,7 @@ function Metric({ metric }) {
     ),
     metric.detail ? h('small', { className: 'usage-metric-detail' }, metric.detail) : null,
     sparkValues.length
-      ? h(SparkChart, { values: sparkValues, className: `usage-sparkline ${metric.tone}`.trim(), mode: sparkMode, tone: metric.tone })
+      ? h(SparkChart, { values: sparkValues, className: `usage-sparkline ${metric.tone}`.trim(), tone: metric.tone })
       : h('span', { className: 'usage-sparkline-empty', 'aria-hidden': 'true' })
   );
 }
@@ -340,7 +339,6 @@ function Timeline({ bounds, points = [], metricKey, label }) {
   const selectedTime = formatPointTime(point, bounds, true);
   const selectedValue = formatChartValue(values[safeIndex], label);
   const peakValue = formatChartValue(model.peak, label);
-  const mode = ['toolCalls', 'infrastructureFailures'].includes(metricKey) ? 'bar' : 'line';
   const labels = points.map(item => formatPointTime(item, bounds, false));
   const detailedLabels = points.map(item => formatPointTime(item, bounds, true));
   const formatValue = value => formatChartValue(value, label);
@@ -356,7 +354,6 @@ function Timeline({ bounds, points = [], metricKey, label }) {
         values,
         labels,
         detailedLabels,
-        mode,
         className: 'usage-timeline-chart',
         ariaLabel: model.summary,
         ariaDescribedBy: readoutId,
@@ -367,7 +364,7 @@ function Timeline({ bounds, points = [], metricKey, label }) {
         onActiveIndexChange: setActiveIndex
       })
     ),
-    h('div', { className: 'usage-chart-hint' }, 'Hover the chart or focus it and use ← / → to inspect exact values. Times are UTC.')
+    h('div', { className: 'usage-chart-hint' }, 'Hover the chart or focus it and use ← / → to inspect exact values. Hourly data uses UTC buckets; missing rate or duration samples are shown as gaps.')
   );
 }
 

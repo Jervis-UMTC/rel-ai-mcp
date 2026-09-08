@@ -14,6 +14,7 @@ assert.equal(classifyAnalyticsOutcome({ ok: false, operationName: 'relai_validat
 assert.equal(classifyAnalyticsOutcome({ ok: false, operationName: 'relai_edit', errorCode: 'EDIT_CONTEXT_MISMATCH' }), OUTCOME_CLASSES.RECOVERABLE_FAILURE);
 assert.equal(classifyAnalyticsOutcome({ ok: false, errorMessage: 'Path is a directory: node_modules' }), OUTCOME_CLASSES.UNCLASSIFIED_FAILURE);
 assert.equal(classifyAnalyticsOutcome({ ok: false, errorMessage: 'ExceptionGroup: unhandled errors in a TaskGroup' }), OUTCOME_CLASSES.INFRASTRUCTURE_FAILURE);
+assert.equal(classifyAnalyticsOutcome({ ok: false, operationName: 'relai_validate', errorCode: 'ERR_MODULE_NOT_FOUND' }), OUTCOME_CLASSES.INFRASTRUCTURE_FAILURE, 'validator infrastructure crashes must not count as reliable operation failures');
 assert.equal(classifyAnalyticsOutcome({ ok: false, errorMessage: 'Operation cancelled.' }), OUTCOME_CLASSES.CANCELLED);
 
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-reliability-'));

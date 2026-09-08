@@ -57,6 +57,9 @@ for (const file of ['electron/renderer/status.html', 'electron/renderer/wizard.h
   assert.doesNotMatch(html, /<style\b/i);
   assert.doesNotMatch(html, /Open in browser/i);
 }
+assert.match(electronCss, /\.status-details > summary > span\s*\{[^}]*transition:/s, 'recovery disclosure animation must target only its direct chevron');
+assert.match(electronCss, /\.status-details\[open\] > summary > span\s*\{[^}]*rotate\(180deg\)/s, 'opening recovery details must rotate only the direct chevron');
+assert.doesNotMatch(electronCss, /\.status-details\[open\] summary span/, 'opening recovery details must not rotate nested diagnostic log text');
 assert.doesNotMatch(wizardHtml, /<div class="wizard-logo">R<\/div>/, 'setup wizard must not restore the synthetic R badge');
 assert.match(wizardHtml, /<small>\/ MCP<\/small>/, 'setup wizard branding should match the website wordmark treatment');
 

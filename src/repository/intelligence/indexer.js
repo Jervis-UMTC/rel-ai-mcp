@@ -5,7 +5,7 @@ import { Worker } from 'node:worker_threads';
 import { collectOptionsFromWorkspace, createCollectionPathFilter, isPathInside, realRootOf } from '../../safety.js';
 import { getStateDir } from '../../stateLayout.js';
 import { watchPathFor } from '../../watchPath.js';
-import { repositoryIndexPath } from './database.js';
+import { ensureIndexSchema, failBuildingGenerations, openIndexDatabase, repositoryIndexPath } from './database.js';
 import { DEFAULT_MAX_INDEX_FILES } from './indexBuild.js';
 import { recentIntelligenceDiagnostics, recordIntelligenceDiagnostic } from './state.js';
 import { measurePerformancePhase } from '../../performanceObservability.js';
@@ -260,6 +260,7 @@ async function runCoalescedIndexing(workspace, config, databaseFile, state, opti
     }
     return decorateMetadata(state, metadata);
   } catch (error) {
+    recoverAbandonedIndexGenerations(databaseFile, error);
     state.dirty = true;
     if (error?.code === 'INDEX_ABORTED' || error?.name === 'AbortError') {
       state.status = state.metadata ? 'ready' : 'idle';
@@ -374,14 +375,16 @@ function repositoryWorkerClient(databaseFile) {
       client.closed = true;
       clearIdleTermination();
       if (workerClients.get(databaseFile) === client) workerClients.delete(databaseFile);
-      for (const entry of pending.values()) {
+      const entries = [...pending.values()];
+      for (const entry of entries) {
         if (entry.cancelTimer) clearTimeout(entry.cancelTimer);
-        entry.reject(reason);
       }
       pending.clear();
       worker.unref();
       worker.removeAllListeners();
-      return worker.terminate().catch(() => {});
+      return worker.terminate().catch(() => {}).finally(() => {
+        for (const entry of entries) entry.reject(reason);
+      });
     }
   };
 
@@ -405,6 +408,19 @@ function repositoryWorkerClient(databaseFile) {
 
 function failedExecution(error) {
   return { promise: Promise.reject(error), cancel() {} };
+}
+
+function recoverAbandonedIndexGenerations(databaseFile, error) {
+  let db = null;
+  try {
+    db = openIndexDatabase(databaseFile);
+    ensureIndexSchema(db);
+    failBuildingGenerations(db, boundedErrorMessage(error));
+  } catch {
+    // Preserve the original indexing failure. A later refresh can retry recovery.
+  } finally {
+    try { db?.close(); } catch {}
+  }
 }
 
 function waitForBuild(record, signal) {

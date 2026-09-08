@@ -413,7 +413,11 @@ See [Development](docs/DEVELOPMENT.md) for source architecture, generated assets
 | Connect ChatGPT with Secure MCP Tunnel | [Connecting to ChatGPT](docs/CONNECTING_TO_CHATGPT.md) |
 | Understand the runtime architecture | [Architecture](docs/ARCHITECTURE.md) |
 | Understand the desktop interaction model | [Desktop UX architecture](docs/DESKTOP_UX_ARCHITECTURE.md) |
-| Review security and local trust boundaries | [Security](docs/SECURITY.md) |
+| Review security and local trust boundaries | [Security architecture](docs/SECURITY.md) |
+| Report a vulnerability | [Security Policy](SECURITY.md) |
+| Review data handling and retention | [Privacy Policy](PRIVACY.md) |
+| Review terms for official project services | [Terms of Use](TERMS.md) |
+| Review bundled third-party software notices | [Third-party notices](THIRD_PARTY_NOTICES.md) |
 | Understand MCP lifecycle and compatibility | [MCP protocol policy](docs/MCP_PROTOCOL_POLICY.md) |
 | Understand recovery and completion authority | [Workflow reliability](docs/WORKFLOW_RELIABILITY.md) |
 | Understand sessions, activity, and observable evidence | [Task observability](docs/TASK_OBSERVABILITY.md) |
@@ -441,5 +445,7 @@ Never include tunnel runtime API keys, local bearer credentials, repository secr
 Rel.AI MCP is created and maintained by [Kyne](https://github.com/Kyne0328).
 
 Copyright © 2026 Kyne. The current source tree is released under the [Apache License 2.0](LICENSE). Rel.AI also ships a [NOTICE](NOTICE) identifying Kyne (Kyne0328) as the original creator and linking to the original Rel.AI MCP project. Under Apache-2.0, applicable attribution notices from that NOTICE must be preserved in qualifying derivative distributions.
+
+For product data handling, official project-service terms, vulnerability reporting, and bundled dependency notices, see the [Privacy Policy](PRIVACY.md), [Terms of Use](TERMS.md), [Security Policy](SECURITY.md), and [Third-party notices](THIRD_PARTY_NOTICES.md).
 
 Previously published Rel.AI releases remain governed by the license terms included with those releases.

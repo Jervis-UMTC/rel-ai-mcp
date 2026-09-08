@@ -1,12 +1,8 @@
 let currentModel = { route: '#home' };
 let expanded = false;
-let collapseTimer = null;
 let geometryTimer = null;
-let hoverOpenTimer = null;
-let suppressHoverOpen = false;
 
-const PULSE_TRANSITION_MS = 170;
-const PULSE_HOVER_OPEN_DELAY_MS = 500;
+const PULSE_TRANSITION_MS = 240;
 
 const shell = document.getElementById('pulseShell');
 const toggle = document.getElementById('pulseToggle');
@@ -30,6 +26,7 @@ function updatePulse(model = {}) {
     contextTitle: '',
     workspace: '',
     otherTaskCount: 0,
+    taskNames: [],
     progressPercent: undefined,
     progressLabel: '',
     ...(model || {})
@@ -44,7 +41,10 @@ function updatePulse(model = {}) {
   const detail = String(currentModel.detail || '').trim();
   const workspace = String(currentModel.workspace || '').trim();
   const taskCount = Math.max(0, Number(currentModel.taskCount || 0));
-  const otherTaskCount = Math.max(0, Number(currentModel.otherTaskCount || 0));
+  const taskNames = (Array.isArray(currentModel.taskNames) ? currentModel.taskNames : [])
+    .map(value => String(value || '').trim())
+    .filter(Boolean)
+    .slice(0, 3);
   const progressPercent = Number(currentModel.progressPercent);
   const hasProgress = Number.isFinite(progressPercent) && progressPercent >= 0;
 
@@ -61,8 +61,9 @@ function updatePulse(model = {}) {
   workspaceRow.hidden = !workspace;
   document.getElementById('pulseWorkspace').textContent = workspace;
 
-  tasksRow.hidden = otherTaskCount < 1;
-  document.getElementById('pulseTasks').textContent = otherTaskCount === 1 ? '1 other local task' : `${otherTaskCount} other local tasks`;
+  tasksRow.hidden = taskNames.length < 1;
+  const hiddenTaskCount = Math.max(0, taskCount - taskNames.length);
+  document.getElementById('pulseTasks').textContent = `${taskNames.join(' · ')}${hiddenTaskCount ? ` · +${hiddenTaskCount} more` : ''}`;
 
   progress.hidden = !hasProgress;
   if (hasProgress) {
@@ -78,12 +79,8 @@ function updatePulse(model = {}) {
 
 function setExpanded(next) {
   const value = next === true;
-  clearTimeout(collapseTimer);
-  collapseTimer = null;
   clearTimeout(geometryTimer);
   geometryTimer = null;
-  clearTimeout(hoverOpenTimer);
-  hoverOpenTimer = null;
   if (expanded === value) return;
   expanded = value;
 
@@ -93,7 +90,9 @@ function setExpanded(next) {
       .finally(() => {
         if (!expanded) return;
         requestAnimationFrame(() => {
-          if (expanded) applyExpandedVisual(true);
+          requestAnimationFrame(() => {
+            if (expanded) applyExpandedVisual(true);
+          });
         });
       });
     return;
@@ -113,36 +112,15 @@ function applyExpandedVisual(value) {
   openButton.tabIndex = value ? 0 : -1;
 }
 
-function scheduleHoverOpen() {
-  clearTimeout(hoverOpenTimer);
-  hoverOpenTimer = null;
-  if (expanded || suppressHoverOpen) return;
-  hoverOpenTimer = setTimeout(() => {
-    hoverOpenTimer = null;
-    if (!suppressHoverOpen && shell.matches(':hover')) setExpanded(true);
-  }, PULSE_HOVER_OPEN_DELAY_MS);
-}
-
-function scheduleCollapse() {
-  clearTimeout(collapseTimer);
-  collapseTimer = setTimeout(() => {
-    if (!shell.matches(':hover') && !shell.contains(document.activeElement)) setExpanded(false);
-  }, 260);
-}
-
-shell.addEventListener('pointerenter', scheduleHoverOpen);
-shell.addEventListener('pointerleave', () => {
-  clearTimeout(hoverOpenTimer);
-  hoverOpenTimer = null;
-  suppressHoverOpen = false;
-  scheduleCollapse();
+document.querySelector('.pulse-bar')?.addEventListener('click', event => {
+  if (!expanded && !event.target.closest('button')) setExpanded(true);
 });
-shell.addEventListener('focusout', scheduleCollapse);
 toggle.addEventListener('click', event => {
   event.stopPropagation();
-  const next = !expanded;
-  if (!next) suppressHoverOpen = true;
-  setExpanded(next);
+  setExpanded(!expanded);
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && expanded) setExpanded(false);
 });
 openButton.addEventListener('click', () => {
   Promise.resolve(window.relaiPulse?.openDashboard?.(currentModel.route || '#home')).catch(() => {});

@@ -24,11 +24,11 @@ The release retains one canonical public tool surface for stdio and private HTTP
 
 Required invariants:
 
-- modern protocol behavior targets `2026-07-28`;
+- ordinary MCP protocol behavior targets `2026-07-28`;
 - HTTP MCP is exposed only at `POST /mcp`;
 - local HTTP MCP requires the private bearer token except in explicit local-only test mode;
 - removed `/register`, `/authorize`, `/token`, `/sse`, and `/messages` routes remain absent;
-- HTTP may retain the tested stateless `2025-11-25` ChatGPT initialization compatibility flow;
+- HTTP may retain only the tested stateless `2025-11-25` ChatGPT startup lifecycle (`initialize` and `notifications/initialized`); all ordinary MCP operations remain modern-only;
 - native Tasks are returned only when the current request advertises the capability;
 - repository work sessions, native MCP Tasks, and managed processes retain separate identifiers;
 - task-scoped calls require the exact `work_id` created by `relai_work action=begin`;
@@ -36,7 +36,7 @@ Required invariants:
 - `relai_edit` is the repository file-change surface; and
 - publishing actions remain explicit.
 
-The native Tasks source gate is `npm run test:native-tasks-release-gate`.
+The native Tasks source gate is `npm run test:native-tasks-release-gate`. The remaining `2025-11-25` compatibility is startup-only; ordinary MCP operations must use `2026-07-28`.
 
 ## 3. Verify pinned native components
 

@@ -14,7 +14,6 @@ try {
   assert.equal(recordLocalToolOutcome(config, { tool: 'relai_inspect', workspace: 'other', ok: true, durationMs: 50, at: '2026-08-08T11:45:00Z' }), true);
 
   const snapshot = readLocalUsageSnapshot(config, '2026-08');
-  assert.equal(snapshot.source, 'local');
   assert.deepEqual(snapshot.privacy, {
     retentionDays: LOCAL_ANALYTICS_RETENTION_DAYS,
     externalTelemetry: { enabled: false, endpointConfigured: false, sampleRatio: 1 }
@@ -24,21 +23,23 @@ try {
     requests: 3, toolCalls: 3, successes: 2, failures: 1,
     reliabilityCalls: 3, reliableCalls: 3, infrastructureFailures: 0,
     operationFailures: 1, recoverableFailures: 0, cancellations: 0,
-    executionMs: 450, requestBytes: 0, resultBytes: 0, activeDays: 1
+    executionMs: 450, activeDays: 1
   });
   assert.equal(snapshot.series.length, 2);
   assert.deepEqual(snapshot.series.map(row => [row.hour, row.toolCalls]), [['2026-08-08T10', 1], ['2026-08-08T11', 2]]);
   assert.equal(snapshot.tools.find(row => row.tool === 'relai_inspect')?.toolCalls, 2);
   assert.equal(snapshot.tools.find(row => row.tool === 'relai_edit')?.failures, 1);
   assert.equal(snapshot.workspaces.find(row => row.workspace === 'repo')?.toolCalls, 2);
-  assert.equal(snapshot.workspaceDimensions.find(row => row.workspace === 'repo')?.displayName, 'This device');
   assert.equal(snapshot.workspaceTools.find(row => row.workspace === 'repo' && row.tool === 'relai_edit')?.failures, 1);
   assert.equal(snapshot.workspaceSeries.filter(row => row.workspace === 'repo').reduce((sum, row) => sum + row.toolCalls, 0), 2);
+  assert.equal('source' in snapshot, false, 'local-only analytics must not retain a cloud/local source discriminator');
+  assert.equal('devices' in snapshot, false, 'single-device analytics must not expose a redundant device dimension');
+  assert.equal('requestBytes' in snapshot.totals, false, 'unused byte counters must not remain in the analytics projection');
   assert.equal(failureCategoryFromCode('SENSITIVE_PATH_RESTRICTED'), 'policy');
   assert.deepEqual(snapshot.failureCategories, [{ category: 'policy', failures: 1 }]);
-  assert.deepEqual(snapshot.workspaceFailureCategories, [{ deviceId: 'local-device', workspace: 'repo', workspaceKey: 'local-device::repo', category: 'policy', failures: 1 }]);
+  assert.deepEqual(snapshot.workspaceFailureCategories, [{ workspace: 'repo', category: 'policy', failures: 1 }]);
   assert.deepEqual(snapshot.failureCategorySeries, [{ hour: '2026-08-08T11', category: 'policy', failures: 1 }]);
-  assert.deepEqual(snapshot.workspaceFailureCategorySeries, [{ hour: '2026-08-08T11', deviceId: 'local-device', workspace: 'repo', workspaceKey: 'local-device::repo', category: 'policy', failures: 1 }]);
+  assert.deepEqual(snapshot.workspaceFailureCategorySeries, [{ hour: '2026-08-08T11', workspace: 'repo', category: 'policy', failures: 1 }]);
 
   await flushLocalAnalytics(config);
   assert.equal(fs.existsSync(stateDatabasePath(config)), true, 'local analytics must use the shared SQLite state database');

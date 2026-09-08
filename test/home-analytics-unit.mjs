@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 
 globalThis.location = { hash: '#home' };
 const {
-  analyticsTaskBoundary,
   homeAnalyticsView,
   overviewWorkspaceStatus
 } = await import('../src/ui/features/home/index.js');
@@ -48,7 +47,7 @@ assert.equal(view.metrics[3].value, '2');
 assert.equal(view.contextSummary, 'Most active project: rel-ai-mcp');
 assert.equal(view.errorSummary, '1 internal error');
 assert.equal(view.pulse.empty, false);
-assert.match(view.pulse.summary, /Latest hour 10 actions/);
+assert.match(view.pulse.summary, /Current hour 10 actions/);
 assert.match(view.pulse.summary, /Overall trend increasing/);
 assert.deepEqual(view.pulse.values, [1, 5, 2, 10]);
 assert.equal('polyline' in view.pulse, false);
@@ -61,9 +60,4 @@ assert.equal(workspaceView.metrics[3].label, 'Total execution time');
 assert.equal(workspaceView.metrics[3].value, '1.50 s');
 
 assert.equal(homeAnalyticsView({ points: [] }).pulse.empty, true);
-assert.equal(analyticsTaskBoundary([
-  { id: 'newest', completedAt: '2026-09-06T03:00:00.000Z' },
-  { id: 'older', completedAt: '2026-09-06T02:00:00.000Z' }
-]), '2026-09-06T03:00:00.000Z');
-
 console.log('Overview analytics preview model passed.');

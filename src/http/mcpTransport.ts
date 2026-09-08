@@ -158,6 +158,22 @@ async function handleMcpStreamableObserved(ctx: HttpRouteContext): Promise<void>
   try {
     const requestContext = measureMcpPhaseSync('mcp.protocol', () => createMcpRequestContext(authInfo, authMode));
     if (legacy) {
+      const method = String(message?.method || '');
+      if (!LEGACY_LIFECYCLE_METHODS.includes(method)) {
+        finishRequest(false);
+        sendMcpProtocolError(
+          ctx.res,
+          400,
+          -32022,
+          `MCP 2025-11-25 compatibility is limited to initialize lifecycle requests. Use MCP ${MCP_PROTOCOL_VERSION} for ${method || 'this request'}.`,
+          message?.id,
+          {
+            supported: [MCP_PROTOCOL_VERSION],
+            requested: String(params.protocolVersion || headerValue(ctx.req.headers, 'mcp-protocol-version') || '2025-11-25')
+          }
+        );
+        return;
+      }
       await handleLegacyMcpRequest(ctx, message, { context: requestContext, params, principalId, finishRequest });
       return;
     }

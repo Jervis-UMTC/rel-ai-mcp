@@ -54,7 +54,8 @@ try {
   };
 
   const events = await import(`../src/ui/events.js?visibility-test=${Date.now()}`);
-  events.initEvents(() => {}, () => {});
+  const connectionStates = [];
+  events.initEvents(() => {}, state => connectionStates.push(state.state));
   events.startSSE();
 
   assert.equal(sources.length, 1, 'visible dashboards should open one live event stream');
@@ -73,6 +74,8 @@ try {
   assert.equal(sources[0].closed, true, 'showing the dashboard must retire the possibly suspended live stream');
   assert.equal(sources.length, 2, 'showing the dashboard must re-handshake live revisions so missed list updates can be detected');
   assert.equal(sources[1].closed, false);
+  assert.deepEqual(connectionStates, ['connecting'],
+    'visibility-driven SSE re-handshakes must stay silent instead of reporting a false reconnect');
 
   events.stopSSE({ emit: false });
   assert.equal(sources[1].closed, true, 'stopping dashboard events must close the resumed live stream');

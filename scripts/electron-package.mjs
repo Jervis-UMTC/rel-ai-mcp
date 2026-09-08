@@ -514,8 +514,14 @@ function ensureTunnelClient(targetPlatform, architecture) {
   const spec = platformManifest?.architectures?.[architecture] || platformManifest;
   if (!spec?.file) throw new Error(`Unsupported tunnel-client platform/architecture: ${targetPlatform}/${architecture}`);
   const executable = path.join(root, 'vendor', 'tunnel-client', targetPlatform, spec.file);
-  if (fs.existsSync(executable)) return;
-  console.log(`[electron-package] OpenAI tunnel-client is missing for ${targetPlatform}; fetching the pinned ${manifest.version} artifact.`);
+  const valid = fs.existsSync(executable) && (() => {
+    const stat = fs.statSync(executable);
+    if (!stat.isFile() || stat.size !== Number(spec.size)) return false;
+    const sha256 = crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex');
+    return sha256 === String(spec.sha256).toLowerCase();
+  })();
+  if (valid) return;
+  console.log(`[electron-package] OpenAI tunnel-client is missing or stale for ${targetPlatform}; fetching the pinned ${manifest.version} artifact.`);
   runNode('OpenAI tunnel-client fetch', fetchTunnelClient, [], {
     env: { ...platformEnvironment, TUNNEL_CLIENT_PLATFORMS: targetPlatform, REL_AI_TARGET_ARCH: architecture }
   });

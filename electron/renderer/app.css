@@ -284,8 +284,8 @@ input:focus { border-color: var(--ui-action-primary); box-shadow: 0 0 0 3px var(
 .notification-switch.enabled { color: var(--ui-text-primary); }
 .notification-switch.enabled .switch-track { background: var(--ui-action-primary); }
 .notification-switch.enabled .switch-track span { background: var(--ui-switch-thumb); transform: translateX(14px); }
-.status-details summary span { transition: transform var(--dur) var(--ease); }
-.status-details[open] summary span { transform: rotate(180deg); }
+.status-details > summary > span { transition: transform var(--dur) var(--ease); }
+.status-details[open] > summary > span { transform: rotate(180deg); }
 
 .wizard-page { display: block; overflow-y: auto; }
 .wizard { width: min(500px, 100%); margin: 0 auto; }

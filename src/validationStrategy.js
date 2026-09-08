@@ -51,6 +51,7 @@ function selectValidationLevel(workspacePath, workspaceConfig, overrideLevel, ch
     try {
       const topology = discoverRepositoryTopology(workspacePath);
       packageIds = [...new Set(changedFiles.map(file => packageForPath(topology, file)?.id).filter(Boolean))];
+      if (!packageIds.length && changedFiles.length && topology.packages.length === 0) packageIds = ['path:root'];
     } catch { packageIds = inferPackageIds(changedFiles); }
   }
   const selected = classifyFiles(changedFiles, workspaceConfig, { ...facts, packageIds });

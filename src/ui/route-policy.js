@@ -19,7 +19,7 @@ const ALLOWED_PARAMS = {
   home: new Set(['workspace']),
   tasks: new Set(['workspace', 'task']),
   code: new Set(['task', 'file']),
-  workspaces: new Set(['workspace', 'focus']),
+  workspaces: new Set(['workspace', 'focus', 'create']),
   processes: new Set(['workspace']),
   activity: new Set(['workspace', 'search', 'time', 'tool', 'status', 'task', 'event']),
   diagnostics: new Set(['workspace']),
@@ -81,7 +81,7 @@ function sanitizeValue(key, value) {
   const text = stripControlCharacters(value).trim();
   if (!text) return '';
   if (key === 'workspace') return WORKSPACE_PATTERN.test(text) ? text : '';
-  if (key === 'focus') return text === '1' ? '1' : '';
+  if (key === 'focus' || key === 'create') return text === '1' ? '1' : '';
   if (key === 'time') return TIME_RANGES.has(text.toLowerCase()) ? text.toLowerCase() : '';
   if (key === 'range') return ANALYTICS_RANGES.has(text.toLowerCase()) ? text.toLowerCase() : '';
   if (key === 'start' || key === 'end') return DATE_PATTERN.test(text) ? text : '';

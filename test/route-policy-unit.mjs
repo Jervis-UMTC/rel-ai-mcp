@@ -31,10 +31,13 @@ assert.equal(new URLSearchParams(normalizedLongFileRoute.split('?')[1]).get('fil
 assert.equal(normalizeRouteKey('activity?token=secret&search=hello'), 'activity?search=hello');
 assert.equal(normalizeRouteKey('workspaces?focus=1'), 'workspaces');
 assert.equal(normalizeRouteKey('workspaces?workspace=myapp&focus=1'), 'workspaces?workspace=myapp&focus=1');
+assert.equal(normalizeRouteKey('workspaces?create=1'), 'workspaces?create=1', 'Add project deep links must preserve the create request');
+assert.equal(normalizeRouteKey('workspaces?create=true'), 'workspaces', 'Add project deep links must reject non-canonical create values');
 assert.equal(normalizeRouteKey('settings/connection?workspace=app'), 'settings/connection');
 
 assert.equal(routeAllowsParam('activity', 'search'), true);
 assert.equal(routeAllowsParam('code', 'file'), true);
+assert.equal(routeAllowsParam('workspaces', 'create'), true);
 assert.equal(routeAllowsParam('activity', 'token'), false);
 assert.equal(routeAllowsParam('settings', 'workspace'), false);
 

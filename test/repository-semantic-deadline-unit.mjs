@@ -40,6 +40,11 @@ try {
   });
   assert.equal(recovered.ok, true);
   assert.ok(recovered.results.length > 0, 'semantic search must recover normally after a deadline cancellation');
+  const recoveredStatus = repositoryIntelligence.status(workspace, config);
+  assert.equal(recoveredStatus.metadata?.zoekt?.current, false,
+    'cold semantic search must not wait for the optional Zoekt rebuild before the graph index is queryable');
+  assert.equal(recoveredStatus.zoektRefreshScheduled, true,
+    'a deferred cold Zoekt rebuild must be scheduled after graph readiness');
 } finally {
   await repositoryIntelligence.shutdown();
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });

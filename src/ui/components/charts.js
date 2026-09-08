@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BarElement,
   CategoryScale,
   Chart as ChartJS,
   Filler,
@@ -9,55 +8,46 @@ import {
   PointElement,
   Tooltip
 } from 'chart.js';
-import { Bar, Line } from 'react-chartjs-2';
+import { color as chartColor } from 'chart.js/helpers';
+import { Line } from 'react-chartjs-2';
+import { COLOR_THEMES } from '../colorTokens.mjs';
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Filler, Tooltip);
+ChartJS.register(CategoryScale, LinearScale, LineElement, PointElement, Filler, Tooltip);
 
 const h = React.createElement;
 const DEFAULT_THEME = Object.freeze({
-  action: '#657f00',
-  border: '#dce3ec',
-  borderDefault: '#cbd5e1',
-  text: '#475569',
-  textMuted: '#64748b',
-  surface: '#ffffff',
-  raised: '#e8eef6',
-  success: '#15803d',
-  danger: '#b91c1c',
-  warning: '#a16207',
+  action: COLOR_THEMES.light.actionPrimary,
+  border: COLOR_THEMES.light.borderSubtle,
+  borderDefault: COLOR_THEMES.light.borderDefault,
+  text: COLOR_THEMES.light.textSecondary,
+  textMuted: COLOR_THEMES.light.textTertiary,
+  surface: COLOR_THEMES.light.surfacePrimary,
+  raised: COLOR_THEMES.light.surfaceRaised,
+  success: COLOR_THEMES.light.statusSuccessForeground,
+  danger: COLOR_THEMES.light.statusDangerForeground,
+  warning: COLOR_THEMES.light.statusWarningForeground,
   reducedMotion: false
 });
 
-export function SparkChart({ values = [], className = '', mode = 'line', tone = '', ariaLabel = '', decorative = true }) {
+export function SparkChart({ values = [], className = '', tone = '', ariaLabel = '', decorative = true }) {
   const data = safeValues(values);
   const theme = useChartTheme();
   const accent = toneColor(theme, tone);
-  const Component = mode === 'bar' ? Bar : Line;
   const chartData = useMemo(() => ({
     labels: data.map((_, index) => String(index + 1)),
-    datasets: [mode === 'bar'
-      ? {
-          data,
-          backgroundColor: withAlpha(accent, 0.3),
-          borderColor: accent,
-          borderWidth: 1,
-          borderRadius: 3,
-          borderSkipped: false,
-          barPercentage: 0.72,
-          categoryPercentage: 0.86
-        }
-      : {
-          data,
-          borderColor: accent,
-          backgroundColor: withAlpha(accent, 0.08),
-          borderWidth: 1.5,
-          cubicInterpolationMode: 'monotone',
-          tension: 0.32,
-          fill: true,
-          pointRadius: 0,
-          pointHoverRadius: 0
-        }]
-  }), [accent, data, mode]);
+    datasets: [{
+      data,
+      borderColor: accent,
+      backgroundColor: withAlpha(accent, 0.08),
+      borderWidth: 1.5,
+      cubicInterpolationMode: 'monotone',
+      tension: 0.32,
+      fill: true,
+      spanGaps: false,
+      pointRadius: 0,
+      pointHoverRadius: 0
+    }]
+  }), [accent, data]);
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -70,8 +60,8 @@ export function SparkChart({ values = [], className = '', mode = 'line', tone = 
       y: { display: false, beginAtZero: true }
     }
   }), []);
-  if (!data.length) return null;
-  return h('div', { className }, h(Component, {
+  if (!data.some(value => value !== null)) return null;
+  return h('div', { className }, h(Line, {
     data: chartData,
     options,
     role: decorative ? undefined : 'img',
@@ -84,7 +74,6 @@ export function AnalyticsTimelineChart({
   values = [],
   labels = [],
   detailedLabels = [],
-  mode = 'line',
   className = '',
   ariaLabel = '',
   ariaDescribedBy = '',
@@ -97,40 +86,27 @@ export function AnalyticsTimelineChart({
   const data = safeValues(values);
   const theme = useChartTheme();
   const chartRef = useRef(null);
-  const Component = mode === 'bar' ? Bar : Line;
-  const latestIndex = Math.max(0, data.length - 1);
+  const latestIndex = Math.max(0, lastDefinedIndex(data));
   const accent = theme.action;
   const chartData = useMemo(() => ({
     labels,
-    datasets: [mode === 'bar'
-      ? {
-          data,
-          backgroundColor: withAlpha(accent, 0.28),
-          hoverBackgroundColor: withAlpha(accent, 0.48),
-          borderColor: context => context.dataIndex === peakIndex ? theme.warning : accent,
-          borderWidth: context => context.dataIndex === peakIndex ? 2 : 1,
-          borderRadius: 5,
-          borderSkipped: false,
-          maxBarThickness: 30,
-          barPercentage: 0.72,
-          categoryPercentage: 0.88
-        }
-      : {
-          data,
-          borderColor: accent,
-          backgroundColor: withAlpha(accent, 0.08),
-          borderWidth: 2,
-          cubicInterpolationMode: 'monotone',
-          tension: 0.34,
-          fill: true,
-          pointRadius: context => context.dataIndex === peakIndex ? 3 : 0,
-          pointHoverRadius: 4,
-          pointHitRadius: 10,
-          pointBackgroundColor: context => context.dataIndex === peakIndex ? theme.warning : accent,
-          pointBorderColor: theme.surface,
-          pointBorderWidth: 2
-        }]
-  }), [accent, data, labels, mode, peakIndex, theme.surface, theme.warning]);
+    datasets: [{
+      data,
+      borderColor: accent,
+      backgroundColor: withAlpha(accent, 0.08),
+      borderWidth: 2,
+      cubicInterpolationMode: 'monotone',
+      tension: 0.34,
+      fill: true,
+      spanGaps: false,
+      pointRadius: context => context.dataIndex === peakIndex ? 3 : 0,
+      pointHoverRadius: 4,
+      pointHitRadius: 10,
+      pointBackgroundColor: context => context.dataIndex === peakIndex ? theme.warning : accent,
+      pointBorderColor: theme.surface,
+      pointBorderWidth: 2
+    }]
+  }), [accent, data, labels, peakIndex, theme.surface, theme.warning]);
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -153,7 +129,7 @@ export function AnalyticsTimelineChart({
         padding: 9,
         callbacks: {
           title: items => detailedLabels[items?.[0]?.dataIndex] || labels[items?.[0]?.dataIndex] || '',
-          label: context => `${valueLabel}: ${formatValue(Number(context.raw) || 0)}`
+          label: context => `${valueLabel}: ${formatValue(context.raw == null ? null : Number(context.raw))}`
         }
       }
     },
@@ -215,7 +191,7 @@ export function AnalyticsTimelineChart({
     onPointerLeave: () => selectIndex(latestIndex),
     onKeyDown
   },
-  h(Component, { ref: chartRef, data: chartData, options, 'aria-hidden': 'true' }),
+  h(Line, { ref: chartRef, data: chartData, options, 'aria-hidden': 'true' }),
   h(AccessibleChartTable, { labels: detailedLabels.length ? detailedLabels : labels, values: data, valueLabel, formatValue }));
 }
 
@@ -285,15 +261,19 @@ function toneColor(theme, tone) {
 }
 
 function safeValues(values) {
-  return (Array.isArray(values) ? values : []).map(Number).map(value => Number.isFinite(value) && value >= 0 ? value : 0);
+  return (Array.isArray(values) ? values : []).map(value => {
+    if (value == null) return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : null;
+  });
+}
+
+function lastDefinedIndex(values) {
+  for (let index = values.length - 1; index >= 0; index -= 1) if (values[index] !== null) return index;
+  return -1;
 }
 
 function withAlpha(color, alpha) {
-  const match = /^#([0-9a-f]{6})$/i.exec(String(color || '').trim());
-  if (!match) return color;
-  const value = Number.parseInt(match[1], 16);
-  const red = value >> 16 & 255;
-  const green = value >> 8 & 255;
-  const blue = value & 255;
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+  const parsed = chartColor(color);
+  return parsed.valid ? parsed.alpha(alpha).rgbString() : color;
 }

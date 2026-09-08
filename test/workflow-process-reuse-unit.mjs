@@ -20,6 +20,16 @@ try {
   assert.equal(reused.reused, true);
   assert.equal(reused.readiness?.verified, true);
 
+  const concurrentArgs = { command, kind: 'service', purpose: 'concurrent reuse fixture', startupWaitMs: 25 };
+  const [concurrentFirst, concurrentSecond] = await Promise.all([
+    startManagedProcess(workspace, config, concurrentArgs, { taskId: 'task-concurrent', principal: 'principal-a' }),
+    startManagedProcess(workspace, config, concurrentArgs, { taskId: 'task-concurrent', principal: 'principal-a' })
+  ]);
+  started.push(concurrentFirst.processId, concurrentSecond.processId);
+  assert.equal(concurrentSecond.processId, concurrentFirst.processId, 'simultaneous identical starts must converge on one managed process');
+  assert.equal([concurrentFirst, concurrentSecond].filter(result => result.reused === true).length, 1,
+    'exactly one simultaneous caller must observe reuse after the initial process starts');
+
   const otherTask = await startManagedProcess(workspace, config, { command, kind: 'service', purpose: 'reuse fixture', startupWaitMs: 25 }, { taskId: 'task-b', principal: 'principal-a' });
   started.push(otherTask.processId);
   assert.notEqual(otherTask.processId, first.processId, 'processes must never be reused across logical tasks');

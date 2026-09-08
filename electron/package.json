@@ -372,6 +372,22 @@
       {
         "from": "../NOTICE",
         "to": "NOTICE"
+      },
+      {
+        "from": "../PRIVACY.md",
+        "to": "PRIVACY.md"
+      },
+      {
+        "from": "../TERMS.md",
+        "to": "TERMS.md"
+      },
+      {
+        "from": "../SECURITY.md",
+        "to": "SECURITY.md"
+      },
+      {
+        "from": "../THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
       }
     ],
     "win": {

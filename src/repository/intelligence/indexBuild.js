@@ -265,6 +265,16 @@ async function attachZoektMetadata(metadata, job, workspace, databaseFile, scan,
       }
     };
   }
+  if (job?.kind === 'refresh') {
+    return {
+      ...metadata,
+      zoekt: {
+        available: true,
+        current: false,
+        reason: 'Zoekt refresh is deferred until after the graph index is ready.'
+      }
+    };
+  }
   try {
     const zoekt = await rebuildZoektIndex(
       workspace,

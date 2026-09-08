@@ -31,29 +31,32 @@ export function analyticsMetrics(scope, previous) {
 
 export function pointMetric(point, key) {
   const completed = Number(point?.successes || 0) + Number(point?.failures || 0);
-  if (key === 'reliabilityRate') return point?.reliabilityCalls ? Number(point.reliableCalls || 0) / Number(point.reliabilityCalls) * 100 : 0;
-  if (key === 'operationSuccessRate' || key === 'successRate') return completed ? Number(point.successes || 0) / completed * 100 : 0;
-  if (key === 'averageDuration') return completed ? Number(point.executionMs || 0) / completed : 0;
+  if (key === 'reliabilityRate') return point?.reliabilityCalls ? Number(point.reliableCalls || 0) / Number(point.reliabilityCalls) * 100 : null;
+  if (key === 'operationSuccessRate' || key === 'successRate') return completed ? Number(point.successes || 0) / completed * 100 : null;
+  if (key === 'averageDuration') return completed ? Number(point.executionMs || 0) / completed : null;
   return Number(point?.[key] || 0);
 }
 
 export function timelineModel(values, metricLabel = 'Actions') {
-  const data = finite(values);
-  if (!data.length || data.every(value => value === 0)) return { empty: true, data, summary: 'No activity in this range.' };
-  const max = Math.max(...data, 1);
-  const peak = Math.max(...data);
-  const peakIndex = data.indexOf(peak);
-  const bucketsAgo = Math.max(0, data.length - 1 - peakIndex);
-  const latest = data.at(-1) || 0;
-  const trend = latest > data[0] ? 'increasing' : latest < data[0] ? 'decreasing' : 'steady';
+  const data = nullableValues(values);
+  const observed = data.map((value, index) => ({ value, index })).filter(row => row.value !== null);
+  if (!observed.length || (metricLabel === 'Actions' && observed.every(row => row.value === 0))) {
+    return { empty: true, data, summary: 'No activity in this range.' };
+  }
+  const peakRow = observed.reduce((best, row) => row.value > best.value ? row : best, observed[0]);
+  const latestRow = observed.at(-1);
+  const first = observed[0].value;
+  const latest = latestRow.value;
+  const bucketsAgo = Math.max(0, latestRow.index - peakRow.index);
+  const trend = latest > first ? 'increasing' : latest < first ? 'decreasing' : 'steady';
   return {
     empty: false,
     data,
-    max,
-    peak,
-    peakIndex,
-    latestIndex: data.length - 1,
-    summary: `${metricLabel} trend. Peak ${formatChartValue(peak, metricLabel)} ${bucketsAgo ? `${bucketsAgo} periods ago` : 'in the latest period'}. Latest ${formatChartValue(latest, metricLabel)}. Overall trend ${trend}.`
+    max: Math.max(peakRow.value, 1),
+    peak: peakRow.value,
+    peakIndex: peakRow.index,
+    latestIndex: latestRow.index,
+    summary: `${metricLabel} trend. Peak ${formatChartValue(peakRow.value, metricLabel)} ${bucketsAgo ? `${bucketsAgo} periods ago` : 'in the latest measured period'}. Latest ${formatChartValue(latest, metricLabel)}. Overall trend ${trend}.`
   };
 }
 
@@ -81,11 +84,16 @@ export function duration(value) {
 }
 
 export function formatChartValue(value, metricLabel) {
+  if (value == null || !Number.isFinite(Number(value))) return '—';
   if (metricLabel === 'Reliable actions' || metricLabel === 'Successful actions' || metricLabel === 'Success rate') return percent(value);
   if (/duration|tool time|average time/i.test(metricLabel)) return duration(value);
   return integer(value);
 }
 
-function finite(values) {
-  return (values || []).map(Number).map(value => Number.isFinite(value) && value >= 0 ? value : 0);
+function nullableValues(values) {
+  return (values || []).map(value => {
+    if (value == null) return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : null;
+  });
 }

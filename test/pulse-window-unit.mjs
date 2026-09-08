@@ -57,6 +57,7 @@ assert.equal(working.progressPercent, 42);
 assert.equal(working.progressLabel, 'Frontend tests');
 assert.equal(working.taskCount, 2);
 assert.equal(working.otherTaskCount, 1);
+assert.deepEqual(working.taskNames, ['Fix tests', 'Prepare notes']);
 
 const ordinaryWaiting = projectPulseStatus({
   taskActivity: {
@@ -77,8 +78,10 @@ const pulseHtml = readFileSync(new URL('../electron/renderer/pulse.html', import
 const pulseCss = readFileSync(new URL('../electron/renderer/pulse.css', import.meta.url), 'utf8');
 const pulseRenderer = readFileSync(new URL('../electron/renderer/pulse.js', import.meta.url), 'utf8');
 assert.match(pulseHtml, /id="pulseTaskCount"/, 'compact Pulse markup must expose the active task count');
+assert.match(pulseHtml, /<span class="pulse-context-label">Tasks<\/span><strong id="pulseTasks">/, 'expanded Pulse must expose task names');
 assert.match(pulseCss, /\.pulse-mark\s*\{[^}]*-webkit-app-region:\s*drag/s, 'compact Pulse logo must remain a native drag handle without consuming the hover surface');
-assert.match(pulseCss, /transition:\s*width 170ms[^;]*height 170ms/s, 'Pulse shell geometry must animate instead of popping directly to expanded size');
+assert.match(pulseCss, /transition:\s*width 240ms[^;]*height 240ms/s, 'Pulse shell geometry must animate instead of popping directly to expanded size');
+assert.match(pulseCss, /user-select:\s*none/, 'Pulse text must not be selectable during pointer interaction');
 const nativeExpandIndex = pulseRenderer.indexOf('setExpanded?.(true)');
 const visualExpandIndex = pulseRenderer.indexOf('applyExpandedVisual(true)');
 assert.ok(nativeExpandIndex >= 0 && visualExpandIndex > nativeExpandIndex, 'native expansion must happen before the visible shell grows');
@@ -86,11 +89,10 @@ const visualCollapseIndex = pulseRenderer.indexOf('applyExpandedVisual(false)');
 const nativeCollapseIndex = pulseRenderer.indexOf('setExpanded?.(false)');
 assert.ok(visualCollapseIndex >= 0 && nativeCollapseIndex > visualCollapseIndex, 'the visible shell must shrink before the native window contracts');
 assert.match(pulseRenderer, /taskCountElement\.textContent = taskCount === 1 \? '1 task' : `\$\{taskCount\} tasks`;/, 'compact Pulse must render the current task count');
-assert.match(pulseRenderer, /const PULSE_HOVER_OPEN_DELAY_MS = 500;/, 'Pulse hover expansion must require a deliberate dwell instead of opening immediately');
-assert.match(pulseRenderer, /shell\.addEventListener\('pointerenter', scheduleHoverOpen\)/, 'hover must schedule expansion rather than opening synchronously');
-assert.match(pulseRenderer, /if \(!next\) suppressHoverOpen = true;/, 'explicitly hiding Pulse must suppress immediate hover reopening');
-assert.match(pulseRenderer, /suppressHoverOpen = false;[\s\S]{0,80}scheduleCollapse\(\);/, 'leaving Pulse must re-arm hover expansion for the next deliberate entry');
-assert.doesNotMatch(pulseRenderer, /addEventListener\('focusin',[\s\S]{0,80}setExpanded\(true\)/, 'focus changes alone must not aggressively expand Pulse');
+assert.doesNotMatch(pulseRenderer, /pointerenter|pointerleave|scheduleHoverOpen|suppressHoverOpen/, 'Pulse expansion must not depend on hover state that can oscillate while the native window resizes');
+assert.match(pulseRenderer, /querySelector\('\.pulse-bar'\)[\s\S]{0,160}!expanded[\s\S]{0,80}setExpanded\(true\)/, 'clicking the compact Pulse must expand it');
+assert.match(pulseRenderer, /event\.key === 'Escape' && expanded/, 'Escape must collapse an expanded Pulse');
+assert.match(pulseRenderer, /taskNames\.join\(' · '\)/, 'expanded Pulse must render active task names');
 
 const workArea = { x: 100, y: 50, width: 1400, height: 900 };
 const displayListeners = new Map();

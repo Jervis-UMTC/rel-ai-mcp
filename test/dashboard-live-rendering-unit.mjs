@@ -191,6 +191,8 @@ assert.match(reactMain, /primaryLabel: 'Retry page'/, 'route failures must retai
 const refreshSource = functionSource(dashboard, 'performRefresh');
 assert.match(refreshSource, /initStore\(hydrated\)[\s\S]*replayLiveEventsDuringRefresh\(\)[\s\S]*const refreshed = getStore\(\)/, 'aggregate refreshes must replay typed live events that arrived while the snapshot was in flight');
 assert.match(refreshSource, /clearShellDashboardState\(\)/, 'a successful aggregate refresh must clear boot failure/loading state before showing the React route');
+assert.match(refreshSource, /clearRecoveryNotice\(\{ announce: options\.announceRecovery === true \}\)/, 'routine catch-up refreshes must not announce a false connection restoration');
+assert.match(functionSource(dashboard, 'recoverDashboard'), /announceRecovery:\s*true/, 'actual dashboard recovery must still announce restoration after a successful retry');
 assert.doesNotMatch(refreshSource, /rerender|syncLiveView|renderViewIfChanged/, 'aggregate refreshes must not invoke a duplicate rendering path');
 assert.match(functionSource(dashboard, 'liveOnEvent'), /bufferLiveEventDuringRefresh\(event\)/, 'live events must be retained while an aggregate refresh is in flight');
 const refreshCoordinatorSource = functionSource(dashboard, 'doRefresh');

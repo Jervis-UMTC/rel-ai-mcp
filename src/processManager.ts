@@ -232,6 +232,7 @@ const metadataScanAt = new Map<string, number>();
 const metadataPruneAt = new Map<string, number>();
 const metadataWriteQueues = new Map<string, Promise<boolean>>();
 const processStateListeners = new Set<ManagedProcessListener>();
+const processReuseReservations = new Map<string, Promise<void>>();
 let processStateVersion = 0;
 let nodePtyPromise: Promise<NodePtyApi> | null = null;
 let restoredCapacityReservation: Promise<void> = Promise.resolve();
@@ -285,24 +286,29 @@ async function startManagedProcess(workspace: ManagedWorkspace, config: ManagedP
     rows,
     environment: Object.entries(env).sort(([left], [right]) => left.localeCompare(right))
   });
-  hydrateProcessMetadata(config);
-  const reusable = args.reuseExisting === false ? null : findReusableManagedProcess(reuseFingerprint);
-  if (reusable) {
-    return {
-      ...processSnapshot(reusable, { includeTail: true, tailBytes: 8192 }),
-      reused: true,
-      readiness: {
-        verified: reusable.status === 'running',
-        observedAt: new Date().toISOString(),
-        waitedMs: 0,
-        status: reusable.status,
-        stdoutBytes: reusable.stdoutBytes,
-        stderrBytes: reusable.stderrBytes
-      }
-    };
-  }
   const admissionSignal = combineAbortSignals(context.signal, getCurrentTaskAbortSignal());
-  await reserveRestoredManagedProcessCapacity(config, admissionSignal);
+  const releaseReuseReservation = args.reuseExisting === false
+    ? null
+    : await acquireManagedProcessReuseReservation(reuseFingerprint, admissionSignal);
+  try {
+    admissionSignal?.throwIfAborted?.();
+    hydrateProcessMetadata(config);
+    const reusable = args.reuseExisting === false ? null : findReusableManagedProcess(reuseFingerprint);
+    if (reusable) {
+      return {
+        ...processSnapshot(reusable, { includeTail: true, tailBytes: 8192 }),
+        reused: true,
+        readiness: {
+          verified: reusable.status === 'running',
+          observedAt: new Date().toISOString(),
+          waitedMs: 0,
+          status: reusable.status,
+          stdoutBytes: reusable.stdoutBytes,
+          stderrBytes: reusable.stderrBytes
+        }
+      };
+    }
+    await reserveRestoredManagedProcessCapacity(config, admissionSignal);
   const processId = `proc_${crypto.randomBytes(24).toString('base64url')}`;
   const directory = processDirectory(config, processId);
   const stdoutPath = path.join(directory, 'stdout.log');
@@ -367,7 +373,7 @@ async function startManagedProcess(workspace: ManagedWorkspace, config: ManagedP
     throw new Error(`Could not initialize managed process storage: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 
-  return runSpan(config, 'relai.process.start', {
+  return await runSpan(config, 'relai.process.start', {
     'relai.workspace': workspace.alias,
     'relai.process.command': record.commandSummary,
     'relai.process.pty': pty
@@ -526,6 +532,9 @@ async function startManagedProcess(workspace: ManagedWorkspace, config: ManagedP
       }
     };
   });
+  } finally {
+    releaseReuseReservation?.();
+  }
 }
 
 function observeInitialProcessState(child: ChildProcess, signal?: AbortSignal): Promise<InitialProcessState> {
@@ -935,6 +944,31 @@ function findReusableManagedProcess(reuseFingerprint: string): ManagedProcessRec
     && !record.discarded
   ) || null;
 }
+
+async function acquireManagedProcessReuseReservation(
+  reuseFingerprint: string,
+  signal?: AbortSignal
+): Promise<() => void> {
+  const previous = processReuseReservations.get(reuseFingerprint) || Promise.resolve();
+  let releaseCurrent: () => void = () => {};
+  const current = new Promise<void>(resolve => { releaseCurrent = resolve; });
+  const tail = previous.then(() => current);
+  processReuseReservations.set(reuseFingerprint, tail);
+  await previous;
+  if (signal?.aborted) {
+    releaseCurrent();
+    if (processReuseReservations.get(reuseFingerprint) === tail) processReuseReservations.delete(reuseFingerprint);
+    throw cancellationError('Managed process startup was cancelled while waiting to reuse an existing process.');
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    releaseCurrent();
+    if (processReuseReservations.get(reuseFingerprint) === tail) processReuseReservations.delete(reuseFingerprint);
+  };
+}
+
 function principalKeyForContext(context: ManagedProcessContext = {}): string {
   if (context.principal) return principalFingerprint(context.principal);
 

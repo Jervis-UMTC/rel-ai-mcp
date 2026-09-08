@@ -44,7 +44,7 @@ type ComputerArgs = Readonly<Record<string, unknown> & {
   key?: unknown;
   keys?: unknown;
 }>;
-type ComputerContext = Readonly<{ computerAdapter?: ComputerAdapter }>;
+type ComputerContext = Readonly<{ computerAdapter?: ComputerAdapter; signal?: AbortSignal }>;
 
 async function readComputerStatus(
   config: ComputerControlConfig | null | undefined,
@@ -83,6 +83,7 @@ async function runComputerAction(
   args: ComputerArgs = {},
   context: ComputerContext = {}
 ): Promise<ComputerControlResultDto> {
+  context.signal?.throwIfAborted?.();
   const action = normalizeAction(args.action);
   if (action === 'status') {
     return { ...(await readComputerStatus(config, context)), workspace: workspace.alias };
@@ -103,7 +104,7 @@ async function runComputerAction(
       engine: adapter.engine || '@midscene/computer'
     });
   }
-  return queueInput(() => executeInputAction(adapter, workspace, action, args));
+  return queueInput(() => executeInputAction(adapter, workspace, action, args), context.signal);
 }
 
 async function executeInputAction(
@@ -259,10 +260,41 @@ function boundedInteger(
   return integer;
 }
 
-function queueInput<T>(operation: () => Promise<T>): Promise<T> {
-  const run = inputQueue.then(operation, operation);
+function queueInput<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted?.();
+  let started = false;
+  const execute = async () => {
+    signal?.throwIfAborted?.();
+    started = true;
+    return operation();
+  };
+  const run = inputQueue.then(execute, execute);
   inputQueue = run.catch(() => undefined);
-  return run;
+  if (!signal) return run;
+
+  return new Promise<T>((resolve, reject) => {
+    let cancelledWhileQueued = false;
+    const onAbort = () => {
+      if (started) return;
+      cancelledWhileQueued = true;
+      try {
+        signal.throwIfAborted();
+      } catch (error) {
+        reject(error);
+      }
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    run.then(
+      value => {
+        signal.removeEventListener('abort', onAbort);
+        if (!cancelledWhileQueued) resolve(value);
+      },
+      error => {
+        signal.removeEventListener('abort', onAbort);
+        if (!cancelledWhileQueued) reject(error);
+      }
+    );
+  });
 }
 
 function errorMessage(error: unknown): string {

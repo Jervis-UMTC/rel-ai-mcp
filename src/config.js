@@ -177,7 +177,7 @@ function configSchema(base) {
     version: z.unknown().optional(),
     stateDir: stringSchema(base.stateDir),
     auditLogPath: stringSchema(base.auditLogPath),
-    trustedBudgetMultiplier: boundedIntegerSchema(1, 10, base.trustedBudgetMultiplier),
+    trustedBudgetMultiplier: boundedIntegerFallbackSchema(1, 10, base.trustedBudgetMultiplier),
     productUx: objectSchema(z.object({
       staleHours: boundedIntegerSchema(1, 24 * 365, base.productUx.staleHours),
       enableStateExport: booleanSchema(base.productUx.enableStateExport)
@@ -245,6 +245,14 @@ function boundedIntegerSchema(min, max, fallback) {
   return z.preprocess(value => {
     const number = Number(value);
     return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.floor(number))) : fallback;
+  }, z.number().int().min(min).max(max));
+}
+
+function boundedIntegerFallbackSchema(min, max, fallback) {
+  return z.preprocess(value => {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < min || number > max) return fallback;
+    return Math.floor(number);
   }, z.number().int().min(min).max(max));
 }
 

@@ -96,6 +96,42 @@ assert.deepEqual(calls, [
   ['pressKey', 'control+s']
 ]);
 
+const queuedCalls = [];
+let releaseBlockedClick;
+let markBlockedClickStarted;
+const blockedClickStarted = new Promise(resolve => { markBlockedClickStarted = resolve; });
+const blockedClick = new Promise(resolve => { releaseBlockedClick = resolve; });
+const blockingAdapter = {
+  ...adapter,
+  click: async (displayId, point) => {
+    queuedCalls.push(['click', displayId, point]);
+    if (point.x === 1) {
+      markBlockedClickStarted();
+      await blockedClick;
+    }
+  }
+};
+const firstQueuedClick = runComputerAction(
+  workspace,
+  enabledConfig,
+  { action: 'click', x: 1, y: 1 },
+  { computerAdapter: blockingAdapter }
+);
+await blockedClickStarted;
+const queuedController = new AbortController();
+const cancelledQueuedClick = runComputerAction(
+  workspace,
+  enabledConfig,
+  { action: 'click', x: 2, y: 2 },
+  { computerAdapter: blockingAdapter, signal: queuedController.signal }
+);
+queuedController.abort();
+await assert.rejects(cancelledQueuedClick, error => error?.name === 'AbortError');
+releaseBlockedClick();
+await firstQueuedClick;
+await new Promise(resolve => setImmediate(resolve));
+assert.deepEqual(queuedCalls, [['click', undefined, { x: 1, y: 1 }]], 'cancelled queued input must never execute later');
+
 calls.length = 0;
 await assert.rejects(
   () => runComputerAction(workspace, enabledConfig, { action: 'type', text: 'x'.repeat(MAX_TYPE_TEXT_BYTES + 1) }, context),

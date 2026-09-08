@@ -267,6 +267,24 @@ assert.equal((await newerVersionDiscovery.updater.discoverUpdate({ force: true }
 assert.equal(newerVersionDiscovery.fake.checkCalls, 1, 'a newer published release must trigger the full updater verification exactly once');
 assert.ok(newerVersionDiscovery.logs.some(entry => /Newly published release 0\.27\.5 detected/.test(entry.message)));
 
+let resolveStoppedDiscovery;
+const stoppedDiscovery = createHarness({
+  currentVersion: '0.27.4',
+  fetchImpl: () => new Promise(resolve => { resolveStoppedDiscovery = resolve; })
+});
+stoppedDiscovery.updater.start();
+const stoppedDiscoveryPromise = stoppedDiscovery.updater.discoverUpdate({ force: true });
+await waitFor(() => typeof resolveStoppedDiscovery === 'function', 'release discovery must enter the fetch before shutdown');
+stoppedDiscovery.updater.stop();
+resolveStoppedDiscovery({
+  status: 302,
+  headers: { get: name => name.toLowerCase() === 'location' ? 'https://github.com/Kyne0328/rel-ai-chatgpt-web-harness/releases/download/0.27.5/latest.yml' : null }
+});
+const stoppedDiscoveryResult = await stoppedDiscoveryPromise;
+assert.equal(stoppedDiscoveryResult.skipped, true, 'an in-flight release discovery must become inert after updater shutdown');
+assert.equal(stoppedDiscovery.fake.checkCalls, 0, 'shutdown discovery must not restart the full updater check');
+assert.equal(stoppedDiscovery.updater.getStatus().state, 'idle', 'shutdown discovery must not move updater state back to checking');
+
 const failedDiscovery = createHarness({
   currentVersion: '0.27.4',
   fetchImpl: async () => ({ status: 503, headers: { get: () => null } })

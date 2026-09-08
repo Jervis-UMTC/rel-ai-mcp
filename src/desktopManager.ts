@@ -84,7 +84,8 @@ async function runDesktopAction(
   }
 
   const native = objectValue(await bridge(request));
-  context.signal?.throwIfAborted?.();
+  // Native desktop operations are not cancellable once dispatched. Do not report
+  // cancellation after a bridge side effect may already have completed.
   const platform = String(native.platform || '').trim();
 
   if (action === 'clipboard_read') {

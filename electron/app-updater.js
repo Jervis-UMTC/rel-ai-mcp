@@ -71,6 +71,7 @@ function createAppUpdater(options = {}) {
   let lastReleaseDiscoveryAt = 0;
   let retryingOperation = '';
   let started = false;
+  let lifecycleGeneration = 0;
   let status = normalizeStatus({
     state: support.supported ? 'idle' : 'unsupported',
     supported: support.supported,
@@ -82,6 +83,7 @@ function createAppUpdater(options = {}) {
   function start() {
     if (started) return snapshot();
     started = true;
+    lifecycleGeneration += 1;
     if (!support.supported) {
       emit({ state: 'unsupported' });
       return snapshot();
@@ -122,6 +124,7 @@ function createAppUpdater(options = {}) {
     releaseDiscoveryTimer = null;
     for (const [eventName, handler] of handlers.splice(0)) autoUpdater.removeListener?.(eventName, handler);
     started = false;
+    lifecycleGeneration += 1;
   }
 
   async function checkForUpdates() {
@@ -264,9 +267,13 @@ function createAppUpdater(options = {}) {
     }
     if (releaseDiscoveryPromise) return releaseDiscoveryPromise;
     lastReleaseDiscoveryAt = discoveryAt;
+    const discoveryGeneration = lifecycleGeneration;
     releaseDiscoveryPromise = (async () => {
       try {
         const latestVersion = await fetchLatestReleaseVersion(fetchImpl);
+        if (!started || lifecycleGeneration !== discoveryGeneration) {
+          return { ok: true, skipped: true, status: snapshot() };
+        }
         if (!isStableVersion(status.currentVersion)) {
           throw new Error('The installed application version is invalid, so release discovery cannot compare versions.');
         }

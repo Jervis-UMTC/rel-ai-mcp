@@ -968,13 +968,27 @@ function AboutPage({ metadata }) {
   const repositoryUrl = validatedGitHubUrl(metadata.repositoryUrl);
   const developer = metadata.developer || {};
   const developerUrl = validatedGitHubUrl(developer.profileUrl);
+  const documentLink = (path, label) => {
+    const href = repositoryDocumentUrl(repositoryUrl, path);
+    return href
+      ? h('a', { className: 'settings-external-link about-detail-value', href, target: '_blank', rel: 'noopener noreferrer' }, label)
+      : h('span', { className: 'about-detail-value' }, label);
+  };
   return h(React.Fragment, null,
-    h(SettingsHeader, { title: 'About Rel.AI', description: 'Rel.AI lets ChatGPT work with your local code projects while files and commands stay on your computer.' }),
+    h(SettingsHeader, { title: 'About Rel.AI', description: 'Rel.AI keeps your projects local and shares bounded tool results through your configured ChatGPT connection when a task needs them.' }),
     h(Card, { title: 'Application information' },
       h('div', { className: 'about-product' }, h('img', { src: '/public/assets/relai-logo.png', width: 193, height: 187, alt: '', 'aria-hidden': 'true' }), h('div', null, h('h4', null, metadata.name || 'Rel.AI MCP'), h('p', null, `Version ${metadata.version || ''}`))),
       h(AboutRow, { label: 'Developer' }, h('span', { className: 'about-detail-value' }, 'Developed by ', developerUrl ? h('a', { className: 'settings-external-link about-detail-value', href: developerUrl, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `${developer.name} on GitHub (@${developer.username})` }, developer.name) : developer.name, developer.username ? ` (@${developer.username})` : '')),
       h(AboutRow, { label: 'Source code' }, repositoryUrl ? h('a', { className: 'settings-external-link about-detail-value', href: repositoryUrl, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Rel.AI MCP source code on GitHub' }, repositoryLabel(repositoryUrl)) : h('span', { className: 'about-detail-value' }, metadata.repositoryUrl || '')),
-      h(AboutRow, { label: 'License' }, h('span', { className: 'about-detail-value' }, String(metadata.license || '')))
+      h(AboutRow, { label: 'License' }, documentLink('LICENSE', String(metadata.license || 'Apache-2.0')))
+    ),
+    h(Card, { title: 'Legal & privacy' },
+      h('p', { className: 'settings-help' }, 'These documents describe Rel.AI data handling, use of official project services, security reporting, and third-party software notices.'),
+      h(AboutRow, { label: 'Privacy' }, documentLink('PRIVACY.md', 'Privacy Policy')),
+      h(AboutRow, { label: 'Terms' }, documentLink('TERMS.md', 'Terms of Use')),
+      h(AboutRow, { label: 'Security' }, documentLink('SECURITY.md', 'Security Policy')),
+      h(AboutRow, { label: 'Third-party software' }, documentLink('THIRD_PARTY_NOTICES.md', 'Third-party notices')),
+      h(AboutRow, { label: 'Attribution' }, documentLink('NOTICE', 'NOTICE'))
     )
   );
 }
@@ -990,6 +1004,17 @@ function validatedGitHubUrl(value) {
   } catch { return ''; }
 }
 function repositoryLabel(value) { try { return new URL(value).pathname.replace(/^\/+|\/+$/g, ''); } catch { return String(value || ''); } }
+function repositoryDocumentUrl(repositoryUrl, filePath) {
+  if (!repositoryUrl) return '';
+  try {
+    const url = new URL(repositoryUrl);
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.username || url.password) return '';
+    const repositoryPath = url.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '');
+    if (!repositoryPath || repositoryPath.split('/').length !== 2) return '';
+    const documentPath = String(filePath || '').split('/').filter(Boolean).map(encodeURIComponent).join('/');
+    return documentPath ? `https://github.com/${repositoryPath}/blob/main/${documentPath}` : '';
+  } catch { return ''; }
+}
 function formatBytes(value, { zero = false } = {}) { let bytes = Number(value || 0); if (!Number.isFinite(bytes) || bytes < 0) bytes = 0; if (bytes === 0) return zero ? '0 B' : ''; const units = ['B', 'KB', 'MB', 'GB', 'TB']; let unit = 0; while (bytes >= 1024 && unit < units.length - 1) { bytes /= 1024; unit += 1; } return `${bytes >= 10 || unit === 0 ? bytes.toFixed(0) : bytes.toFixed(1)} ${units[unit]}`; }
 function normalizeReleaseNoteText(value) { return String(value || '').replace(/<\s*br\s*\/?\s*>/gi, '\n').replace(/<\s*li(?:\s[^>]*)?>/gi, '\n• ').replace(/<\s*\/\s*li\s*>/gi, '\n').replace(/<\s*\/?\s*(?:h[1-6]|p|div|ul|ol|section|article)(?:\s[^>]*)?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim(); }
 function messageOf(error) { return error instanceof Error ? error.message : String(error || 'The operation failed.'); }

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { packPlugin } from '../scripts/pack-plugin.mjs';
 import { validatePlugin } from '../scripts/validate-plugin.mjs';
 import { getMcpToolSchemas } from '../src/tools/schema.js';
 import { TASKS_EXTENSION_REVISION } from '../src/mcp/protocol.js';
@@ -24,11 +25,8 @@ try {
   assert.equal(sourceValidation.ok, true);
   assert.deepEqual(sourceValidation.skills, expectedSkills);
 
-  const packed = runNpmPack(root, packDir, temp);
-  assert.equal(packed.status, 0, packed.error?.message || packed.stderr || packed.stdout);
-  const parsedMetadata = JSON.parse(packed.stdout);
-  const metadata = Array.isArray(parsedMetadata) ? parsedMetadata[0] : Object.values(parsedMetadata)[0];
-  assert.ok(metadata?.filename, `npm pack returned no artifact metadata: ${packed.stdout}`);
+  const metadata = packPlugin({ rootDir: root, destination: packDir });
+  assert.ok(metadata?.filename, 'plugin packer must return artifact metadata');
   assert.ok(Number.isFinite(Number(metadata.size)) && Number(metadata.size) > 0, 'npm pack must report a non-empty compressed artifact');
   assert.ok(Number.isFinite(Number(metadata.unpackedSize)) && Number(metadata.unpackedSize) > 0, 'npm pack must report non-empty unpacked content');
   const artifact = path.join(packDir, metadata.filename);
@@ -125,37 +123,3 @@ try {
   fs.rmSync(temp, { recursive: true, force: true });
 }
 
-function runNpmPack(cwd, destination, tempRoot) {
-  const npmArgs = ['pack', '--json', '--pack-destination', destination];
-  const stdoutPath = path.join(tempRoot, 'npm-pack.stdout.json');
-  const stderrPath = path.join(tempRoot, 'npm-pack.stderr.log');
-  const stdoutFd = fs.openSync(stdoutPath, 'w');
-  const stderrFd = fs.openSync(stderrPath, 'w');
-  let result;
-  try {
-    const npmCli = resolveNpmCli();
-    const options = { cwd, timeout: 120_000, shell: false, stdio: ['ignore', stdoutFd, stderrFd] };
-    result = npmCli
-      ? spawnSync(process.execPath, [npmCli, ...npmArgs], options)
-      : process.platform === 'win32'
-        ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `npm pack --json --pack-destination "${destination}"`], options)
-        : spawnSync('npm', npmArgs, options);
-  } finally {
-    fs.closeSync(stdoutFd);
-    fs.closeSync(stderrFd);
-  }
-  return {
-    ...result,
-    stdout: fs.readFileSync(stdoutPath, 'utf8'),
-    stderr: fs.readFileSync(stderrPath, 'utf8')
-  };
-}
-
-function resolveNpmCli() {
-  const candidates = [
-    process.env.npm_execpath,
-    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    path.resolve(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
-  ];
-  return candidates.map(value => String(value || '')).find(value => value && fs.existsSync(value)) || '';
-}

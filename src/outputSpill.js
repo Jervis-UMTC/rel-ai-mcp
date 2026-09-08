@@ -10,6 +10,7 @@ const MAX_OUTPUT_SPILL_BYTES = 32 * 1024 * 1024;
 const MAX_TOTAL_SPILL_BYTES = 256 * 1024 * 1024;
 const MAX_SPILL_FILES = 100;
 const SPILL_TTL_MS = 24 * 60 * 60 * 1000;
+const spillUsageByRoot = new Map();
 
 function outputSpillOwner({ taskId = '', workspace = '', principal = '' } = {}) {
   const task = String(taskId || '').trim();
@@ -21,6 +22,7 @@ function outputSpillOwner({ taskId = '', workspace = '', principal = '' } = {}) 
 
 function createOutputSpillWriter(config = {}, ownerId = '') {
   const owner = String(ownerId || '').trim();
+  const root = spillRoot(config);
   let fd = null;
   let file = '';
   let outputRef = '';
@@ -29,8 +31,7 @@ function createOutputSpillWriter(config = {}, ownerId = '') {
 
   function start(initial) {
     if (!owner || fd !== null) return;
-    const root = spillRoot(config);
-    pruneOutputSpills(root);
+    spillUsageByRoot.set(root, pruneOutputSpills(root));
     const directory = path.join(root, taskDirectoryName(owner));
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     outputRef = `spill_${crypto.randomBytes(18).toString('base64url')}`;
@@ -43,7 +44,10 @@ function createOutputSpillWriter(config = {}, ownerId = '') {
     if (fd === null) return;
     const chunk = Buffer.isBuffer(value) ? value : Buffer.from(String(value ?? ''), 'utf8');
     if (!chunk.length) return;
-    const remaining = Math.max(0, MAX_OUTPUT_SPILL_BYTES - bytes);
+    const fileRemaining = Math.max(0, MAX_OUTPUT_SPILL_BYTES - bytes);
+    const totalBytes = spillUsageByRoot.get(root) ?? MAX_TOTAL_SPILL_BYTES;
+    const globalRemaining = Math.max(0, MAX_TOTAL_SPILL_BYTES - totalBytes);
+    const remaining = Math.min(fileRemaining, globalRemaining);
     if (!remaining) {
       spillTruncated = true;
       return;
@@ -51,6 +55,7 @@ function createOutputSpillWriter(config = {}, ownerId = '') {
     const accepted = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
     fs.writeSync(fd, accepted);
     bytes += accepted.length;
+    spillUsageByRoot.set(root, totalBytes + accepted.length);
     if (accepted.length < chunk.length) spillTruncated = true;
   }
 
@@ -94,7 +99,7 @@ function pruneOutputSpills(root) {
   let files = [];
   const directories = [];
   try {
-    if (!fs.existsSync(root)) return;
+    if (!fs.existsSync(root)) return 0;
     for (const directory of fs.readdirSync(root, { withFileTypes: true })) {
       if (!directory.isDirectory()) continue;
       const base = path.join(root, directory.name);
@@ -109,26 +114,35 @@ function pruneOutputSpills(root) {
       }
     }
   } catch {
-    return;
+    return MAX_TOTAL_SPILL_BYTES;
   }
 
   const cutoff = Date.now() - SPILL_TTL_MS;
-  for (const item of files.filter(item => item.mtimeMs < cutoff)) {
-    try { fs.rmSync(item.file, { force: true }); } catch {}
+  const retained = [];
+  for (const item of files) {
+    if (item.mtimeMs >= cutoff) {
+      retained.push(item);
+      continue;
+    }
+    try { fs.rmSync(item.file, { force: true }); }
+    catch { retained.push(item); }
   }
-  files = files.filter(item => item.mtimeMs >= cutoff).sort((a, b) => a.mtimeMs - b.mtimeMs);
+  files = retained.sort((a, b) => a.mtimeMs - b.mtimeMs);
   let total = files.reduce((sum, item) => sum + item.size, 0);
   const targetBytes = Math.max(0, MAX_TOTAL_SPILL_BYTES - MAX_OUTPUT_SPILL_BYTES);
   const targetFiles = Math.max(0, MAX_SPILL_FILES - 1);
   while (files.length > targetFiles || total > targetBytes) {
     const item = files.shift();
     if (!item) break;
-    try { fs.rmSync(item.file, { force: true }); } catch {}
-    total -= item.size;
+    try {
+      fs.rmSync(item.file, { force: true });
+      total -= item.size;
+    } catch {}
   }
   for (const directory of directories) {
     try { fs.rmdirSync(directory); } catch {}
   }
+  return Math.max(0, total);
 }
 
 export { createOutputSpillWriter, outputSpillOwner, readOutputSpill };

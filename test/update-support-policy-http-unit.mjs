@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { startHttpServer } from '../src/httpServer.ts';
 import { mcpConnectionManager } from '../src/mcp/connectionManager.js';
@@ -7,6 +9,32 @@ import { mcpConnectionManager } from '../src/mcp/connectionManager.js';
 const httpServerSource = fs.readFileSync(new URL('../src/httpServer.ts', import.meta.url), 'utf8');
 assert.match(httpServerSource, /if \(!isolated\) \{[\s\S]*?pruneManagedProcesses\(runtimeConfig\)/, 'isolated HTTP servers must not prune shared managed-process state');
 assert.match(httpServerSource, /createRelaiCoreRuntime\(\{[\s\S]*?isolated,[\s\S]*?stopManagedProcessesOnShutdown:/, 'HTTP shutdown must delegate managed-process ownership to the shared core runtime with the isolated boundary intact');
+
+const authTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-http-auth-precondition-'));
+const authConfig = path.join(authTemp, 'config.json');
+const authStateDir = path.join(authTemp, 'state');
+const previousConfig = process.env.REL_AI_MCP_CONFIG;
+const previousToken = process.env.REL_AI_MCP_TOKEN;
+const previousAllowNoAuth = process.env.REL_AI_MCP_ALLOW_NO_AUTH;
+fs.writeFileSync(authConfig, JSON.stringify({ version: 3, stateDir: authStateDir, workspaces: {} }, null, 2));
+process.env.REL_AI_MCP_CONFIG = authConfig;
+delete process.env.REL_AI_MCP_TOKEN;
+delete process.env.REL_AI_MCP_ALLOW_NO_AUTH;
+try {
+  assert.throws(
+    () => startHttpServer({ host: '127.0.0.1', port: 0, writeProfile: false }),
+    /REL_AI_MCP_TOKEN is required/
+  );
+  assert.equal(fs.existsSync(authStateDir), false, 'missing HTTP auth must fail before durable state initialization');
+} finally {
+  if (previousConfig == null) delete process.env.REL_AI_MCP_CONFIG;
+  else process.env.REL_AI_MCP_CONFIG = previousConfig;
+  if (previousToken == null) delete process.env.REL_AI_MCP_TOKEN;
+  else process.env.REL_AI_MCP_TOKEN = previousToken;
+  if (previousAllowNoAuth == null) delete process.env.REL_AI_MCP_ALLOW_NO_AUTH;
+  else process.env.REL_AI_MCP_ALLOW_NO_AUTH = previousAllowNoAuth;
+  fs.rmSync(authTemp, { recursive: true, force: true });
+}
 
 const server = startHttpServer({
   host: '127.0.0.1',

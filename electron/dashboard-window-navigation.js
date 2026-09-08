@@ -1,4 +1,5 @@
 import { URL } from 'node:url';
+import { normalizeRouteKey } from '../src/ui/route-policy.js';
 
 function validateConnection(connection) {
   const target = new URL(String(connection?.url || ''));
@@ -12,9 +13,10 @@ function validateConnection(connection) {
 function normalizeRouteHash(value) {
   const text = String(value || '').trim();
   if (!text) return '';
-  const hash = text.startsWith('#') ? text : `#${text}`;
-  if (!/^#[A-Za-z0-9/_-]+$/.test(hash)) throw new Error('Invalid dashboard route.');
-  return hash;
+  const requested = text.startsWith('#') ? text.slice(1) : text;
+  const normalized = normalizeRouteKey(requested);
+  if (normalized !== requested) throw new Error('Invalid dashboard route.');
+  return `#${normalized}`;
 }
 
 function safeUrl(value) {

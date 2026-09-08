@@ -52,6 +52,13 @@ function startHttpServer(options: HttpServerOptions = {}): RelaiHttpServer {
   const clearRuntimeLogs = typeof options.clearRuntimeLogs === "function" ? options.clearRuntimeLogs : null;
   const onRuntimeLogChange = typeof options.onRuntimeLogChange === "function" ? options.onRuntimeLogChange : null;
 
+  if (!token && !allowNoAuth) {
+    throw new Error("REL_AI_MCP_TOKEN is required for the HTTP server. Set a strong token, or set REL_AI_MCP_ALLOW_NO_AUTH=1 for local-only testing.");
+  }
+  if (allowNoAuth && !isLoopbackHost(host)) {
+    throw new Error('REL_AI_MCP_ALLOW_NO_AUTH is permitted only on a loopback bind.');
+  }
+
   ensureConfig();
   const coreRuntime = createRelaiCoreRuntime({
     isolated,
@@ -68,13 +75,6 @@ function startHttpServer(options: HttpServerOptions = {}): RelaiHttpServer {
   });
   if (!isolated) {
     pruneManagedProcesses(runtimeConfig);
-  }
-
-  if (!token && !allowNoAuth) {
-    throw new Error("REL_AI_MCP_TOKEN is required for the HTTP server. Set a strong token, or set REL_AI_MCP_ALLOW_NO_AUTH=1 for local-only testing.");
-  }
-  if (allowNoAuth && !isLoopbackHost(host)) {
-    throw new Error('REL_AI_MCP_ALLOW_NO_AUTH is permitted only on a loopback bind.');
   }
 
   const routeOptions: ResolvedHttpServerOptions = {

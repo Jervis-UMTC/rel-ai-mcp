@@ -268,8 +268,9 @@ try {
     body: JSON.stringify({ jsonrpc: '2.0', id: 33, method: 'tools/list', params: {} })
   });
   const chatGptTools = await readMcpResponse(chatGptToolsResponse);
-  assert.equal(chatGptToolsResponse.status, 200, JSON.stringify(chatGptTools));
-  assert.equal(chatGptTools.result?.tools?.length, mcpToolCount);
+  assert.equal(chatGptToolsResponse.status, 400, JSON.stringify(chatGptTools));
+  assert.equal(chatGptTools.error?.code, -32022);
+  assert.deepEqual(chatGptTools.error?.data?.supported, [mcpProtocolVersion]);
 
   const chatGptStatusResponse = await freshFetch(`${base}/mcp`, {
     method: 'POST',

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { buildUsageModel, currentUsageMonth } from '../src/ui/features/usage/index.js';
 import { analyticsBounds, analyticsRangeScope } from '../src/ui/features/usage/range-model.js';
 import { loadAnalyticsData } from '../src/ui/features/usage/data.js';
-import { analyticsMetrics, timelineModel } from '../src/ui/features/usage/render.js';
+import { analyticsMetrics, formatChartValue, pointMetric, timelineModel } from '../src/ui/features/usage/render.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
@@ -51,6 +51,8 @@ assert.match(usageReact, /'data-usage-status': true, role: 'status', 'aria-live'
 assert.doesNotMatch(usageReact, /'data-usage-content'.*'aria-live'/);
 assert.match(usageReact, /Analytics updated for \$\{bounds\.label\}/);
 assert.match(usageReact, /taskRevision/, 'Analytics must refresh current local metrics from canonical live task activity');
+assert.match(homeReact, /revisions\?\.task/, 'Overview analytics must refresh from canonical live task revisions');
+assert.match(workspacesReact, /taskRevision/, 'Project analytics must refresh from canonical live task revisions');
 assert.match(usageReact, /'aria-pressed': range === key \? 'true' : 'false'/);
 assert.match(usageReact, /role: 'tooltip'/, 'Analytics metric help must expose tooltip semantics');
 assert.match(usageReact, /'aria-describedby': helpId/, 'Analytics metric help triggers must reference their tooltip text');
@@ -63,6 +65,8 @@ assert.match(charts, /event\.key === 'ArrowLeft'/, 'Analytics timeline must supp
 assert.match(charts, /event\.key === 'ArrowRight'/, 'Analytics timeline must support keyboard period navigation');
 assert.match(charts, /react-chartjs-2/, 'Analytics charts must use the canonical React Chart.js wrapper');
 assert.match(charts, /chart\.js/, 'Analytics charts must use Chart.js instead of first-party SVG geometry');
+assert.doesNotMatch(charts, /\bBar(?:Element)?\b/, 'Temporal analytics must use line charts consistently');
+assert.match(charts, /spanGaps: false/, 'Missing rate and duration samples must remain visible as gaps');
 assert.ok(uiPackage.dependencies['chart.js'], 'Chart.js must be owned by the UI workspace');
 assert.ok(uiPackage.dependencies['react-chartjs-2'], 'The React Chart.js wrapper must be owned by the UI workspace');
 assert.doesNotMatch(`${usageReact}\n${homeReact}\n${workspacesReact}`, /h\(['"]svg['"]/, 'Analytics feature renderers must not retain first-party SVG chart markup');
@@ -75,7 +79,7 @@ const currentMetricScope = {
   toolCalls: 10, reliabilityCalls: 10, reliableCalls: 9.68, reliabilityRate: 96.8,
   infrastructureFailures: 0, recoverableFailures: 0, failures: 1,
   completed: 10, operationSuccessRate: 92.7, averageDuration: 6120,
-  points: [], tools: [], workspaces: [], devices: [], failureCategories: []
+  points: [], tools: [], workspaces: [], failureCategories: []
 };
 const previousWithoutRateBaselines = {
   toolCalls: 0, reliabilityCalls: 0, reliableCalls: 0, reliabilityRate: 0,
@@ -100,11 +104,18 @@ assert.deepEqual(timeline.data, [1, 3, 2]);
 assert.equal('coordinates' in timeline, false);
 assert.equal('points' in timeline, false);
 assert.equal('area' in timeline, false);
+const sparseRateTimeline = timelineModel([null, 100, null, 50], 'Successful actions');
+assert.deepEqual(sparseRateTimeline.data, [null, 100, null, 50]);
+assert.equal(sparseRateTimeline.peakIndex, 1);
+assert.equal(sparseRateTimeline.latestIndex, 3);
+assert.equal(pointMetric({ successes: 0, failures: 0 }, 'operationSuccessRate'), null, 'empty success-rate buckets must remain missing rather than becoming 0%');
+assert.equal(pointMetric({ successes: 0, failures: 0, executionMs: 0 }, 'averageDuration'), null, 'empty duration buckets must remain missing rather than becoming 0 ms');
+assert.equal(formatChartValue(null, 'Successful actions'), '—');
 
 for (const label of ['Actions', 'Reliable actions', 'Internal errors', 'Retryable problems', 'Successful actions', 'Average time']) {
   assert.match(usageCombined, new RegExp(label), `Usage must render ${label}.`);
 }
-for (const field of ['requests', 'toolCalls', 'successes', 'failures', 'requestBytes', 'resultBytes', 'executionMs', 'activeDays']) {
+for (const field of ['requests', 'toolCalls', 'successes', 'failures', 'executionMs', 'activeDays']) {
   assert.match(usageCombined, new RegExp(`\\b${field}\\b`), `Analytics must consume ${field}.`);
 }
 assert.match(usageReact, /Analytics unavailable/);
@@ -118,15 +129,14 @@ assert.doesNotMatch(usageRender, /Trend starts now|Completed outcomes|Workspace 
 
 const snapshot = buildUsageModel({
   ok: true,
-  source: 'local',
   month: '2026-08',
-  totals: { requests: 8, toolCalls: 5, successes: 4, failures: 1, requestBytes: 1200, resultBytes: 3400, executionMs: 5600, activeDays: 2 },
+  totals: { requests: 8, toolCalls: 5, successes: 4, failures: 1, executionMs: 5600, activeDays: 2 },
   tools: [{ tool: 'relai_read', toolCalls: 3, successes: 3, failures: 0, executionMs: 900 }],
-  devices: [{ deviceId: 'local', displayName: 'This device', toolCalls: 5, successes: 4, failures: 1, executionMs: 5600 }],
   workspaces: [{ workspace: 'repo', toolCalls: 5, successes: 4, failures: 1, executionMs: 5600 }],
   failureCategories: [{ category: 'SENSITIVE_PATH_RESTRICTED', failures: 1 }]
 }, '2026-08');
-assert.equal(snapshot.source, 'local');
+assert.equal('source' in snapshot, false);
+assert.equal('devices' in snapshot, false);
 assert.equal(snapshot.totals.toolCalls, 5);
 assert.equal(snapshot.tools[0].tool, 'relai_read');
 assert.deepEqual(snapshot.failureCategories, [{ category: 'runtime', failures: 1 }]);
@@ -137,11 +147,10 @@ const bounds = analyticsBounds('24h', { now: new Date('2026-08-08T12:00:00.000Z'
 assert.equal(bounds.start.toISOString(), '2026-08-07T12:00:00.000Z');
 const ranged = analyticsRangeScope([buildUsageModel({
   ok: true,
-  source: 'local',
   month: '2026-08',
-  totals: { requests: 2, toolCalls: 2, successes: 1, failures: 1, requestBytes: 10, resultBytes: 20, executionMs: 100, activeDays: 1 },
-  tools: [], devices: [], workspaces: [],
-  series: [{ hour: '2026-08-08T10', requests: 2, toolCalls: 2, successes: 1, failures: 1, requestBytes: 10, resultBytes: 20, executionMs: 100 }],
+  totals: { requests: 2, toolCalls: 2, successes: 1, failures: 1, executionMs: 100, activeDays: 1 },
+  tools: [], workspaces: [],
+  series: [{ hour: '2026-08-08T10', requests: 2, toolCalls: 2, successes: 1, failures: 1, executionMs: 100 }],
   toolSeries: [], workspaceSeries: [], workspaceToolSeries: [],
   failureCategorySeries: [{ hour: '2026-08-08T10', category: 'policy', failures: 1 }]
 }, '2026-08')], bounds);
@@ -150,33 +159,32 @@ assert.equal(ranged.averageDuration, 50);
 assert.deepEqual(ranged.failureCategories, [{ category: 'policy', failures: 1 }]);
 
 const rollingHourBounds = analyticsBounds('1h', { now: new Date('2026-08-08T10:45:00.000Z') });
+assert.equal(rollingHourBounds.start.toISOString(), '2026-08-08T10:00:00.000Z');
+assert.equal(rollingHourBounds.end.toISOString(), '2026-08-08T11:00:00.000Z');
 const rollingHour = analyticsRangeScope([buildUsageModel({
   ok: true,
-  source: 'local',
   month: '2026-08',
-  totals: { requests: 2, toolCalls: 2, successes: 2, failures: 0, requestBytes: 0, resultBytes: 0, executionMs: 20, activeDays: 1 },
-  tools: [], devices: [], workspaces: [],
+  totals: { requests: 2, toolCalls: 2, successes: 2, failures: 0, executionMs: 20, activeDays: 1 },
+  tools: [], workspaces: [],
   series: [
-    { hour: '2026-08-08T08', requests: 1, toolCalls: 1, successes: 1, failures: 0, requestBytes: 0, resultBytes: 0, executionMs: 10 },
-    { hour: '2026-08-08T09', requests: 1, toolCalls: 1, successes: 1, failures: 0, requestBytes: 0, resultBytes: 0, executionMs: 10 }
+    { hour: '2026-08-08T09', requests: 1, toolCalls: 1, successes: 1, failures: 0, executionMs: 10 },
+    { hour: '2026-08-08T10', requests: 1, toolCalls: 1, successes: 1, failures: 0, executionMs: 10 }
   ],
   toolSeries: [], workspaceSeries: [], workspaceToolSeries: []
 }, '2026-08')], rollingHourBounds);
-assert.equal(rollingHour.toolCalls, 1, 'rolling ranges must include an hourly bucket that overlaps the cutoff');
-assert.equal(rollingHour.points.reduce((sum, point) => sum + point.toolCalls, 0), 1, 'timeline totals must match rolling-range totals at a partial-hour cutoff');
+assert.equal(rollingHour.toolCalls, 1, 'one-hour analytics must represent the current UTC-hour bucket without pulling in the previous partial bucket');
+assert.equal(rollingHour.points.reduce((sum, point) => sum + point.toolCalls, 0), 1, 'timeline totals must match the aligned UTC-hour range');
 
 const loaded = await loadAnalyticsData({
   desktop: { getLocalUsage: async () => ({
     ok: true,
-    source: 'local',
     month: '2026-08',
     privacy: { retentionDays: 180, externalTelemetry: { enabled: false, endpointConfigured: true, sampleRatio: 0.25 } },
-    totals: { requests: 2, toolCalls: 2, successes: 2, failures: 0, requestBytes: 0, resultBytes: 0, executionMs: 120, activeDays: 1 },
-    tools: [], devices: [], workspaces: [{ workspace: 'repo', toolCalls: 2, successes: 2, failures: 0, executionMs: 120 }],
-    workspaceDimensions: [{ deviceId: 'local', displayName: 'This device', workspace: 'repo', workspaceKey: 'local::repo', toolCalls: 2, successes: 2, failures: 0, executionMs: 120 }],
+    totals: { requests: 2, toolCalls: 2, successes: 2, failures: 0, executionMs: 120, activeDays: 1 },
+    tools: [], workspaces: [{ workspace: 'repo', toolCalls: 2, successes: 2, failures: 0, executionMs: 120 }],
     workspaceTools: [],
-    series: [{ hour: '2026-08-08T10', requests: 2, toolCalls: 2, successes: 2, failures: 0, requestBytes: 0, resultBytes: 0, executionMs: 120 }],
-    toolSeries: [], workspaceSeries: [{ hour: '2026-08-08T10', deviceId: 'local', workspace: 'repo', workspaceKey: 'local::repo', toolCalls: 2, successes: 2, failures: 0, executionMs: 120 }], workspaceToolSeries: []
+    series: [{ hour: '2026-08-08T10', requests: 2, toolCalls: 2, successes: 2, failures: 0, executionMs: 120 }],
+    toolSeries: [], workspaceSeries: [{ hour: '2026-08-08T10', workspace: 'repo', toolCalls: 2, successes: 2, failures: 0, executionMs: 120 }], workspaceToolSeries: []
   }) },
   range: '24h',
   now: new Date('2026-08-08T12:00:00.000Z')

@@ -35,11 +35,11 @@ export function stopSSE(options = {}) {
   if (options.emit !== false) emitState('offline');
 }
 
-export function restartSSE() {
+export function restartSSE(options = {}) {
   stopSSE({ emit: false });
   _stopped = false;
   _retryCount = 0;
-  _connect();
+  _connect({ emitConnecting: options.emitConnecting !== false });
 }
 
 export function isLive() {
@@ -48,13 +48,13 @@ export function isLive() {
 
 function _handleVisibilityChange() {
   if (_stopped || document.visibilityState !== 'visible') return;
-  restartSSE();
+  restartSSE({ emitConnecting: false });
 }
 
-function _connect() {
+function _connect(options = {}) {
   if (_stopped || _es) return;
   const generation = ++_generation;
-  emitState(_retryCount ? 'reconnecting' : 'connecting');
+  if (options.emitConnecting !== false) emitState(_retryCount ? 'reconnecting' : 'connecting');
   const source = new EventSource('/events', { withCredentials: true });
   _es = source;
 

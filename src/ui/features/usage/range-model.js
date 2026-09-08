@@ -8,16 +8,17 @@ const RANGE_MS = Object.freeze({
 });
 
 export const ANALYTICS_RANGES = Object.freeze([
-  ['1h', 'Last hour'],
-  ['24h', 'Last 24 hours'],
-  ['7d', 'Last 7 days'],
-  ['30d', 'Last 30 days'],
+  ['1h', 'Current UTC hour'],
+  ['24h', 'Latest 24 UTC-hour buckets'],
+  ['7d', 'Latest 7 days of UTC-hour buckets'],
+  ['30d', 'Latest 30 days of UTC-hour buckets'],
   ['month', 'This month'],
   ['custom', 'Custom range']
 ]);
 
+const HOUR_MS = 60 * 60 * 1000;
 const RELIABILITY_KEYS = Object.freeze(['reliabilityCalls', 'reliableCalls', 'infrastructureFailures', 'operationFailures', 'recoverableFailures', 'cancellations']);
-const TOTAL_KEYS = Object.freeze(['requests', 'toolCalls', 'successes', 'failures', 'requestBytes', 'resultBytes', 'executionMs', ...RELIABILITY_KEYS]);
+const TOTAL_KEYS = Object.freeze(['requests', 'toolCalls', 'successes', 'failures', 'executionMs', ...RELIABILITY_KEYS]);
 const GROUP_KEYS = Object.freeze(['toolCalls', 'successes', 'failures', 'executionMs', ...RELIABILITY_KEYS]);
 
 export function analyticsBounds(range = '24h', { now = new Date(), customStart = '', customEnd = '' } = {}) {
@@ -31,15 +32,17 @@ export function analyticsBounds(range = '24h', { now = new Date(), customStart =
     start = parseDateStart(customStart);
     const inclusiveEnd = parseDateStart(customEnd);
     if (!start || !inclusiveEnd) throw new Error('Choose both custom dates.');
-    end = new Date(inclusiveEnd.getTime() + 24 * 60 * 60 * 1000);
+    end = new Date(inclusiveEnd.getTime() + 24 * HOUR_MS);
     if (end > endNow) end = endNow;
     if (start >= end) throw new Error('Custom analytics start must be before the end date.');
-    if (end.getTime() - start.getTime() > 90 * 24 * 60 * 60 * 1000) throw new Error('Custom analytics ranges are limited to 90 days.');
+    if (end.getTime() - start.getTime() > 90 * 24 * HOUR_MS) throw new Error('Custom analytics ranges are limited to 90 days.');
   } else {
+    end = ceilUtcHour(end);
     const duration = RANGE_MS[range] || RANGE_MS['24h'];
     start = new Date(end.getTime() - duration);
   }
-  const duration = Math.max(1, end.getTime() - start.getTime());
+  end = ceilUtcHour(end);
+  const duration = Math.max(HOUR_MS, end.getTime() - start.getTime());
   const previousEnd = new Date(start);
   const previousStart = new Date(start.getTime() - duration);
   return { range, start, end, previousStart, previousEnd, label: rangeLabel(range, start, end) };
@@ -63,14 +66,11 @@ export function normalizeUsageSnapshot(snapshot, requestedMonth = '') {
   const month = normalizeMonth(snapshot.month || requestedMonth);
   if (!month) throw new Error('Analytics are unavailable for the selected month.');
   return {
-    source: snapshot.source === 'local' ? 'local' : 'cloud',
     month,
     privacy: normalizePrivacy(snapshot.privacy),
     totals: normalizeTotals(snapshot.totals),
     tools: normalizeBreakdown(snapshot.tools, 'tool'),
-    devices: normalizeBreakdown(snapshot.devices, 'device'),
     workspaces: normalizeBreakdown(snapshot.workspaces, 'workspace'),
-    workspaceDimensions: normalizeBreakdown(snapshot.workspaceDimensions, 'workspaceDimension'),
     workspaceTools: normalizeBreakdown(snapshot.workspaceTools, 'workspaceTool'),
     series: normalizeSeries(snapshot.series, 'overall'),
     toolSeries: normalizeSeries(snapshot.toolSeries, 'tool'),
@@ -83,10 +83,10 @@ export function normalizeUsageSnapshot(snapshot, requestedMonth = '') {
   };
 }
 
-export function analyticsRangeScope(models, bounds, { workspace = '', deviceId = '', monthlyFallback = false } = {}) {
+export function analyticsRangeScope(models, bounds, { workspace = '', monthlyFallback = false } = {}) {
   const all = Array.isArray(models) ? models : [];
   const rows = all.flatMap(model => model.series).filter(row => inRange(row.hour, bounds.start, bounds.end));
-  const workspaceRows = all.flatMap(model => model.workspaceSeries).filter(row => inRange(row.hour, bounds.start, bounds.end) && workspaceMatch(row, workspace, deviceId));
+  const workspaceRows = all.flatMap(model => model.workspaceSeries).filter(row => inRange(row.hour, bounds.start, bounds.end) && workspaceMatch(row, workspace));
   const baseRows = workspace ? workspaceRows : rows;
   let totals = sumRows(baseRows);
   let usedMonthlyFallback = false;
@@ -96,12 +96,8 @@ export function analyticsRangeScope(models, bounds, { workspace = '', deviceId =
     fallbackModel = model || null;
     if (model) {
       if (workspace) {
-        const relevant = model.workspaceDimensions.filter(row => workspaceMatch(row, workspace, deviceId));
+        const relevant = model.workspaces.filter(row => row.workspace === workspace);
         if (relevant.length) totals = sumRows(relevant);
-        else {
-          const legacy = model.workspaces.filter(row => row.workspace === workspace);
-          if (legacy.length) totals = sumRows(legacy);
-        }
       } else {
         totals = { ...model.totals };
       }
@@ -111,29 +107,25 @@ export function analyticsRangeScope(models, bounds, { workspace = '', deviceId =
   if (!usedMonthlyFallback) totals.activeDays = uniqueActiveDays(baseRows);
   else if (!Number.isFinite(totals.activeDays)) totals.activeDays = uniqueActiveDays(baseRows);
   const toolRows = workspace
-    ? all.flatMap(model => model.workspaceToolSeries).filter(row => inRange(row.hour, bounds.start, bounds.end) && workspaceMatch(row, workspace, deviceId))
+    ? all.flatMap(model => model.workspaceToolSeries).filter(row => inRange(row.hour, bounds.start, bounds.end) && workspaceMatch(row, workspace))
     : all.flatMap(model => model.toolSeries).filter(row => inRange(row.hour, bounds.start, bounds.end));
   const tools = groupRows(toolRows, row => row.tool || 'Unknown tool', 'tool');
-  const deviceNames = new Map(all.flatMap(model => model.workspaceDimensions).map(row => [row.deviceId, row.displayName || row.deviceId]));
-  const devices = workspace ? groupRows(workspaceRows, row => row.deviceId || '', 'device', row => deviceNames.get(row.deviceId) || row.displayName || row.deviceId || '') : [];
   const workspaces = workspace ? [] : groupRows(all.flatMap(model => model.workspaceSeries).filter(row => inRange(row.hour, bounds.start, bounds.end)), row => row.workspace || 'Unattributed', 'workspace');
   const categoryRows = workspace
-    ? all.flatMap(model => model.workspaceFailureCategorySeries).filter(row => inRange(row.hour, bounds.start, bounds.end) && workspaceMatch(row, workspace, deviceId))
+    ? all.flatMap(model => model.workspaceFailureCategorySeries).filter(row => inRange(row.hour, bounds.start, bounds.end) && workspaceMatch(row, workspace))
     : all.flatMap(model => model.failureCategorySeries).filter(row => inRange(row.hour, bounds.start, bounds.end));
   let failureCategories = groupFailureCategories(categoryRows);
   if (usedMonthlyFallback && fallbackModel) {
     const monthlyCategories = workspace
-      ? fallbackModel.workspaceFailureCategories.filter(row => workspaceMatch(row, workspace, deviceId))
+      ? fallbackModel.workspaceFailureCategories.filter(row => workspaceMatch(row, workspace))
       : fallbackModel.failureCategories;
     failureCategories = groupFailureCategories(monthlyCategories);
   }
   const points = bucketSeries(baseRows, bounds.start, bounds.end);
   return {
-    source: all.length && all.every(model => model.source === 'local') ? 'local' : 'cloud',
     kind: workspace ? 'workspace' : 'all',
     label: workspace || 'All projects',
     workspace,
-    deviceId,
     ...totals,
     completed: totals.successes + totals.failures,
     successRate: totals.successes + totals.failures ? totals.successes / (totals.successes + totals.failures) * 100 : 0,
@@ -141,7 +133,6 @@ export function analyticsRangeScope(models, bounds, { workspace = '', deviceId =
     reliabilityRate: totals.reliabilityCalls ? totals.reliableCalls / totals.reliabilityCalls * 100 : null,
     averageDuration: totals.successes + totals.failures ? totals.executionMs / (totals.successes + totals.failures) : 0,
     tools,
-    devices,
     workspaces,
     failureCategories,
     points,
@@ -162,15 +153,8 @@ export function deltaFor(current, previous, key, { rate = false, inverse = false
 }
 
 export function workspaceOptions(models) {
-  const map = new Map();
-  for (const row of (models || []).flatMap(model => model.workspaceDimensions)) {
-    const alias = row.workspace;
-    if (!alias) continue;
-    if (!map.has(alias)) map.set(alias, new Map());
-    map.get(alias).set(row.deviceId, row.displayName || row.deviceId);
-  }
-  for (const model of models || []) for (const row of model.workspaces) if (row.workspace && !map.has(row.workspace)) map.set(row.workspace, new Map());
-  return [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([workspace, devices]) => ({ workspace, devices: [...devices.entries()].map(([deviceId, displayName]) => ({ deviceId, displayName })) }));
+  const aliases = new Set((models || []).flatMap(model => model.workspaces).map(row => row.workspace).filter(Boolean));
+  return [...aliases].sort((a, b) => a.localeCompare(b)).map(workspace => ({ workspace }));
 }
 
 function normalizePrivacy(value) {
@@ -191,7 +175,7 @@ function normalizePrivacy(value) {
 function normalizeTotals(value) {
   if (!value || typeof value !== 'object') throw new Error('Analytics are unavailable because monthly totals were not returned.');
   const result = {};
-  for (const key of ['requests', 'toolCalls', 'successes', 'failures', 'requestBytes', 'resultBytes', 'executionMs', 'activeDays']) result[key] = exactNumber(value[key], key);
+  for (const key of ['requests', 'toolCalls', 'successes', 'failures', 'executionMs', 'activeDays']) result[key] = exactNumber(value[key], key);
   return { ...result, ...normalizeReliability(value, 'totals') };
 }
 
@@ -203,9 +187,7 @@ function normalizeBreakdown(value, kind) {
     const failures = exactNumber(row.failures, `${kind}.failures`);
     return {
       ...(kind.toLowerCase().includes('tool') ? { tool: String(row.tool || '') } : {}),
-      ...(kind === 'device' || kind.includes('workspace') ? { deviceId: String(row.deviceId || ''), displayName: String(row.displayName || '') } : {}),
       ...(kind.includes('workspace') || kind === 'workspace' ? { workspace: String(row.workspace || '') } : {}),
-      ...(row.workspaceKey ? { workspaceKey: String(row.workspaceKey) } : {}),
       toolCalls: exactNumber(row.toolCalls ?? row.calls, `${kind}.toolCalls`),
       successes,
       failures,
@@ -223,14 +205,12 @@ function normalizeSeries(value, kind) {
     return {
       hour: String(item?.hour || ''),
       ...(kind.toLowerCase().includes('tool') ? { tool: String(item?.tool || '') } : {}),
-      ...(kind.includes('workspace') ? { deviceId: String(item?.deviceId || ''), workspace: String(item?.workspace || ''), workspaceKey: String(item?.workspaceKey || ''), displayName: String(item?.displayName || '') } : {}),
+      ...(kind.includes('workspace') ? { workspace: String(item?.workspace || '') } : {}),
       requests: exactNumber(item?.requests ?? 0, `${kind}.requests`),
       toolCalls: exactNumber(item?.toolCalls ?? 0, `${kind}.toolCalls`),
       successes,
       failures,
       ...normalizeReliability(item, kind),
-      requestBytes: exactNumber(item?.requestBytes ?? 0, `${kind}.requestBytes`),
-      resultBytes: exactNumber(item?.resultBytes ?? 0, `${kind}.resultBytes`),
       executionMs: exactNumber(item?.executionMs ?? 0, `${kind}.executionMs`)
     };
   }).filter(row => hourTime(row.hour) !== null);
@@ -240,7 +220,7 @@ function normalizeFailureRows(value, { workspace = false, series = false } = {})
   if (!Array.isArray(value)) return [];
   return value.map(item => ({
     ...(series ? { hour: String(item?.hour || '') } : {}),
-    ...(workspace ? { deviceId: String(item?.deviceId || ''), workspace: String(item?.workspace || ''), workspaceKey: String(item?.workspaceKey || '') } : {}),
+    ...(workspace ? { workspace: String(item?.workspace || '') } : {}),
     category: normalizeFailureCategory(item?.category),
     failures: exactNumber(item?.failures ?? 0, 'failureCategory.failures')
   })).filter(row => row.failures > 0 && (!series || hourTime(row.hour) !== null));
@@ -261,7 +241,7 @@ function groupFailureCategories(rows) {
   return [...grouped.entries()].map(([category, failures]) => ({ category, failures })).filter(row => row.failures > 0).sort((a, b) => b.failures - a.failures || a.category.localeCompare(b.category));
 }
 
-function groupRows(rows, identity, kind, displayName = null) {
+function groupRows(rows, identity, kind) {
   const grouped = new Map();
   for (const row of rows || []) {
     const key = identity(row);
@@ -273,7 +253,6 @@ function groupRows(rows, identity, kind, displayName = null) {
   return [...grouped.entries()].map(([key, totals]) => ({
     ...(kind === 'tool' ? { tool: key } : {}),
     ...(kind === 'workspace' ? { workspace: key } : {}),
-    ...(kind === 'device' ? { deviceId: key, displayName: displayName ? displayName((rows || []).find(row => identity(row) === key)) : key } : {}),
     ...totals
   })).sort((a, b) => b.toolCalls - a.toolCalls);
 }
@@ -297,20 +276,25 @@ function uniqueActiveDays(rows) {
   return new Set((rows || []).map(row => row.hour.slice(0, 10))).size;
 }
 
-function workspaceMatch(row, workspace, deviceId) {
-  if (workspace && row.workspace !== workspace) return false;
-  return !deviceId || row.deviceId === deviceId;
+function workspaceMatch(row, workspace) {
+  return !workspace || row.workspace === workspace;
 }
 
 function inRange(hour, start, end) {
   const time = hourTime(hour);
-  return time !== null && time < end.getTime() && time + 60 * 60 * 1000 > start.getTime();
+  return time !== null && time >= start.getTime() && time < end.getTime();
 }
 
 function hourTime(hour) {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(String(hour || ''))) return null;
   const value = Date.parse(`${hour}:00:00Z`);
   return Number.isFinite(value) ? value : null;
+}
+
+function ceilUtcHour(value) {
+  const time = value.getTime();
+  const remainder = time % HOUR_MS;
+  return new Date(remainder ? time + HOUR_MS - remainder : time);
 }
 
 function parseDateStart(value) {

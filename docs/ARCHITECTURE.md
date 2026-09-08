@@ -108,7 +108,7 @@ Modern MCP behavior targets protocol `2026-07-28`.
 - `src/server.js` serves modern stdio and rejects initialize-based legacy lifecycle requests.
 - `src/http/mcpTransport.ts` serves stateless HTTP MCP with strict protocol, method, name, capability, Host/Origin, and `_meta` validation.
 - `src/http/mcpAuth.ts` accepts the private Rel.AI bearer token used by tunnel-client and explicit local clients.
-- HTTP retains the SDK-supported stateless `2025-11-25` initialization flow required by supported ChatGPT clients.
+- HTTP retains only the SDK-supported stateless `2025-11-25` startup lifecycle (`initialize` and `notifications/initialized`) required by supported ChatGPT clients; all ordinary MCP operations are modern-only.
 - Native Task interception is owned by `src/mcp/transportTasks.js` before ordinary modern SDK dispatch.
 
 The HTTP service does not expose the removed OAuth authorization server. `/register`, `/authorize`, `/token`, legacy `/sse`, and legacy `/messages` are absent.
@@ -166,11 +166,11 @@ Local durable stores include configuration, connection profile, connection gener
 
 Retained compatibility is intentionally narrow:
 
-- HTTP `2025-11-25` stateless initialization for supported ChatGPT clients;
+- HTTP `2025-11-25` stateless startup lifecycle (`initialize` and `notifications/initialized`) for supported ChatGPT clients;
 - historical task-status aliases normalized on read; and
 - stable internal operation names retained in audit/history/authorization evidence where they are data contracts rather than transport modes.
 
-Compatibility code must remain isolated and tested. It must not create a second active source of schemas, policy, lifecycle, persistence, or connection transport.
+Compatibility code must remain isolated and tested. The `2025-11-25` shim is startup-lifecycle-only and must not dispatch ordinary MCP operations. It must not create a second active source of schemas, policy, lifecycle, persistence, or connection transport.
 
 ## Current architecture metrics
 

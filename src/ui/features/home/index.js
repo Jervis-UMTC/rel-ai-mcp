@@ -102,11 +102,6 @@ export function desktopSetupState(data = {}) {
   };
 }
 
-export function analyticsTaskBoundary(tasks = []) {
-  const task = tasks.find(item => item?.endedAt || item?.completedAt);
-  return String(task?.endedAt || task?.completedAt || '');
-}
-
 export function homeAnalyticsView(scope = {}) {
   const completed = Number(scope.completed || 0);
   const actions = Number(scope.toolCalls || 0);
@@ -156,7 +151,7 @@ function homeAnalyticsPulseView(points = []) {
   return {
     empty: false,
     values,
-    summary: `Action activity over the last 24 hours. ${formatInteger(total)} total actions. Peak ${formatInteger(peak)} ${pluralLabel(peak, 'action')} ${hoursAgo ? `${hoursAgo} ${pluralLabel(hoursAgo, 'hour')} ago` : 'in the latest hour'}. Latest hour ${formatInteger(latest)} ${pluralLabel(latest, 'action')}. Overall trend ${trend}.`
+    summary: `Action activity across the latest 24 UTC-hour buckets. ${formatInteger(total)} total actions. Peak ${formatInteger(peak)} ${pluralLabel(peak, 'action')} ${hoursAgo ? `${hoursAgo} ${pluralLabel(hoursAgo, 'hour')} ago` : 'in the current hour'}. Current hour ${formatInteger(latest)} ${pluralLabel(latest, 'action')}. Overall trend ${trend}.`
   };
 }
 
@@ -173,7 +168,7 @@ function analyticsContextSummary(scope = {}, actions = 0) {
   const topProject = Array.isArray(scope.workspaces) ? scope.workspaces[0] : null;
   if (!actions) return 'No activity';
   if (scope.kind !== 'workspace' && topProject?.workspace) return `Most active project: ${topProject.workspace}`;
-  return `${formatInteger(actions)} ${pluralLabel(actions, 'action')} in the last 24 hours`;
+  return `${formatInteger(actions)} ${pluralLabel(actions, 'action')} in the latest 24 UTC-hour buckets`;
 }
 
 function formatInteger(value) {

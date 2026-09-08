@@ -14,7 +14,7 @@ function projectPulseStatus(status = {}) {
   const activeCalls = Math.max(0, Number(activity.activeCalls || 0));
   const route = taskRoute(primary);
 
-  if (attentionTask) return attentionModel(attentionTask, taskCount, route);
+  if (attentionTask) return attentionModel(attentionTask, taskCount, route, tasks);
   if (activeCalls > 0 || normalizeStatus(activity.state) === 'working') {
     return {
       visible: true,
@@ -24,7 +24,7 @@ function projectPulseStatus(status = {}) {
       detail: taskDetail(primary, taskCount, 'Rel.AI is using this computer now.'),
       route,
       taskCount,
-      ...taskPresentation(primary, taskCount),
+      ...taskPresentation(primary, taskCount, tasks),
       actionRequired: false
     };
   }
@@ -37,7 +37,7 @@ function projectPulseStatus(status = {}) {
       detail: taskDetail(primary, taskCount, 'ChatGPT may still be working. Rel.AI is ready for the next local action.'),
       route,
       taskCount,
-      ...taskPresentation(primary, taskCount),
+      ...taskPresentation(primary, taskCount, tasks),
       actionRequired: false
     };
   }
@@ -66,7 +66,7 @@ function projectPulseStatus(status = {}) {
   };
 }
 
-function attentionModel(task, taskCount, route) {
+function attentionModel(task, taskCount, route, tasks) {
   const status = normalizeStatus(task.status);
   const title = status === 'waiting_for_approval'
     ? 'Approval required'
@@ -86,19 +86,24 @@ function attentionModel(task, taskCount, route) {
     detail: taskDetail(task, taskCount, cleanText(task.currentActivity || task.errorSummary || fallback, 140)),
     route,
     taskCount,
-    ...taskPresentation(task, taskCount),
+    ...taskPresentation(task, taskCount, tasks),
     actionRequired: true
   };
 }
 
-function taskPresentation(task, taskCount) {
-  if (!task || typeof task !== 'object') return { otherTaskCount: Math.max(0, taskCount - 1) };
+function taskPresentation(task, taskCount, tasks = []) {
+  const taskNames = (Array.isArray(tasks) ? tasks : [])
+    .map(candidate => cleanText(candidate?.title || candidate?.objective, 72))
+    .filter(Boolean)
+    .slice(0, 3);
+  if (!task || typeof task !== 'object') return { otherTaskCount: Math.max(0, taskCount - 1), taskNames };
   const progressPercent = Number(task.progress?.percent);
   const presentation = {
     contextTitle: cleanText(task.title || task.objective, 96),
     workspace: cleanText(task.workspace, 80),
     progressLabel: cleanText(task.progress?.label, 80),
-    otherTaskCount: Math.max(0, taskCount - 1)
+    otherTaskCount: Math.max(0, taskCount - 1),
+    taskNames
   };
   if (Number.isFinite(progressPercent)) presentation.progressPercent = Math.min(100, Math.max(0, progressPercent));
   return presentation;

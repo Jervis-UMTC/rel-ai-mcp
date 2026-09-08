@@ -46,7 +46,7 @@ type UiArgs = Readonly<Record<string, unknown> & BrowserInteractionArgs & {
   clear?: unknown;
 }>;
 
-type UiContext = AutomationContext & Readonly<Record<string, unknown>>;
+type UiContext = AutomationContext & Readonly<Record<string, unknown>> & Readonly<{ signal?: AbortSignal }>;
 
 type UiSessionRecord = Readonly<{
   sessionId: string;
@@ -60,6 +60,7 @@ type UiSessionRecord = Readonly<{
 type SessionCallback<T> = (record: UiSessionRecord) => Promise<T> | T;
 
 const sessions = new Map<string, UiSessionRecord>();
+const pendingStarts = new Set<Readonly<{ taskId: string }>>();
 const pendingSessionCloses = new Set<Promise<void>>();
 
 async function startUiSession(
@@ -67,12 +68,15 @@ async function startUiSession(
   args: UiArgs = {},
   context: UiContext = {}
 ): Promise<Record<string, unknown>> {
+  throwIfUiAborted(context.signal);
   const taskId = taskIdFor(args, context);
   const existing = taskId ? [...sessions.values()].find(record => record.attribution.taskId === taskId) : null;
-  if (existing) {
-    throw taskError('UI_SESSION_ALREADY_ACTIVE', `Work session already has an active UI test session: ${existing.sessionId}. Stop it before starting another.`);
+  const pendingForTask = taskId ? [...pendingStarts].some(pending => pending.taskId === taskId) : false;
+  if (existing || pendingForTask) {
+    const detail = existing ? `: ${existing.sessionId}` : '';
+    throw taskError('UI_SESSION_ALREADY_ACTIVE', `Work session already has an active or starting UI test session${detail}. Stop it before starting another.`);
   }
-  if (sessions.size >= MAX_ACTIVE_SESSIONS) {
+  if (sessions.size + pendingStarts.size >= MAX_ACTIVE_SESSIONS) {
     throw taskError('UI_SESSION_LIMIT', `Rel.AI supports at most ${MAX_ACTIVE_SESSIONS} concurrent UI test sessions.`);
   }
 
@@ -85,25 +89,29 @@ async function startUiSession(
   const viewport = normalizeViewport(args.width, args.height);
   const sessionId = `ui_${crypto.randomBytes(24).toString('base64url')}`;
   const createdAt = new Date().toISOString();
-  const browser = await launchWebBrowserSession({
-    protocol,
-    viewport,
-    headless: args.headless !== false,
-    allowedPorts
-  });
-  const record: UiSessionRecord = Object.freeze({
-    sessionId,
-    attribution: createAutomationAttribution(workspace, args, context),
-    origin,
-    allowedPorts,
-    browser,
-    createdAt
-  });
-  sessions.set(sessionId, record);
-  browser.onDisconnected(() => sessions.delete(sessionId));
-
+  const pendingStart = Object.freeze({ taskId });
+  pendingStarts.add(pendingStart);
+  let browser: WebBrowserSession | null = null;
+  let record: UiSessionRecord | null = null;
   try {
-    const initialNavigation = await browser.navigate(initialUrl, timeoutFor(args.timeoutMs));
+    browser = await withUiAbortResource(launchWebBrowserSession({
+      protocol,
+      viewport,
+      headless: args.headless !== false,
+      allowedPorts
+    }), context.signal, launchedBrowser => launchedBrowser.close());
+    record = Object.freeze({
+      sessionId,
+      attribution: createAutomationAttribution(workspace, args, context),
+      origin,
+      allowedPorts,
+      browser,
+      createdAt
+    });
+    sessions.set(sessionId, record);
+    browser.onDisconnected(() => sessions.delete(sessionId));
+
+    const initialNavigation = await withUiAbort(browser.navigate(initialUrl, timeoutFor(args.timeoutMs)), context.signal);
     return {
       ok: true,
       workspace: workspace.alias,
@@ -120,9 +128,11 @@ async function startUiSession(
       createdAt
     };
   } catch (error) {
-    sessions.delete(sessionId);
-    await browser.close().catch(() => {});
+    if (record) sessions.delete(sessionId);
+    if (browser) await browser.close().catch(() => {});
     throw error;
+  } finally {
+    pendingStarts.delete(pendingStart);
   }
 }
 
@@ -132,6 +142,7 @@ function withUiSession<T>(
   context: UiContext,
   callback: SessionCallback<T>
 ): Promise<T> | T {
+  throwIfUiAborted(context.signal);
   return callback(requireUiSession(workspace, args, context));
 }
 
@@ -215,6 +226,65 @@ async function trackUiRecordClose(records: readonly UiSessionRecord[]): Promise<
 
 async function closeUiRecords(records: readonly UiSessionRecord[]): Promise<void> {
   await Promise.allSettled(records.map(record => record.browser.close()));
+}
+
+function throwIfUiAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw taskError('UI_OPERATION_CANCELLED', errorMessage(signal.reason || 'UI operation cancelled.'));
+}
+
+function withUiAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  throwIfUiAborted(signal);
+  return new Promise<T>((resolve, reject) => {
+    let aborted = false;
+    const onAbort = () => {
+      aborted = true;
+      reject(taskError('UI_OPERATION_CANCELLED', errorMessage(signal.reason || 'UI operation cancelled.')));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      value => {
+        signal.removeEventListener('abort', onAbort);
+        if (!aborted) resolve(value);
+      },
+      error => {
+        signal.removeEventListener('abort', onAbort);
+        if (!aborted) reject(error);
+      }
+    );
+  });
+}
+
+function withUiAbortResource<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  cleanup: (value: T) => Promise<unknown> | unknown
+): Promise<T> {
+  if (!signal) return promise;
+  throwIfUiAborted(signal);
+  return new Promise<T>((resolve, reject) => {
+    let aborted = false;
+    const onAbort = () => {
+      aborted = true;
+      reject(taskError('UI_OPERATION_CANCELLED', errorMessage(signal.reason || 'UI operation cancelled.')));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      value => {
+        signal.removeEventListener('abort', onAbort);
+        if (!aborted) {
+          resolve(value);
+          return;
+        }
+        void Promise.resolve(cleanup(value)).catch(() => {});
+      },
+      error => {
+        signal.removeEventListener('abort', onAbort);
+        if (!aborted) reject(error);
+      }
+    );
+  });
 }
 
 function errorMessage(error: unknown): string {

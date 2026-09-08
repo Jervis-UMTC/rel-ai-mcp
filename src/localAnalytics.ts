@@ -21,8 +21,6 @@ const PREVIOUS_SCHEMA_VERSION = 2;
 const LEGACY_SCHEMA_VERSION = 1;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
-const LOCAL_DEVICE_ID = 'local-device';
-const LOCAL_DEVICE_NAME = 'This device';
 const LOCAL_ANALYTICS_RETENTION_DAYS = 180;
 const RETENTION_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const LEGACY_MIGRATION_KEY = 'local_analytics_legacy_migrated_v1';
@@ -168,13 +166,10 @@ function projectLocalUsageSnapshot(config: AnalyticsConfig, month: string, docum
   const totals = {
     ...aggregateDto(document.totals),
     requests: number(document.totals.requests),
-    requestBytes: 0,
-    resultBytes: 0,
     activeDays
   };
   const externalTelemetry = telemetryStatus(config);
   return {
-    source: 'local',
     month,
     privacy: {
       retentionDays: LOCAL_ANALYTICS_RETENTION_DAYS,
@@ -186,61 +181,40 @@ function projectLocalUsageSnapshot(config: AnalyticsConfig, month: string, docum
     },
     totals,
     tools: document.tools.map(row => ({ tool: row.tool, ...aggregateDto(row) })),
-    devices: [{ deviceId: LOCAL_DEVICE_ID, displayName: LOCAL_DEVICE_NAME, ...aggregateDto(document.totals) }],
     workspaces: document.workspaces.map(row => ({ workspace: row.workspace, ...aggregateDto(row) })),
-    workspaceDimensions: document.workspaces.map(row => ({
-      deviceId: LOCAL_DEVICE_ID,
-      displayName: LOCAL_DEVICE_NAME,
-      workspace: row.workspace,
-      workspaceKey: `${LOCAL_DEVICE_ID}::${row.workspace}`,
-      ...aggregateDto(row)
-    })),
     workspaceTools: document.workspaceTools.map(row => ({
-      deviceId: LOCAL_DEVICE_ID,
       workspace: row.workspace,
-      workspaceKey: `${LOCAL_DEVICE_ID}::${row.workspace}`,
       tool: row.tool,
       ...aggregateDto(row)
     })),
     series: document.hours.map(row => ({
       hour: row.hour,
       requests: number(row.requests),
-      ...aggregateDto(row),
-      requestBytes: 0,
-      resultBytes: 0
+      ...aggregateDto(row)
     })),
     toolSeries: document.hours.flatMap(row => row.tools.map(item => ({ hour: row.hour, tool: item.tool, ...aggregateDto(item) }))),
     workspaceSeries: document.hours.flatMap(row => row.workspaces.map(item => ({
       hour: row.hour,
-      deviceId: LOCAL_DEVICE_ID,
-      displayName: LOCAL_DEVICE_NAME,
       workspace: item.workspace,
-      workspaceKey: `${LOCAL_DEVICE_ID}::${item.workspace}`,
       ...aggregateDto(item)
     }))),
     workspaceToolSeries: document.hours.flatMap(row => row.workspaceTools.map(item => ({
       hour: row.hour,
-      deviceId: LOCAL_DEVICE_ID,
       workspace: item.workspace,
-      workspaceKey: `${LOCAL_DEVICE_ID}::${item.workspace}`,
       tool: item.tool,
       ...aggregateDto(item)
     }))),
     performance: { phaseMs: sanitizePerformancePhases(document.performancePhases) },
     failureCategories: document.failureCategories.map(item => ({ category: item.category, failures: number(item.failures) })),
     workspaceFailureCategories: document.workspaceFailureCategories.map(item => ({
-      deviceId: LOCAL_DEVICE_ID,
       workspace: item.workspace,
-      workspaceKey: `${LOCAL_DEVICE_ID}::${item.workspace}`,
       category: item.category,
       failures: number(item.failures)
     })),
     failureCategorySeries: document.hours.flatMap(row => row.failureCategories.map(item => ({ hour: row.hour, category: item.category, failures: number(item.failures) }))),
     workspaceFailureCategorySeries: document.hours.flatMap(row => row.workspaceFailureCategories.map(item => ({
       hour: row.hour,
-      deviceId: LOCAL_DEVICE_ID,
       workspace: item.workspace,
-      workspaceKey: `${LOCAL_DEVICE_ID}::${item.workspace}`,
       category: item.category,
       failures: number(item.failures)
     })))

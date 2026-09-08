@@ -607,7 +607,7 @@ Bump root/electron/status UI/lockfiles to 0.23.1.
 ## [0.23.0] — 2026-07-28
 
 ### Standards-compliant MCP lifecycle and recovery
-- **Use MCP `2026-07-28` through the stable v2 SDK without cutting off ChatGPT.** Native stdio and modern HTTP use `server/discover` plus per-request protocol, client, and capability metadata. HTTP also serves the SDK-supported stateless `2025-11-25` initialize flow used by ChatGPT. `MCP-Session-Id`, `/sse`, `/messages`, JSON-RPC batches, and removed tool aliases remain rejected.
+- **Use MCP `2026-07-28` through the stable v2 SDK without cutting off ChatGPT.** Native stdio and modern HTTP use `server/discover` plus per-request protocol, client, and capability metadata. HTTP retains only the SDK-supported stateless `2025-11-25` startup lifecycle used by ChatGPT; ordinary MCP operations remain modern-only. `MCP-Session-Id`, `/sse`, `/messages`, JSON-RPC batches, and removed tool aliases remain rejected.
 - **Keep transport, work-session, native-task, and process identity separate.** Every stateless request supplies its authenticated principal; the principal-bound `work_id` returned by `relai_begin_work` owns repository work, native `taskId` owns one asynchronous MCP request, and `processId` owns one managed process.
 - **Detect and recover stale client state.** Rel.AI fingerprints the canonical tool manifest, serves the current list on every stateless request, invalidates stale credentials, and exposes explicit reconnect or host-action states in the dashboard.
 - **Publish one 30-tool surface at tool-surface version 27.** The public native-Tasks probe, standalone validation-plan tool, named UI-check wrapper, and duplicate protocol routers are removed. Work-scoped schemas require a principal- and workspace-bound `work_id`; `relai_run_checks` plans change-aware validation internally.
@@ -674,7 +674,7 @@ Bump root/electron/status UI/lockfiles to 0.23.1.
 - **Isolate development and test servers from the production connector profile.** Programmatic servers on an ephemeral port ignore saved launch state and cannot rewrite `connection.json`, preventing validation runs from repointing the active app or ChatGPT endpoint.
 
 ### Breaking upgrade behavior
-- **Do not restore old aliases, sessionful protocol routes, or color-token aliases.** Modern clients negotiate MCP `2026-07-28` through `server/discover` and send current metadata on every stateless request; the HTTP endpoint separately accepts ChatGPT's SDK-supported stateless initialize flow.
+- **Do not restore old aliases, sessionful protocol routes, or color-token aliases.** Modern clients negotiate MCP `2026-07-28` through `server/discover` and send current metadata on every stateless request; the HTTP endpoint separately accepts only ChatGPT's SDK-supported stateless startup lifecycle.
 
 ### Validation
 - Workstream-specific release, dashboard, audit, updater, dependency, and benchmark tests passed; aggregate `npm run test:all` remains the final concurrent-workstream reconciliation gate

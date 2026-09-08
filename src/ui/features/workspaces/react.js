@@ -20,7 +20,7 @@ import {
 import { DeleteProjectModal, ProjectFormModal, RepairProjectModal } from './react-modals.js';
 
 const h = React.createElement;
-const WORKSPACE_STORE_KEYS = Object.freeze(['config', 'health']);
+const WORKSPACE_STORE_KEYS = Object.freeze(['config', 'health', 'live']);
 
 export function createWorkspacesRoute(useDashboardSlices) {
   return function WorkspacesRoute() {
@@ -57,7 +57,7 @@ function WorkspacesView({ data = {} }) {
   const [recentRevision, setRecentRevision] = useState(0);
   const recent = useMemo(() => recentWorkspaceAliases(allWorkspaces), [allWorkspaces, recentRevision]);
   const analyticsAliases = useMemo(() => views.map(view => view.alias), [views]);
-  const analytics = useWorkspaceAnalytics(analyticsAliases);
+  const analytics = useWorkspaceAnalytics(analyticsAliases, Number(data.live?.revisions?.task || 0));
 
   useLayoutEffect(() => {
     const alias = routeParams.get('workspace') || '';
@@ -276,21 +276,21 @@ function WorkspaceAnalytics({ scope }) {
   const averageDuration = Number(scope?.averageDuration || 0);
   const values = Array.isArray(scope?.points) ? scope.points.map(point => Number(point.toolCalls || 0)) : [];
   return h('section', { className: 'workspace-analytics-mini', 'aria-label': `${scope.workspace || 'Project'} analytics` },
-    h('div', { className: 'workspace-analytics-head' }, h('span', null, 'Last 24 hours')),
+    h('div', { className: 'workspace-analytics-head' }, h('span', null, '24h · hourly')),
     h('div', { className: 'workspace-analytics-metrics' },
       h(MiniMetric, { label: 'Actions', value: formatInteger(toolCalls) }),
       h(MiniMetric, { label: 'Reliable', value: reliabilityCalls ? formatPercent(reliabilityRate) : '—' }),
       h(MiniMetric, { label: 'Average time', value: completed ? formatDuration(averageDuration) : '—' })
     ),
     values.length
-      ? h(SparkChart, { values, className: 'workspace-analytics-sparkline', mode: 'bar' })
+      ? h(SparkChart, { values, className: 'workspace-analytics-sparkline' })
       : h('span', { className: 'workspace-analytics-sparkline-empty', 'aria-hidden': 'true' })
   );
 }
 
 function MiniMetric({ label, value }) { return h('div', null, h('span', null, label), h('strong', null, value)); }
 
-function useWorkspaceAnalytics(aliases) {
+function useWorkspaceAnalytics(aliases, taskRevision = 0) {
   const key = aliases.join('\u0000');
   const [scopes, setScopes] = useState(() => new Map());
   useEffect(() => {
@@ -300,14 +300,16 @@ function useWorkspaceAnalytics(aliases) {
       return undefined;
     }
     let active = true;
-    void loadAnalyticsModels({ desktop, range: '24h', now: new Date() })
-      .then(({ bounds, models }) => {
-        if (!active) return;
-        setScopes(new Map(aliases.map(alias => [alias, analyticsRangeScope(models, bounds, { workspace: alias })])));
-      })
-      .catch(() => { if (active) setScopes(new Map()); });
-    return () => { active = false; };
-  }, [key]);
+    const timer = window.setTimeout(() => {
+      void loadAnalyticsModels({ desktop, range: '24h', now: new Date() })
+        .then(({ bounds, models }) => {
+          if (!active) return;
+          setScopes(new Map(aliases.map(alias => [alias, analyticsRangeScope(models, bounds, { workspace: alias })])));
+        })
+        .catch(() => { if (active) setScopes(new Map()); });
+    }, 180);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [key, taskRevision]);
   return scopes;
 }
 

@@ -14,10 +14,10 @@ import { buildTaskSemanticProgress } from '../../../taskSemanticProgress.js';
 import { completeDesktopSetup, desktopSetupSteps, dismissDesktopSetup, isDesktopSetupDismissed } from '../onboarding/index.js';
 import { CHATGPT_CONNECTOR_CREATE_URL, RELAI_CONNECTOR_ICON_FILENAME, RELAI_CONNECTOR_ICON_URL, chatGptFirstPrompt, chatGptGuideSteps } from '../settings/connection-guidance.js';
 import { loadAnalyticsData } from '../usage/data.js';
-import { activeTaskList, analyticsTaskBoundary, desktopSetupState, homeAnalyticsView, overviewState, overviewWorkspaceStatus } from './index.js';
+import { activeTaskList, desktopSetupState, homeAnalyticsView, overviewState, overviewWorkspaceStatus } from './index.js';
 
 const h = React.createElement;
-const HOME_STORE_KEYS = Object.freeze(['config', 'health', 'connection', 'connectionState', 'desktopStatus', 'mcpConnection', 'tasks', 'taskActivity']);
+const HOME_STORE_KEYS = Object.freeze(['config', 'health', 'connection', 'connectionState', 'desktopStatus', 'mcpConnection', 'tasks', 'taskActivity', 'live']);
 
 export function createHomeRoute(useDashboardSlices) {
   return function HomeRoute() {
@@ -34,7 +34,7 @@ function HomeView({ data = {} }) {
     activeCard ? h(TaskActivityCard, { model: activeCard }) : null,
     h(DesktopSetupChecklist, { setup }),
     h(ConnectionHero, { state: state.bridgeState }),
-    setup.firstRequestObserved ? h(HomeAnalytics, { tasks: state.tasks, workspace }) : null,
+    setup.firstRequestObserved ? h(HomeAnalytics, { taskRevision: Number(data.live?.revisions?.task || 0), workspace }) : null,
     h('div', { className: 'layout-grid' },
       h(WorkspaceSummaryCard, { workspaces: state.workspaces, findings: state.findings }),
       setup.firstRequestObserved ? h(RecentTasksCard, { tasks: state.tasks }) : null
@@ -168,17 +168,18 @@ function RecentTasksCard({ tasks }) {
   );
 }
 
-function HomeAnalytics({ tasks, workspace }) {
-  const boundary = analyticsTaskBoundary(tasks);
+function HomeAnalytics({ taskRevision, workspace }) {
   const [analytics, setAnalytics] = useState({ scope: null, error: false, loading: true });
   useEffect(() => {
     let active = true;
-    setAnalytics(current => ({ ...current, loading: !current.scope, error: false }));
-    void loadAnalyticsData({ desktop: globalThis.window?.relaiDesktop, range: '24h', now: new Date(), workspace })
-      .then(({ current }) => { if (active) setAnalytics({ scope: current, error: false, loading: false }); })
-      .catch(() => { if (active) setAnalytics(current => ({ ...current, error: true, loading: false })); });
-    return () => { active = false; };
-  }, [boundary, workspace]);
+    const timer = window.setTimeout(() => {
+      setAnalytics(current => ({ ...current, loading: !current.scope, error: false }));
+      void loadAnalyticsData({ desktop: globalThis.window?.relaiDesktop, range: '24h', now: new Date(), workspace })
+        .then(({ current }) => { if (active) setAnalytics({ scope: current, error: false, loading: false }); })
+        .catch(() => { if (active) setAnalytics(current => ({ ...current, error: true, loading: false })); });
+    }, 180);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [taskRevision, workspace]);
   if (analytics.scope) return h(HomeAnalyticsContent, { scope: analytics.scope, refreshing: analytics.loading });
   return h('section', { className: 'card home-analytics-card', 'data-home-analytics': '', 'aria-busy': analytics.loading ? 'true' : 'false' },
     h('div', { className: 'card-head home-analytics-head' },
@@ -193,7 +194,7 @@ function HomeAnalyticsContent({ scope, refreshing }) {
   const view = homeAnalyticsView(scope);
   return h('section', { className: 'card home-analytics-card', 'data-home-analytics': '', 'aria-busy': refreshing ? 'true' : 'false' },
     h('div', { className: 'card-head home-analytics-head' },
-      h('div', null, h('div', { className: 'home-analytics-title-row' }, h(Icon, { name: 'usage', className: 'home-analytics-title-icon', size: 17 }), h('h3', null, view.heading), h('span', null, 'Last 24 hours'))),
+      h('div', null, h('div', { className: 'home-analytics-title-row' }, h(Icon, { name: 'usage', className: 'home-analytics-title-icon', size: 17 }), h('h3', null, view.heading), h('span', null, '24h · hourly'))),
       h('a', { className: 'buttonlike secondary compact-button home-analytics-link', href: routeHref('usage', view.workspaceScoped ? { workspace: view.workspace } : {}) }, h('span', null, 'View analytics'), h(Icon, { name: 'chevronRight', size: 15 }))
     ),
     h('div', { className: 'home-analytics-body' },
@@ -217,11 +218,10 @@ function HomeAnalyticsPulse({ pulse }) {
     h(SparkChart, {
       values: pulse.values,
       className: 'home-analytics-chart-canvas',
-      mode: 'bar',
       ariaLabel: pulse.summary,
       decorative: false
     }),
-    h('div', { className: 'home-analytics-scale' }, h('span', null, '24h ago'), h('span', null, 'Now'))
+    h('div', { className: 'home-analytics-scale' }, h('span', null, 'Earlier'), h('span', null, 'Current hour'))
   );
 }
 
