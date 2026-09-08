@@ -11,6 +11,9 @@ jobs:
     name: Build Windows Electron dist
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -23,6 +26,16 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             electron/package-lock.json
+
+      - name: Restore Electron packaging cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .cache/electron
+            .cache/electron-builder
+            vendor/tunnel-client/win32
+            vendor/zoekt/win32
+          key: electron-dist-${{ runner.os }}-${{ hashFiles('electron/package-lock.json', 'vendor/tunnel-client/manifest.json', 'vendor/zoekt/manifest.json') }}
 
       - name: Use declared npm
         run: node scripts/ensure-package-manager.mjs
@@ -39,10 +52,11 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Upload Electron dist
+      - name: Upload installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: electron-dist-${{ github.run_number }}
-          path: dist/
+          name: rel-ai-mcp-setup-${{ github.run_number }}
+          path: dist/Rel.AI-MCP-Setup-*.exe
           if-no-files-found: error
+          compression-level: 0
           retention-days: 7
