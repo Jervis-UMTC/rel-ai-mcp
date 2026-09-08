@@ -11,12 +11,16 @@ jobs:
     name: Build Windows Electron dist
     runs-on: windows-latest
     timeout-minutes: 60
-    env:
-      ELECTRON_CACHE: ${{ runner.temp }}/electron-cache
-      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder-cache
+
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Configure Electron cache
+        shell: pwsh
+        run: |
+          "ELECTRON_CACHE=$env:RUNNER_TEMP\electron-cache" >> $env:GITHUB_ENV
+          "ELECTRON_BUILDER_CACHE=$env:RUNNER_TEMP\electron-builder-cache" >> $env:GITHUB_ENV
 
       - name: Set up Node.js
         uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
