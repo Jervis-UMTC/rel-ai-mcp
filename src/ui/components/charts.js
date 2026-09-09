@@ -88,6 +88,7 @@ export function AnalyticsTimelineChart({
   const chartRef = useRef(null);
   const latestIndex = Math.max(0, lastDefinedIndex(data));
   const accent = theme.action;
+  const trailingData = trailingGapContinuation(data);
   const chartData = useMemo(() => ({
     labels,
     datasets: [{
@@ -105,8 +106,20 @@ export function AnalyticsTimelineChart({
       pointBackgroundColor: context => context.dataIndex === peakIndex ? theme.warning : accent,
       pointBorderColor: theme.surface,
       pointBorderWidth: 2
-    }]
-  }), [accent, data, labels, peakIndex, theme.surface, theme.warning]);
+    }, ...(trailingData ? [{
+      data: trailingData,
+      borderColor: withAlpha(accent, 0.5),
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      borderDash: [4, 4],
+      tension: 0,
+      fill: false,
+      spanGaps: true,
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      pointHitRadius: 0
+    }] : [])]
+  }), [accent, data, labels, peakIndex, theme.surface, theme.warning, trailingData]);
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -114,7 +127,7 @@ export function AnalyticsTimelineChart({
     interaction: { intersect: false, mode: 'index' },
     layout: { padding: { top: 8, right: 4, bottom: 0, left: 0 } },
     onHover: (_event, elements) => {
-      const index = elements?.[0]?.index;
+      const index = elements?.find(item => item.datasetIndex === 0)?.index;
       if (Number.isInteger(index)) onActiveIndexChange(index);
     },
     plugins: {
@@ -127,6 +140,7 @@ export function AnalyticsTimelineChart({
         titleColor: theme.text,
         bodyColor: theme.text,
         padding: 9,
+        filter: item => item.datasetIndex === 0,
         callbacks: {
           title: items => detailedLabels[items?.[0]?.dataIndex] || labels[items?.[0]?.dataIndex] || '',
           label: context => `${valueLabel}: ${formatValue(context.raw == null ? null : Number(context.raw))}`
@@ -271,6 +285,15 @@ function safeValues(values) {
 function lastDefinedIndex(values) {
   for (let index = values.length - 1; index >= 0; index -= 1) if (values[index] !== null) return index;
   return -1;
+}
+
+function trailingGapContinuation(values) {
+  const last = lastDefinedIndex(values);
+  if (last < 0 || last >= values.length - 1) return null;
+  const continuation = new Array(values.length).fill(null);
+  continuation[last] = values[last];
+  continuation[values.length - 1] = values[last];
+  return continuation;
 }
 
 function withAlpha(color, alpha) {

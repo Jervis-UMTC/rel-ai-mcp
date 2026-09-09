@@ -1,4 +1,4 @@
-// Hash-based dashboard navigation with persistent workspace scope.
+// Hash-based dashboard navigation with workspace scope.
 import { clearUnsavedChanges, hasUnsavedChanges, initInteractionSafety } from './interaction-safety.js';
 import { confirmAction } from './components/confirm-dialog.js';
 import { normalizeRouteKey } from './route-policy.js';
@@ -84,7 +84,6 @@ function currentRouteKey() {
 
 function replaceRouteState(routeKey) {
   history.replaceState(null, '', `${location.pathname}${location.search}#${routeKey}`);
-  try { localStorage.setItem('relai_dashboard_route', routeKey); } catch {}
 }
 
 async function _route() {
@@ -111,7 +110,6 @@ async function _route() {
 
   const id = routeKey.split(/[/?]/)[0] || 'home';
   _currentRouteKey = routeKey;
-  try { localStorage.setItem('relai_dashboard_route', routeKey); } catch {}
   window.dispatchEvent(new CustomEvent('relai:route-change', {
     detail: { section: id, path: currentRoutePath(), params: getRouteParams() }
   }));

@@ -35,6 +35,10 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = resolveTheme(normalized);
 }
 
+function isDesktopSurface() {
+  return document.documentElement.dataset.surface === 'desktop';
+}
+
 function syncDesktopTheme(theme) {
   const setter = window.relaiDesktop?.setAppPreferences;
   if (typeof setter !== 'function') return;
@@ -52,16 +56,19 @@ function bindSystemTheme() {
 }
 
 export function getUiPreferences() {
+  const fallback = document.documentElement.dataset.themePreference || 'system';
   return {
-    theme: normalizeTheme(readStored(THEME_KEY, document.documentElement.dataset.themePreference || 'system'))
+    theme: isDesktopSurface()
+      ? normalizeTheme(fallback)
+      : normalizeTheme(readStored(THEME_KEY, fallback))
   };
 }
 
 export function setThemePreference(theme) {
   const normalized = normalizeTheme(theme);
-  writeStored(THEME_KEY, normalized);
+  if (!isDesktopSurface()) writeStored(THEME_KEY, normalized);
   applyTheme(normalized);
-  syncDesktopTheme(normalized);
+  if (isDesktopSurface()) syncDesktopTheme(normalized);
 }
 
 function markPreferencesReady() {
@@ -71,7 +78,6 @@ function markPreferencesReady() {
 export function initUiPreferences() {
   const preferences = getUiPreferences();
   applyTheme(preferences.theme);
-  syncDesktopTheme(preferences.theme);
   bindSystemTheme();
   window.requestAnimationFrame(markPreferencesReady);
   return preferences;

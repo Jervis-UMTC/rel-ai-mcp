@@ -1,9 +1,10 @@
 function renderDashboardShellBootstrap(): string {
   return `try {
-  const themePreference = localStorage.getItem('relai_ui_theme') || 'system';
-  const resolvedTheme = themePreference === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : themePreference;
   const launchParams = new URLSearchParams(location.search);
   const desktopSurface = launchParams.get('surface') === 'desktop';
+  const requestedTheme = desktopSurface ? launchParams.get('theme') : localStorage.getItem('relai_ui_theme');
+  const themePreference = ['system', 'dark', 'light'].includes(requestedTheme) ? requestedTheme : 'system';
+  const resolvedTheme = themePreference === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : themePreference;
   Object.assign(document.documentElement.dataset, {
     themePreference,
     theme: resolvedTheme,

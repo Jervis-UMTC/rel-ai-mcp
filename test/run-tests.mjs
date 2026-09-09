@@ -19,6 +19,7 @@ const files = [
   'service-runtime-lifecycle-unit.mjs',
   'core-runtime-boundary-unit.mjs',
   'desktop-ui-smoke.mjs',
+  'competing-ownership-unit.mjs',
   'toast-unit.mjs',
   'secure-tunnel-packaging-contract-unit.mjs',
   'authorization-policy-unit.mjs',

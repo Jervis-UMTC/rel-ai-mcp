@@ -19,6 +19,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { HashRouter, useLocation } from 'react-router-dom';
 import { Icon } from '../components/icons.js';
 import { connectionLayerViews, connectionSummary } from '../connection-state.js';
+import { classifyTaskActivity } from '../../taskActivityPresentation.js';
 import {
   APPLICATION_NAV_ITEMS,
   MOBILE_MORE_NAV_ITEMS,
@@ -39,6 +40,7 @@ export { applyLiveEvent, getSnapshot, init, patchLocalConnection, subscribe } fr
 const h = React.createElement;
 const DashboardStoreContext = createContext(null);
 const reactRouteComponents = new Map();
+const reactRoutePreloads = [];
 const uiListeners = new Set();
 let foundationRoot = null;
 let foundationOptions = {};
@@ -91,6 +93,7 @@ registerReactSection('settings', createLazyRoute(() => import('../features/setti
 registerReactSection('diagnostics', createLazyRoute(() => import('../features/settings/diagnostics-react.js'), 'createDiagnosticsRoute', useDashboardSlices));
 
 function createLazyRoute(load, factoryName, storeHook) {
+  reactRoutePreloads.push(load);
   const LazyComponent = lazy(async () => {
     const module = await load();
     const factory = module?.[factoryName];
@@ -100,6 +103,10 @@ function createLazyRoute(load, factoryName, storeHook) {
   return function LazyRoute() {
     return h(LazyComponent);
   };
+}
+
+export function preloadReactRoutes() {
+  return Promise.allSettled(reactRoutePreloads.map(load => load()));
 }
 
 export function mountReactFoundation(element, store, options = {}) {
@@ -674,14 +681,13 @@ function connectionPresentation(data = {}) {
   if (data?.ok === false) return { label: 'Error', tone: 'bad' };
   const connection = connectionSummary(data?.connectionState);
   if (connection.tone !== 'ok') return { label: connection.label, tone: connection.tone };
-  const task = data?.taskActivity || {};
-  const taskCount = Number(task.activeTaskCount || task.tasks?.length || 0) || 1;
-  const callCount = Number(task.activeCalls || 0);
-  if (task.state === 'working') return { label: `${taskCount} running`, tone: 'working' };
-  if (task.state === 'settling') return { label: `${taskCount} open`, tone: 'warn' };
+  const task = classifyTaskActivity(data?.taskActivity);
+  if (task.category === 'attention') return { label: 'Action required', tone: 'bad' };
+  if (task.category === 'working') return { label: `${Math.max(1, task.taskCount)} running`, tone: 'working' };
+  if (task.category === 'waiting') return { label: `${Math.max(1, task.taskCount)} open`, tone: 'warn' };
   const dashboardLayer = connectionLayerViews(data?.connectionState).find(layer => layer.key === 'dashboardUpdates');
   if (dashboardLayer) return { label: dashboardLayer.label, tone: dashboardLayer.tone };
-  return { label: 'Available', tone: 'ok', callCount };
+  return { label: 'Available', tone: 'ok', callCount: task.activeCalls };
 }
 
 function lastUpdatedText(lastEventAt, now) {

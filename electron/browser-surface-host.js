@@ -112,8 +112,7 @@ function createBrowserSurfaceHost(options = {}) {
         webSecurity: true,
         allowRunningInsecureContent: false,
         spellcheck: false,
-        navigateOnDragDrop: false,
-        backgroundThrottling: false
+        navigateOnDragDrop: false
       }
     });
     const initialBounds = { x: 0, y: 0, width: record.viewport.width, height: record.viewport.height };

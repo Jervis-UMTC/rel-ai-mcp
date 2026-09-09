@@ -268,7 +268,7 @@
     box-shadow: none;
   }
   .title-wrap { @apply min-w-0 flex-1; }
-  .page-title { @apply truncate text-[23px] font-extrabold leading-tight; }
+  .page-title { @apply truncate text-[23px] font-extrabold; line-height: 1.35; }
   .page-subtitle { @apply mt-1 text-[13px]; overflow-wrap: anywhere; color: var(--ui-text-secondary); }
   .top-controls { @apply flex min-w-0 items-center justify-end gap-2; }
 

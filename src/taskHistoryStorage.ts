@@ -22,6 +22,14 @@ interface TaskHistoryRow {
   updated_at_ms?: number;
 }
 
+interface TaskHistoryEventRow {
+  id: string;
+  workspace?: string;
+  task_id?: string;
+  session_id?: string;
+  payload: string;
+}
+
 function getTaskHistoryDir(config: TaskHistoryConfig = {}): string {
   return path.join(getStateDir(config), 'sessions');
 }
@@ -40,19 +48,99 @@ function listSessions(directory: string, limit = MAX_SESSIONS): StoredTaskSessio
   return withStateDatabase(config, (db: DatabaseSync) => {
     const rows = db.prepare('SELECT id,payload FROM task_history ORDER BY updated_at_ms DESC,id ASC LIMIT ?')
       .all(Math.max(0, Math.floor(Number(limit) || 0))) as unknown as TaskHistoryRow[];
-    const sessions: StoredTaskSession[] = [];
-    const invalid: string[] = [];
-    for (const row of rows) {
-      const session = parseStoredSession(row.payload);
-      if (session) sessions.push(session);
-      else invalid.push(String(row.id));
-    }
-    if (invalid.length) {
-      const remove = db.prepare('DELETE FROM task_history WHERE id=?');
-      for (const id of invalid) remove.run(id);
-    }
-    return sessions;
+    return parseSessionRows(db, rows);
   }, { transaction: true }) as StoredTaskSession[];
+}
+
+function listSessionSummaries(directory: string, limit = MAX_SESSIONS): StoredTaskSession[] {
+  const config = configForDirectory(directory);
+  migrateLegacyTaskHistory(config);
+  return withStateDatabase(config, (db: DatabaseSync) => {
+    const rows = db.prepare(`
+      SELECT id,
+        CASE
+          WHEN json_valid(payload) THEN json_set(
+            json_remove(payload, '$.events', '$.workflowEvidence'),
+            '$.events',
+            CASE
+              WHEN json_type(payload, '$.events') = 'array'
+                AND json_array_length(json_extract(payload, '$.events')) = 1
+                AND json_type(payload, '$.events[0]') = 'object'
+                THEN json_array(json(json_extract(payload, '$.events[0]')))
+              ELSE json('[]')
+            END
+          )
+          ELSE payload
+        END AS payload
+      FROM task_history
+      ORDER BY updated_at_ms DESC,id ASC
+      LIMIT ?
+    `).all(Math.max(0, Math.floor(Number(limit) || 0))) as unknown as TaskHistoryRow[];
+    return parseSessionRows(db, rows);
+  }, { transaction: true }) as StoredTaskSession[];
+}
+
+function listRecentSessionEvents(directory: string, limit = MAX_SESSIONS): Record<string, any>[] {
+  const config = configForDirectory(directory);
+  migrateLegacyTaskHistory(config);
+  return withStateDatabase(config, (db: DatabaseSync) => {
+    const rows = db.prepare(`
+      SELECT
+        task.id,
+        CASE WHEN json_valid(task.payload) THEN json_extract(task.payload, '$.workspace') END AS workspace,
+        CASE WHEN json_valid(task.payload) THEN json_extract(task.payload, '$.taskId') END AS task_id,
+        CASE WHEN json_valid(task.payload) THEN json_extract(task.payload, '$.sessionId') END AS session_id,
+        event.value AS payload
+      FROM task_history AS task
+      CROSS JOIN json_each(
+        CASE WHEN json_valid(task.payload) THEN task.payload ELSE '{"events":[]}' END,
+        '$.events'
+      ) AS event
+      WHERE event.type = 'object'
+      ORDER BY
+        COALESCE(
+          json_extract(event.value, '$.timestamp'),
+          json_extract(event.value, '$.ts'),
+          json_extract(event.value, '$.at'),
+          json_extract(event.value, '$.createdAt'),
+          json_extract(event.value, '$.startedAt'),
+          ''
+        ) DESC,
+        task.updated_at_ms DESC,
+        task.id ASC,
+        CAST(event.key AS INTEGER) DESC
+      LIMIT ?
+    `).all(Math.max(0, Math.floor(Number(limit) || 0))) as unknown as TaskHistoryEventRow[];
+    return rows.flatMap(row => {
+      try {
+        const event = JSON.parse(String(row.payload || '')) as Record<string, any>;
+        if (!event || typeof event !== 'object' || Array.isArray(event)) return [];
+        return [{
+          ...event,
+          workspace: event.workspace || row.workspace || '',
+          taskId: event.taskId || row.task_id || row.id,
+          sessionId: event.sessionId || row.session_id || row.id
+        }];
+      } catch {
+        return [];
+      }
+    });
+  }, { transaction: false }) as Record<string, any>[];
+}
+
+function parseSessionRows(db: DatabaseSync, rows: TaskHistoryRow[]): StoredTaskSession[] {
+  const sessions: StoredTaskSession[] = [];
+  const invalid: string[] = [];
+  for (const row of rows) {
+    const session = parseStoredSession(row.payload);
+    if (session) sessions.push(session);
+    else invalid.push(String(row.id));
+  }
+  if (invalid.length) {
+    const remove = db.prepare('DELETE FROM task_history WHERE id=?');
+    for (const id of invalid) remove.run(id);
+  }
+  return sessions;
 }
 
 function readSession(directory: string, id: unknown): StoredTaskSession | null {
@@ -232,6 +320,8 @@ export {
   clearTaskHistory,
   ensureCurrentHistory,
   getTaskHistoryDir,
+  listRecentSessionEvents,
+  listSessionSummaries,
   listSessions,
   pruneSessions,
   readSession,

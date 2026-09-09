@@ -146,6 +146,7 @@ input:focus { border-color: var(--ui-action-primary); box-shadow: 0 0 0 3px var(
 .status-badge.connecting::before { background: var(--ui-status-info-foreground); }
 .status-badge.degraded::before { background: var(--ui-status-warning-foreground); }
 .status-badge.working::before { background: var(--ui-status-info-foreground); animation: activityPulse 1.35s ease-in-out infinite; }
+.status-badge.attention::before { background: var(--ui-status-danger-foreground); }
 .status-badge.waiting::before, .status-badge.settling::before { background: var(--ui-status-info-foreground); }
 .status-badge.failed::before { background: var(--ui-status-danger-foreground); }
 .status-hero { padding: 20px; overflow: hidden; position: relative; }

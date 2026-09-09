@@ -1,5 +1,5 @@
 import { fetchJson, invalidateCache, DASHBOARD_DATA_URL } from './ui/api.js';
-import { applyLiveEvent, clearShellDashboardState, clearShellRecoveryNotice, getSnapshot as getStore, init as initStore, initConnectorRefreshModal, initUpdateAvailableModal, mountReactFoundation, patchLocalConnection, setShellConnectionOverride, setShellLastEventAt, setShellNow, showShellDashboardState, showShellRecoveryNotice, subscribe as subscribeStore } from './dashboard-react.js';
+import { applyLiveEvent, clearShellDashboardState, clearShellRecoveryNotice, getSnapshot as getStore, init as initStore, initConnectorRefreshModal, initUpdateAvailableModal, mountReactFoundation, patchLocalConnection, preloadReactRoutes, setShellConnectionOverride, setShellLastEventAt, setShellNow, showShellDashboardState, showShellRecoveryNotice, subscribe as subscribeStore } from './dashboard-react.js';
 import { initRouter } from './ui/router.js';
 import { initEvents, startSSE } from './ui/events.js';
 import { initUiPreferences } from './ui/preferences.js';
@@ -18,7 +18,6 @@ document.documentElement.dataset.surface = surface;
 document.documentElement.dataset.windowChrome = requestedChrome;
 document.documentElement.dataset.platform = requestedPlatform;
 cleanLaunchQuery();
-restoreRoute();
 
 let _routerReady = false;
 let _lastEventAt = null;
@@ -43,14 +42,6 @@ function cleanLaunchQuery() {
   const rawHash = (location.hash || '').slice(1);
   if (rawHash) cleanUrl += `#${normalizeRouteKey(rawHash)}`;
   history.replaceState(null, '', cleanUrl);
-}
-
-function restoreRoute() {
-  if (location.hash) return;
-  try {
-    const saved = localStorage.getItem('relai_dashboard_route');
-    if (saved) location.hash = `#${normalizeRouteKey(saved)}`;
-  } catch {}
 }
 
 function readInitialPayload() {
@@ -120,6 +111,7 @@ function activateRouter() {
   if (_routerReady) return;
   _routerReady = true;
   initRouter();
+  void preloadReactRoutes();
 }
 
 function initDesktopBridge() {

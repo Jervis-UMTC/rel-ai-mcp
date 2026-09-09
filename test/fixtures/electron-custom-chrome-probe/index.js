@@ -24,7 +24,8 @@ app.whenReady().then(async () => {
       preload: path.join(root, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: false
     }
   });
   try {
@@ -39,7 +40,7 @@ app.whenReady().then(async () => {
       await waitFor(win, `location.hash === '#${route}' && document.querySelector('#routeRoot')?.children.length > 0`);
       if (route === 'tools') await waitFor(win, `document.querySelectorAll('.tool-card').length === ${expectedToolCount}`);
       if (route === 'usage') {
-        await waitFor(win, `document.querySelector('[data-usage-page]') && !document.querySelector('[data-usage-unavailable]')`);
+        await waitFor(win, `document.querySelector('.usage-overview') || document.querySelector('[data-usage-unavailable]')`);
       }
       measurements.push(await win.webContents.executeJavaScript(`(() => {
         const titlebar = document.getElementById('windowTitlebar').getBoundingClientRect();

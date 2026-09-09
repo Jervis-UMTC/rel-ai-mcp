@@ -234,18 +234,10 @@ function contentTypeForStaticAsset(filePath: string): string {
   return 'application/octet-stream';
 }
 
-function jsonForHtmlScript(value: unknown): string {
-  return JSON.stringify(value)
-    .replaceAll('<', String.raw`\u003c`)
-    .replaceAll('>', String.raw`\u003e`)
-    .replaceAll('&', String.raw`\u0026`);
-}
-
 export {
   DEFAULT_MAX_BODY_BYTES,
   contentTypeForStaticAsset,
   isAuthorized,
-  jsonForHtmlScript,
   normalizeMaxBodyBytes,
   readJsonBody,
   readRawBody,

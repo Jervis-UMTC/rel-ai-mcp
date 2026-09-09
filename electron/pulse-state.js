@@ -1,21 +1,21 @@
-const ATTENTION_STATUSES = Object.freeze(new Set(['waiting_for_approval', 'blocked', 'validation_failed']));
-const TERMINAL_STATUSES = Object.freeze(new Set(['completed', 'failed', 'cancelled', 'inactive']));
+import { importResourceModule } from './resource-path.js';
+
+const { classifyTaskActivity } = await importResourceModule('src/taskActivityPresentation.js');
 
 function projectPulseStatus(status = {}) {
   const activity = status?.taskActivity && typeof status.taskActivity === 'object' ? status.taskActivity : {};
-  const tasks = (Array.isArray(activity.tasks) ? activity.tasks : [])
-    .filter(task => task && typeof task === 'object' && !TERMINAL_STATUSES.has(normalizeStatus(task.status)));
-  const attentionTask = tasks.find(task => ATTENTION_STATUSES.has(normalizeStatus(task.status))) || null;
-  const primary = attentionTask
-    || tasks.find(task => Math.max(0, Number(task.activeCalls || 0)) > 0)
-    || tasks[0]
-    || null;
-  const taskCount = Math.max(tasks.length, Math.max(0, Number(activity.activeTaskCount || 0)));
-  const activeCalls = Math.max(0, Number(activity.activeCalls || 0));
+  const presentation = classifyTaskActivity(activity);
+  const {
+    activeCalls,
+    attentionTask,
+    primaryTask: primary,
+    taskCount,
+    tasks
+  } = presentation;
   const route = taskRoute(primary);
 
-  if (attentionTask) return attentionModel(attentionTask, taskCount, route, tasks);
-  if (activeCalls > 0 || normalizeStatus(activity.state) === 'working') {
+  if (presentation.category === 'attention') return attentionModel(attentionTask, taskCount, route, tasks);
+  if (presentation.category === 'working') {
     return {
       visible: true,
       tone: 'working',
@@ -28,7 +28,7 @@ function projectPulseStatus(status = {}) {
       actionRequired: false
     };
   }
-  if (taskCount > 0 || ['waiting', 'settling'].includes(normalizeStatus(activity.state))) {
+  if (presentation.category === 'waiting') {
     return {
       visible: true,
       tone: 'waiting',
@@ -51,7 +51,7 @@ function projectPulseStatus(status = {}) {
       detail: 'Open Rel.AI for connection details and recovery options.',
       route: '#diagnostics',
       taskCount: 0,
-      actionRequired: true
+      actionRequired: false
     };
   }
   return {

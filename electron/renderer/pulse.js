@@ -1,8 +1,11 @@
 let currentModel = { route: '#home' };
 let expanded = false;
-let geometryTimer = null;
+let morphAnimation = null;
+let morphDirection = '';
+let compactSize = null;
 
-const PULSE_TRANSITION_MS = 240;
+const PULSE_TRANSITION_MS = 220;
+const PULSE_EASING = 'cubic-bezier(.16,1,.3,1)';
 
 const shell = document.getElementById('pulseShell');
 const toggle = document.getElementById('pulseToggle');
@@ -21,6 +24,7 @@ function stateLabel(model) {
 }
 
 function updatePulse(model = {}) {
+  if (model?.expanded === false && expanded) resetExpandedFromHost();
   currentModel = {
     ...currentModel,
     contextTitle: '',
@@ -79,37 +83,142 @@ function updatePulse(model = {}) {
 
 function setExpanded(next) {
   const value = next === true;
-  clearTimeout(geometryTimer);
-  geometryTimer = null;
   if (expanded === value) return;
   expanded = value;
+  applyExpandedAccessibility(value);
+
+  if (morphAnimation) {
+    shell.dataset.collapsing = String(!value);
+    if ((value && morphDirection === 'collapse') || (!value && morphDirection === 'expand')) {
+      morphDirection = value ? 'expand' : 'collapse';
+      morphAnimation.reverse();
+    }
+    return;
+  }
 
   if (value) {
+    const before = shell.getBoundingClientRect();
+    compactSize = { width: before.width, height: before.height };
     Promise.resolve(window.relaiPulse?.setExpanded?.(true))
-      .catch(() => {})
-      .finally(() => {
-        if (!expanded) return;
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (expanded) applyExpandedVisual(true);
-          });
-        });
+      .then(() => {
+        if (!expanded) {
+          Promise.resolve(window.relaiPulse?.setExpanded?.(false)).catch(() => {});
+          return;
+        }
+        startExpandMorph();
+      })
+      .catch(() => {
+        expanded = false;
+        applyExpandedAccessibility(false);
       });
     return;
   }
 
-  applyExpandedVisual(false);
-  geometryTimer = setTimeout(() => {
-    if (!expanded) Promise.resolve(window.relaiPulse?.setExpanded?.(false)).catch(() => {});
-  }, PULSE_TRANSITION_MS);
+  startCollapseMorph();
 }
 
-function applyExpandedVisual(value) {
-  shell.dataset.expanded = String(value);
+function startExpandMorph() {
+  const before = compactSize || shell.getBoundingClientRect();
+  applyExpandedLayout(true);
+  shell.dataset.collapsing = 'false';
+  const after = shell.getBoundingClientRect();
+  if (prefersReducedMotion() || !canAnimateMorph(before, after)) return;
+  startMorph([
+    { transform: `scale(${before.width / after.width}, ${before.height / after.height})`, borderRadius: '999px' },
+    { transform: 'scale(1, 1)', borderRadius: '18px' }
+  ], 'expand');
+}
+
+function startCollapseMorph() {
+  if (shell.dataset.expanded !== 'true') {
+    applyExpandedLayout(false);
+    Promise.resolve(window.relaiPulse?.setExpanded?.(false)).catch(() => {});
+    return;
+  }
+  shell.dataset.collapsing = 'true';
+  const from = shell.getBoundingClientRect();
+  const target = compactSize;
+  if (prefersReducedMotion() || !canAnimateMorph(target, from)) {
+    finishCollapsedLayout();
+    return;
+  }
+  startMorph([
+    { transform: 'scale(1, 1)', borderRadius: '18px' },
+    { transform: `scale(${target.width / from.width}, ${target.height / from.height})`, borderRadius: '999px' }
+  ], 'collapse');
+}
+
+function startMorph(keyframes, direction) {
+  morphAnimation?.cancel();
+  morphDirection = direction;
+  const animation = shell.animate(keyframes, {
+    duration: PULSE_TRANSITION_MS,
+    easing: PULSE_EASING,
+    fill: 'both'
+  });
+  morphAnimation = animation;
+  animation.addEventListener('finish', () => finishMorph(animation), { once: true });
+  animation.addEventListener('cancel', () => {
+    if (morphAnimation === animation) {
+      morphAnimation = null;
+      morphDirection = '';
+    }
+  }, { once: true });
+}
+
+function finishMorph(animation) {
+  if (morphAnimation !== animation) return;
+  const direction = morphDirection;
+  morphAnimation = null;
+  morphDirection = '';
+  if (direction === 'collapse' && !expanded) {
+    applyExpandedLayout(false);
+    animation.cancel();
+    finishCollapsedLayout();
+    return;
+  }
+  animation.cancel();
+  shell.dataset.collapsing = 'false';
+  if (!expanded) startCollapseMorph();
+}
+
+function finishCollapsedLayout() {
+  applyExpandedLayout(false);
+  shell.dataset.collapsing = 'false';
+  Promise.resolve(window.relaiPulse?.setExpanded?.(false)).catch(() => {});
+}
+
+function resetExpandedFromHost() {
+  const animation = morphAnimation;
+  morphAnimation = null;
+  morphDirection = '';
+  animation?.cancel();
+  expanded = false;
+  applyExpandedAccessibility(false);
+  applyExpandedLayout(false);
+  shell.dataset.collapsing = 'false';
+}
+
+function applyExpandedAccessibility(value) {
   toggle.setAttribute('aria-expanded', String(value));
   toggle.setAttribute('aria-label', value ? 'Hide activity details' : 'Show activity details');
   island.setAttribute('aria-hidden', String(!value));
   openButton.tabIndex = value ? 0 : -1;
+}
+
+function applyExpandedLayout(value) {
+  shell.dataset.expanded = String(value);
+}
+
+function canAnimateMorph(compact, expandedRect) {
+  return Boolean(compact && expandedRect
+    && compact.width > 0 && compact.height > 0
+    && expandedRect.width > 0 && expandedRect.height > 0
+    && typeof shell.animate === 'function');
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 }
 
 document.querySelector('.pulse-bar')?.addEventListener('click', event => {
@@ -123,6 +232,6 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && expanded) setExpanded(false);
 });
 openButton.addEventListener('click', () => {
-  Promise.resolve(window.relaiPulse?.openDashboard?.(currentModel.route || '#home')).catch(() => {});
+  Promise.resolve(window.relaiPulse?.openDashboard?.()).catch(() => {});
 });
 window.relaiPulse?.onState?.(updatePulse);

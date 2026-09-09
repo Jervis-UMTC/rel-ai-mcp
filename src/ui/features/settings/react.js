@@ -849,6 +849,21 @@ function LocalDataSettings() {
     if (!result?.ok) { toast(result?.error || 'Task and activity history could not be cleared.', { variant: 'error' }); return; }
     toast(result.message || 'Task and activity history cleared.', { variant: 'success' }); requestDashboardRefresh(); await load();
   };
+  const clearAnalytics = async () => {
+    const confirmed = await confirmAction({
+      title: 'Clear analytics',
+      message: 'Clear local analytics history?',
+      detail: 'This removes aggregate action, reliability, timing, project, and failure-category history. Project files, task history, memory, settings, and external telemetry configuration are not changed.',
+      confirmLabel: 'Clear analytics',
+      danger: true
+    });
+    if (!confirmed) return;
+    setBusy('analytics');
+    const result = await postJson('/api/diagnostics/reset', { target: 'analytics', confirm: true }).catch(actionError => ({ ok: false, error: messageOf(actionError) }));
+    setBusy('');
+    if (!result?.ok) { toast(result?.error || 'Local analytics could not be cleared.', { variant: 'error' }); return; }
+    toast(result.message || 'Local analytics cleared.', { variant: 'success' }); requestDashboardRefresh(); await load();
+  };
   const clearAppLog = async () => {
     const confirmed = await confirmAction({ title: 'Clear app log', message: 'Clear the saved app log?', detail: 'The saved troubleshooting log cannot be restored. Project files, connection settings, and other local data are not changed.', confirmLabel: 'Clear app log', danger: true });
     if (!confirmed) return;
@@ -879,6 +894,7 @@ function LocalDataSettings() {
     h('div', { className: 'local-data-actions' },
       h('button', { className: 'secondary', type: 'button', disabled: active > 0 || busy === 'temporary', onClick: () => void clearTemporary() }, busy === 'temporary' ? 'Clearing…' : 'Clear temporary output'),
       h('button', { className: 'secondary danger', type: 'button', disabled: active > 0 || busy === 'history', onClick: () => void clearHistory() }, busy === 'history' ? 'Clearing…' : 'Clear task & activity history'),
+      h('button', { className: 'secondary danger', type: 'button', disabled: busy === 'analytics', onClick: () => void clearAnalytics() }, busy === 'analytics' ? 'Clearing…' : 'Clear analytics'),
       h('button', { className: 'secondary danger', type: 'button', disabled: busy === 'logs', onClick: () => void clearAppLog() }, busy === 'logs' ? 'Clearing…' : 'Clear app log'),
       h('button', { className: 'secondary', type: 'button', disabled: busy === 'folder', onClick: () => void openFolder() }, busy === 'folder' ? 'Opening…' : 'Data folder')
     ),
@@ -903,7 +919,7 @@ function LogoutRow() {
   };
   return h('div', { className: 'setting-row' },
     h('div', { className: 'setting-row-copy' }, h('strong', null, 'Log out'), h('span', null, 'Disconnect the saved OpenAI tunnel from this Rel.AI installation. You can choose whether to keep local Rel.AI data when you log out.')),
-    h('button', { className: 'secondary', type: 'button', disabled: busy, onClick: () => void logout() }, busy ? 'Logging out…' : 'Log out')
+    h('button', { className: 'secondary settings-nowrap-action', type: 'button', disabled: busy, onClick: () => void logout() }, busy ? 'Logging out…' : 'Log out')
   );
 }
 

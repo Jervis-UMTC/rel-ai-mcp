@@ -1,9 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { postJson } from '../../api.js';
 import { AnalyticsTimelineChart, SparkChart } from '../../components/charts.js';
-import { confirmAction } from '../../components/confirm-dialog.js';
 import { Icon } from '../../components/icons.js';
-import { toast } from '../../components/toast.js';
 import { getRouteParams, getWorkspaceFilter, replaceRouteParams, routeHref } from '../../router.js';
 import { ANALYTICS_RANGES, analyticsBounds, workspaceOptions } from './range-model.js';
 import { loadAnalyticsData } from './data.js';
@@ -40,7 +37,6 @@ export function createUsageRoute(useDashboardSlices) {
     const [loadState, setLoadState] = useState({ status: 'loading', message: '' });
     const [analytics, setAnalytics] = useState(null);
     const [refreshToken, setRefreshToken] = useState(0);
-    const [clearing, setClearing] = useState(false);
     const [status, setStatus] = useState('Loading analytics…');
     const initialLoad = useRef(true);
     const loadingRef = useRef(false);
@@ -124,26 +120,6 @@ export function createUsageRoute(useDashboardSlices) {
       if (key === 'start') setStart(value); else setEnd(value);
       if (range === 'custom') replaceRouteParams({ [key]: value });
     };
-    const clearAnalytics = async () => {
-      const confirmed = await confirmAction({
-        title: 'Clear analytics',
-        message: 'Clear local analytics history?',
-        detail: 'This removes aggregate action, reliability, timing, project, and failure-category history. Project files, task history, memory, settings, and external telemetry configuration are not changed.',
-        confirmLabel: 'Clear analytics',
-        danger: true
-      });
-      if (!confirmed) return;
-      setClearing(true);
-      const result = await postJson('/api/diagnostics/reset', { target: 'analytics', confirm: true });
-      setClearing(false);
-      if (!result?.ok) {
-        toast(result?.error || 'Local analytics could not be cleared.', { variant: 'error' });
-        return;
-      }
-      toast(result.message || 'Local analytics cleared.', { variant: 'success' });
-      setRefreshToken(value => value + 1);
-    };
-
     const options = analytics ? workspaceOptions(analytics.models) : [];
     const selectedWorkspace = options.some(option => option.workspace === workspace) ? workspace : '';
 
@@ -161,7 +137,7 @@ export function createUsageRoute(useDashboardSlices) {
           selectedWorkspace,
           start
         }),
-        h(PrivacyCard, { privacy: analytics?.privacy, clearing, onClear: clearAnalytics }),
+        h(PrivacyCard, { privacy: analytics?.privacy }),
         h('div', { className: 'sr-only', 'data-usage-status': true, role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, status),
         h('div', { className: 'usage-content', 'data-usage-content': true, 'aria-busy': loadState.status === 'loading' ? 'true' : undefined },
           loadState.status === 'loading' && !analytics
@@ -224,7 +200,7 @@ function AnalyticsToolbar({ end, loading, onDateChange, onRangeChange, onRefresh
   );
 }
 
-function PrivacyCard({ privacy, clearing, onClear }) {
+function PrivacyCard({ privacy }) {
   if (!privacy) return h('div', { 'data-usage-privacy': true });
   const copy = analyticsPrivacyCopy(privacy);
   return h('div', { 'data-usage-privacy': true },
@@ -234,8 +210,7 @@ function PrivacyCard({ privacy, clearing, onClear }) {
           h('strong', { className: 'usage-privacy-title' }, h(Icon, { name: 'reliability', size: 17 }), h('span', null, 'Data & privacy')),
           h('span', null, copy.retention),
           h('span', null, copy.telemetry)
-        ),
-        h('button', { type: 'button', className: 'secondary danger', 'data-usage-clear': true, disabled: clearing, onClick: () => { void onClear(); } }, clearing ? 'Clearing…' : 'Clear analytics')
+        )
       )
     )
   );

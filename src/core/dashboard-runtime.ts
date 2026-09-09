@@ -236,10 +236,6 @@ export function dashboardReleaseNotes(): JsonRecord {
   return getReleaseNotes();
 }
 
-export function safeInitialDashboardData(options: DashboardRuntimeOptions = {}): JsonRecord {
-  return dashboardSnapshot(options, { limit: 100, requireHttpToken: false });
-}
-
 export function createDashboardEventSubscription(
   options: DashboardRuntimeOptions,
   sink: DashboardEventSink

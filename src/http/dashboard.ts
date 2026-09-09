@@ -14,7 +14,6 @@ import {
   dashboardTaskSession,
   dashboardTools,
   dashboardWorkspacePreflight,
-  safeInitialDashboardData,
   updateDashboardWorkspace
 } from '../core/dashboard-runtime.ts';
 import { ERROR_CODES, errorPayload } from '../contracts/errors.ts';
@@ -22,7 +21,7 @@ import { resolvePackagePath } from '../packageMetadata.js';
 import { handleOpenFolder, handlePickFolder, handleWorkspaceChecks } from './dashboardActions.ts';
 import { readCachedStaticAsset } from './dashboardAssets.ts';
 import { renderDashboardShellBootstrap } from './dashboardShellChrome.ts';
-import { contentTypeForStaticAsset, jsonForHtmlScript, readJsonBody, sendHtml, sendJson, sendSse } from './io.ts';
+import { contentTypeForStaticAsset, readJsonBody, sendHtml, sendJson, sendSse } from './io.ts';
 import type { HttpRouteContext, HttpServerOptions } from './types.ts';
 
 async function handleFavicon(ctx: HttpRouteContext): Promise<void> {
@@ -84,7 +83,7 @@ function handleDashboard(ctx: HttpRouteContext): void {
     "frame-ancestors 'none'",
     "form-action 'self'"
   ].join('; ');
-  sendHtml(ctx.res, 200, renderDashboardHtml(ctx.options, nonce), {
+  sendHtml(ctx.res, 200, renderDashboardHtml(nonce), {
     'Content-Security-Policy': csp,
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff'
@@ -168,16 +167,7 @@ function sendDashboardStreamError(res: ServerResponse<IncomingMessage>, error: u
   sendSse(res, 'dashboard.error', errorPayload(ERROR_CODES.UNKNOWN, errorMessage(error)));
 }
 
-function initialDashboardData(options: HttpServerOptions = {}): Record<string, unknown> {
-  try {
-    return safeInitialDashboardData(options);
-  } catch (error) {
-    return errorPayload(ERROR_CODES.CONFIGURATION_INVALID, errorMessage(error));
-  }
-}
-
-function renderDashboardHtml(options: HttpServerOptions, nonce: string): string {
-  const initialDashboardJson = jsonForHtmlScript(initialDashboardData(options));
+function renderDashboardHtml(nonce: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -192,7 +182,6 @@ function renderDashboardHtml(options: HttpServerOptions, nonce: string): string 
 </head>
 <body>
 <div id="dashboardRoot"></div>
-<script type="application/json" id="initialDashboardData" nonce="${nonce}">${initialDashboardJson}</script>
 <script type="module" src="/public/dashboard-app.js"></script>
 </body>
 </html>`;

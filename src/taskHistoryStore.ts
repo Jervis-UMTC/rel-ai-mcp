@@ -17,6 +17,8 @@ import {
   clearTaskHistory as clearStoredTaskHistory,
   ensureCurrentHistory,
   getTaskHistoryDir,
+  listRecentSessionEvents,
+  listSessionSummaries,
   listSessions,
   pruneSessions,
   readSession,
@@ -55,6 +57,7 @@ interface ReadSessionOptions {
 
 interface ReadHistoryOptions {
   limit?: number;
+  summary?: boolean;
 }
 
 interface EpisodeOptions {
@@ -253,8 +256,16 @@ function readTaskHistory(config: TaskHistoryConfig, activity: TaskActivitySnapsh
   let persisted: TaskRecord[] = [];
   try {
     ensureCurrentHistory(config);
-    persisted = listSessions(directory, MAX_SESSIONS).map((session: StoredTaskSession) => {
-      const current = readPendingSession(directory, session.id) || session as TaskRecord;
+    const storedSessions = options.summary === true
+      ? listSessionSummaries(directory, MAX_SESSIONS)
+      : listSessions(directory, MAX_SESSIONS);
+    persisted = storedSessions.map((session: StoredTaskSession) => {
+      const pending = readPendingSession(directory, session.id);
+      const needsFullRecord = options.summary === true
+        && !pending
+        && session.status !== 'inactive'
+        && !isTerminalTaskStatus(session.status);
+      const current = pending || (needsFullRecord ? readSession(directory, session.id) : null) || session as TaskRecord;
       if (isStoredSessionNoise(current, activeIds)) {
         discardStoredSession(directory, current.id);
         return null;
@@ -280,6 +291,18 @@ function readTaskHistory(config: TaskHistoryConfig, activity: TaskActivitySnapsh
     .sort((left, right) => eventTime(right) - eventTime(left))
     .slice(0, limit)
     .map(publicSession);
+}
+
+function readRecentTaskHistoryEvents(config: TaskHistoryConfig, limit = 200): HistoryEvent[] {
+  try {
+    const directory = getTaskHistoryDir(config);
+    return listRecentSessionEvents(directory, clamp(limit || 200, 1, 1000))
+      .map((event: HistoryEvent) => sanitizeActivityEventRecord(event) as HistoryEvent)
+      .filter((event: HistoryEvent | null): event is HistoryEvent => Boolean(event));
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] recent task history event read:', error);
+    return [];
+  }
 }
 
 function readRelevantTaskEpisodes(config: TaskHistoryConfig, workspace: unknown, query: unknown, options: EpisodeOptions = {}): Record<string, any>[] {
@@ -779,6 +802,7 @@ export {
   getTaskHistoryDir,
   readConversationContinuity,
   readCrossWorkspaceTaskEpisodes,
+  readRecentTaskHistoryEvents,
   readRecentWorkflowEvidence,
   readRelevantTaskEpisodes,
   readTaskBackgroundOperation,

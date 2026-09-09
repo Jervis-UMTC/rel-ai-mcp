@@ -1,0 +1,41 @@
+name: Dependency health
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit dependency trees
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            electron/package-lock.json
+      - name: Use declared npm
+        run: node scripts/ensure-package-manager.mjs
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Electron dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: electron
+      - name: Block production vulnerabilities
+        run: npm run audit:production
+      - name: Block packaging vulnerabilities
+        run: npm run audit:packaging
+      - name: Report available root updates
+        continue-on-error: true
+        run: npm outdated --long
+      - name: Report available Electron updates
+        continue-on-error: true
+        run: npm outdated --prefix electron --long

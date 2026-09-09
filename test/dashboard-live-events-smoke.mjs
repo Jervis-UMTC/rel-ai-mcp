@@ -86,10 +86,14 @@ try {
   const dashboardCookie = String(dashboardResponse.headers.get('set-cookie') || '').split(';')[0];
   assert.match(dashboardCookie, /^relai_dashboard_session=/);
   const html = await dashboardResponse.text();
-  assert.match(html, /id="initialDashboardData"/, 'HTML bootstrap remains available before SSE connects');
-  const initial = initialDashboardPayload(html);
+  assert.doesNotMatch(html, /id="initialDashboardData"/, 'HTML shell must not synchronously build the aggregate dashboard snapshot');
+  const initialResponse = await fetch(`http://127.0.0.1:${address.port}/api/dashboard/v10`, {
+    headers: { cookie: dashboardCookie }
+  });
+  assert.equal(initialResponse.status, 200);
+  const initial = await initialResponse.json();
   assert.equal(initial.ok, true);
-  assert.ok(initial.live?.streamId, 'HTML bootstrap must carry the live stream identity');
+  assert.ok(initial.live?.streamId, 'authoritative bootstrap fetch must carry the live stream identity');
   assert.deepEqual(Object.keys(initial.live.revisions).sort(), ['connection', 'diagnostics', 'process', 'task', 'workspace']);
   assert.ok(Array.isArray(initial.tasks));
   assert.ok(Array.isArray(initial.managedProcesses));
@@ -192,12 +196,6 @@ try {
 }
 
 console.log('Dashboard typed live events and revision-based reconnect catch-up passed.');
-
-function initialDashboardPayload(html) {
-  const match = String(html).match(/<script type="application\/json" id="initialDashboardData"[^>]*>([\s\S]*?)<\/script>/);
-  assert.ok(match?.[1], 'HTML bootstrap must contain serialized dashboard data');
-  return JSON.parse(match[1]);
-}
 
 function createEventReader(reader) {
   const decoder = new TextDecoder();

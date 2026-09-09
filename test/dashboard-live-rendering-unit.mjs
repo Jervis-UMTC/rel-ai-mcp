@@ -50,6 +50,9 @@ assert.doesNotMatch(dashboard, /from ['"]\.\/ui\/store\.js['"]/, 'the production
 assert.match(reactMain, /from ['"]\.\.\/store\.js['"]/, 'the Vite-built dashboard entry must own the canonical store dependency');
 assert.match(reactMain, /function RouteOutlet\(/, 'the React shell must own the active route outlet');
 assert.match(reactMain, /reactRouteComponents\.get\(route\.section\)/, 'the active React feature must be selected directly from the canonical route registry');
+assert.match(reactMain, /reactRoutePreloads\.push\(load\)/, 'lazy route modules must register for one-time background preloading');
+assert.match(reactMain, /export function preloadReactRoutes\(\)[\s\S]*Promise\.allSettled\(reactRoutePreloads\.map\(load => load\(\)\)\)/, 'route preloading must warm modules without turning preload failures into dashboard failures');
+assert.match(functionSource(dashboard, 'activateRouter'), /initRouter\(\);[\s\S]*void preloadReactRoutes\(\)/, 'the dashboard must warm lazy route modules after the initial router becomes usable');
 assert.doesNotMatch(reactMain, /bridgeRouteSections|getReactSections|routeRoots|createReactSection|unmountReactSection|LegacyRouteOutlet/, 'React must not retain the migration bridge or per-route React roots');
 assert.doesNotMatch(dashboard, /features\/settings\/(?:index|connector|diagnostics)\.js|updateConnectorLiveState|updateSystemLiveState/, 'dashboard bootstrap must not load legacy Settings or Troubleshooting renderers');
 assert.match(settingsReact, /export function createSettingsRoute/, 'Settings must expose one React route factory');

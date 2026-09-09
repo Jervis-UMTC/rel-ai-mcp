@@ -23,6 +23,8 @@ const main = `${mainEntry}\n${desktopHost}\n${desktopPower}`;
 const coreDesktopOperations = read('src/core/desktop-operations.ts');
 const desktopSettings = read('electron/desktop-settings.js');
 const settingsReact = read('src/ui/features/settings/react.js');
+const settingsStyles = read('src/ui/features/settings/styles.css');
+const usageReact = read('src/ui/features/usage/react.js');
 const appUpdater = read('electron/app-updater.js');
 const appUpdaterEvents = read('electron/app-updater-events.js');
 const desktopLifecycle = read('electron/desktop-lifecycle.js');
@@ -232,6 +234,10 @@ assert.match(ipc, /channels\.DESKTOP_LOCAL_DATA_CLEAR_TEMPORARY[\s\S]{0,120}clea
 assert.match(desktopIpcContract, /\[DESKTOP_IPC\.DESKTOP_LOCAL_DATA_CLEAR_TEMPORARY\]: input\('handle', \['dashboard'\], 'reject'\)/, 'local-data cleanup authorization must stay dashboard-only in the canonical IPC contract');
 assert.match(desktopLocalData, /output-spills/, 'local-data cleanup must target bounded temporary command output');
 assert.match(settingsReact, /api\/diagnostics\/reset/, 'category cleanup must reuse the existing guarded diagnostics resets');
+assert.match(settingsReact, /target:\s*'analytics'/, 'analytics clearing must live with App local-data controls');
+assert.doesNotMatch(usageReact, /data-usage-clear|Clear local analytics history\?/, 'Analytics page must not expose destructive analytics clearing');
+assert.match(settingsReact, /className: 'secondary settings-nowrap-action'/, 'logout action must opt into nowrap layout');
+assert.match(settingsStyles, /\.settings-nowrap-action\s*\{[^}]*whitespace-nowrap/, 'logout action must stay on one line at narrow widths');
 assert.match(settingsReact, /Keep my local Rel\.AI data/, 'logout modal must offer one keep-data checkbox');
 assert.match(settingsReact, /useState\(true\)/, 'logout modal must default to keeping local data');
 assert.match(settingsReact, /relaiDesktop\.logout\(!keepData\)/, 'logout checkbox must map directly to the existing clear-data backend flag');
@@ -243,6 +249,7 @@ assert.match(desktopLocalData, /contains project files/, 'full local-data cleari
 assert.ok(electronPackage.build.files.includes('desktop-local-data.js'), 'desktop local-data manager must be packaged with Electron');
 
 assert.match(dashboardJs, /dataset\.surface = surface/);
+assert.doesNotMatch(dashboardJs, /localStorage\.getItem\('relai_dashboard_route'\)/, 'hashless launches must default to Overview instead of restoring the previous route');
 assert.match(dashboardJs, /desktop: window\.relaiDesktop \|\| null/);
 assert.match(dashboardJs, /initUpdateAvailableModal/);
 assert.doesNotMatch(dashboardServer, /id="windowTitlebar"/, 'server shell must not duplicate React-owned desktop chrome');

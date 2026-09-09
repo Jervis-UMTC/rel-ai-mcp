@@ -39,6 +39,25 @@ const validationFailed = projectPulseStatus({
 assert.equal(validationFailed.actionRequired, true);
 assert.equal(validationFailed.title, 'Checks need attention');
 
+const staleAttention = projectPulseStatus({
+  taskActivity: {
+    state: 'idle', activeCalls: 0, activeTaskCount: 0,
+    tasks: [{ taskId: 'task-stale', workspace: 'repo', status: 'blocked', currentActivity: 'Old blocker' }]
+  }
+});
+assert.equal(staleAttention.actionRequired, false, 'stale task rows must not pin Pulse in Action required');
+assert.equal(staleAttention.visible, false, 'an idle activity snapshot must not stay visible because of stale task rows');
+
+const connectionAttention = projectPulseStatus({
+  serverRunning: true,
+  tunnelStatus: 'failed',
+  errorCode: 'tunnel_connection_interrupted',
+  error: 'Secure MCP Tunnel disconnected.'
+});
+assert.equal(connectionAttention.tone, 'attention');
+assert.equal(connectionAttention.badge, 'Needs attention');
+assert.equal(connectionAttention.actionRequired, false, 'connection recovery must not be mislabeled as a task action required state');
+
 const working = projectPulseStatus({
   taskActivity: {
     state: 'working', activeCalls: 1, activeTaskCount: 2, operation: 'Running tests',
@@ -77,22 +96,32 @@ assert.equal(projectPulseStatus({ serverRunning: false }).visible, false);
 const pulseHtml = readFileSync(new URL('../electron/renderer/pulse.html', import.meta.url), 'utf8');
 const pulseCss = readFileSync(new URL('../electron/renderer/pulse.css', import.meta.url), 'utf8');
 const pulseRenderer = readFileSync(new URL('../electron/renderer/pulse.js', import.meta.url), 'utf8');
+const preloadSource = readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
 assert.match(pulseHtml, /id="pulseTaskCount"/, 'compact Pulse markup must expose the active task count');
 assert.match(pulseHtml, /<span class="pulse-context-label">Tasks<\/span><strong id="pulseTasks">/, 'expanded Pulse must expose task names');
-assert.match(pulseCss, /\.pulse-mark\s*\{[^}]*-webkit-app-region:\s*drag/s, 'compact Pulse logo must remain a native drag handle without consuming the hover surface');
-assert.match(pulseCss, /transition:\s*width 240ms[^;]*height 240ms/s, 'Pulse shell geometry must animate instead of popping directly to expanded size');
+assert.match(pulseCss, /\.pulse-bar\s*\{[^}]*-webkit-app-region:\s*drag/s, 'Pulse header must provide one stable native drag surface in compact and expanded states');
+assert.match(pulseCss, /\.pulse-compact-copy\s*\{[^}]*-webkit-app-region:\s*no-drag/s, 'compact click-to-expand content must stay interactive inside the native drag surface');
+assert.doesNotMatch(pulseCss, /\.pulse-shell\s*\{[^}]*transition:\s*[^;]*(?:width|height)/s, 'Pulse shell must not animate layout-triggering width or height properties');
+assert.match(pulseCss, /will-change:\s*transform, opacity/, 'Pulse morphing should stay on compositor-friendly properties');
 assert.match(pulseCss, /user-select:\s*none/, 'Pulse text must not be selectable during pointer interaction');
 const nativeExpandIndex = pulseRenderer.indexOf('setExpanded?.(true)');
-const visualExpandIndex = pulseRenderer.indexOf('applyExpandedVisual(true)');
-assert.ok(nativeExpandIndex >= 0 && visualExpandIndex > nativeExpandIndex, 'native expansion must happen before the visible shell grows');
-const visualCollapseIndex = pulseRenderer.indexOf('applyExpandedVisual(false)');
-const nativeCollapseIndex = pulseRenderer.indexOf('setExpanded?.(false)');
-assert.ok(visualCollapseIndex >= 0 && nativeCollapseIndex > visualCollapseIndex, 'the visible shell must shrink before the native window contracts');
+const visualExpandIndex = pulseRenderer.indexOf('startExpandMorph()');
+assert.ok(nativeExpandIndex >= 0 && visualExpandIndex > nativeExpandIndex, 'native expansion must happen before the compositor morph begins');
+const collapseLayoutIndex = pulseRenderer.indexOf('applyExpandedLayout(false)');
+const nativeCollapseIndex = pulseRenderer.lastIndexOf('setExpanded?.(false)');
+assert.ok(collapseLayoutIndex >= 0 && nativeCollapseIndex > collapseLayoutIndex, 'the visual morph must reach compact layout before the native window contracts');
+assert.match(pulseRenderer, /shell\.animate\(/, 'Pulse geometry must use the Web Animations compositor path instead of CSS width/height interpolation');
+assert.match(pulseRenderer, /morphAnimation\.reverse\(\)/, 'rapid open/close changes must reverse the active morph instead of restarting from a jump');
+assert.match(pulseRenderer, /model\?\.expanded === false && expanded[^\n]*resetExpandedFromHost\(\)/, 'a hidden native collapse must reset stale renderer expansion before Pulse is shown again');
+assert.match(pulseRenderer, /prefers-reduced-motion:\s*reduce/, 'Pulse motion must honor the reduced-motion preference');
 assert.match(pulseRenderer, /taskCountElement\.textContent = taskCount === 1 \? '1 task' : `\$\{taskCount\} tasks`;/, 'compact Pulse must render the current task count');
 assert.doesNotMatch(pulseRenderer, /pointerenter|pointerleave|scheduleHoverOpen|suppressHoverOpen/, 'Pulse expansion must not depend on hover state that can oscillate while the native window resizes');
 assert.match(pulseRenderer, /querySelector\('\.pulse-bar'\)[\s\S]{0,160}!expanded[\s\S]{0,80}setExpanded\(true\)/, 'clicking the compact Pulse must expand it');
 assert.match(pulseRenderer, /event\.key === 'Escape' && expanded/, 'Escape must collapse an expanded Pulse');
 assert.match(pulseRenderer, /taskNames\.join\(' · '\)/, 'expanded Pulse must render active task names');
+assert.match(pulseRenderer, /relaiPulse\?\.openDashboard\?\.\(\)/, 'Pulse must use the same no-route dashboard opener as the tray');
+assert.doesNotMatch(pulseRenderer, /openDashboard\?\.\(currentModel\.route/, 'Pulse must not turn a dashboard open into a deep-link navigation requirement');
+assert.match(preloadSource, /openDashboard:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('url:open-dashboard'\)/, 'Pulse preload must expose the canonical no-route dashboard open action');
 
 const workArea = { x: 100, y: 50, width: 1400, height: 900 };
 const displayListeners = new Map();
@@ -103,6 +132,11 @@ const fakeScreen = {
 };
 assert.deepEqual(pulseBounds(fakeScreen), { x: 1196, y: 68, width: 286, height: 48 });
 assert.deepEqual(pulseBounds(fakeScreen, { expanded: true }), { x: 1118, y: 68, width: 364, height: 288 });
+assert.deepEqual(
+  pulseBounds(fakeScreen, { expanded: true, anchor: { right: 150, top: 0 } }),
+  { x: 100, y: 50, width: 364, height: 288 },
+  'expanded Pulse must clamp safely to the active display when the saved anchor is too close to an edge'
+);
 
 const windows = [];
 class FakeWindow {
@@ -200,17 +234,24 @@ window.webContentsEvents.get('did-finish-load')?.();
 assert.equal(window.sent.at(-1).channel, 'pulse:update');
 assert.equal(window.sent.at(-1).payload.tone, 'working');
 assert.equal(window.sent.at(-1).payload.themePreference, 'dark');
+assert.equal(window.sent.at(-1).payload.expanded, false, 'Pulse state sent to the renderer must include authoritative native expansion state');
 assert.equal(manager.setExpanded(true), true);
 assert.deepEqual(window.boundsWrites.at(-1), pulseBounds(fakeScreen, { expanded: true }));
 assert.equal(manager.setExpanded(false), false);
 assert.deepEqual(window.boundsWrites.at(-1), pulseBounds(fakeScreen));
 
 window.currentBounds = { x: 500, y: 200, width: 286, height: 48 };
-window.events.get('move')?.();
+window.events.get('will-move')?.({}, { x: 500, y: 200, width: 286, height: 48 });
 assert.equal(manager.setExpanded(true), true);
 assert.deepEqual(window.boundsWrites.at(-1), { x: 422, y: 200, width: 364, height: 288 }, 'expansion must preserve the right edge and top of a user-moved Pulse');
 assert.equal(manager.setExpanded(false), false);
 assert.deepEqual(window.boundsWrites.at(-1), { x: 500, y: 200, width: 286, height: 48 }, 'collapse must return to the user-moved compact position');
+window.events.get('move')?.();
+assert.equal(manager.setExpanded(true), true);
+assert.deepEqual(window.boundsWrites.at(-1), { x: 422, y: 200, width: 364, height: 288 }, 'programmatic move notifications must not rewrite the manual anchor');
+window.events.get('will-move')?.({}, { x: 700, y: 300, width: 364, height: 288 });
+assert.equal(manager.setExpanded(false), false);
+assert.deepEqual(window.boundsWrites.at(-1), { x: 778, y: 300, width: 286, height: 48 }, 'dragging the expanded Pulse must preserve the same right/top anchor when it collapses');
 
 manager.update({
   serverRunning: true, tunnelStatus: 'running',
@@ -225,7 +266,7 @@ assert.equal(window.visible, false);
 manager.setEnabled(true);
 assert.equal(window.visible, true);
 displayListeners.get('display-metrics-changed')?.();
-assert.deepEqual(window.boundsWrites.at(-1), { x: 500, y: 200, width: 286, height: 48 }, 'display changes must keep a valid user-moved Pulse position');
+assert.deepEqual(window.boundsWrites.at(-1), { x: 778, y: 300, width: 286, height: 48 }, 'display changes must preserve the latest valid user-moved Pulse position');
 assert.equal(securityErrors.length, 0);
 assert.equal(manager.stop(), true);
 assert.equal(manager.stop(), false, 'Pulse shutdown must be idempotent');

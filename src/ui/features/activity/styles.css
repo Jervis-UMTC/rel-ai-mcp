@@ -15,7 +15,8 @@
 .activity-table { width: 100%; min-width: 0; table-layout: fixed; }
 .activity-col-time { width: 96px; }
 .activity-col-message { width: auto; }
-.activity-time-column { @apply whitespace-nowrap align-top; }
+.activity-time-column { @apply whitespace-nowrap; }
+.activity-table tbody .activity-time-column { @apply align-top; }
 .activity-message-column { min-width: 0; overflow: hidden; }
 .activity-message-cell { @apply min-w-0 py-2; }
 .activity-row-trigger { @apply grid min-h-11 w-full min-w-0 gap-1 rounded-md text-left; justify-content: stretch; justify-items: stretch; padding: 0; border: 0; background: transparent; color: inherit; }

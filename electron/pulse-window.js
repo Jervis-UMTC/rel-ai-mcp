@@ -30,7 +30,8 @@ function createPulseWindowManager(options = {}) {
   let themePreference = 'system';
   let expanded = false;
   let customAnchor = null;
-  let lastAppliedBounds = null;
+  let applyingGeometry = false;
+  let geometryRevision = 0;
   let currentStatus = {};
   let currentModel = projectPulseStatus(currentStatus);
   const wayland = platform === 'linux' && String(env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland';
@@ -75,7 +76,7 @@ function createPulseWindowManager(options = {}) {
   }
 
   function pulseModel() {
-    return { ...currentModel, themePreference };
+    return { ...currentModel, themePreference, expanded };
   }
 
   function sync() {
@@ -130,7 +131,8 @@ function createPulseWindowManager(options = {}) {
       event.preventDefault();
       window?.hide();
     });
-    window.on('move', rememberPosition);
+    if (platform === 'win32' || platform === 'darwin') window.on('will-move', rememberManualPosition);
+    else if (!wayland) window.on('move', rememberPosition);
     window.on('closed', () => {
       window = null;
       rendererReady = false;
@@ -146,18 +148,30 @@ function createPulseWindowManager(options = {}) {
   function applyGeometry() {
     if (!window || window.isDestroyed()) return;
     const bounds = pulseBounds(screen, { expanded, anchor: customAnchor });
-    lastAppliedBounds = bounds;
     if (wayland) {
       window.setSize?.(bounds.width, bounds.height, false);
       return;
     }
+    const revision = ++geometryRevision;
+    applyingGeometry = true;
     window.setBounds?.(bounds, false);
+    setImmediate(() => {
+      if (geometryRevision === revision) applyingGeometry = false;
+    });
+  }
+
+  function rememberManualPosition(_event, newBounds) {
+    if (wayland || !newBounds) return;
+    rememberAnchor(newBounds);
   }
 
   function rememberPosition() {
-    if (wayland || !window || window.isDestroyed() || typeof window.getBounds !== 'function') return;
-    const bounds = window.getBounds();
-    if (sameBounds(bounds, lastAppliedBounds)) return;
+    if (wayland || applyingGeometry || !window || window.isDestroyed() || typeof window.getBounds !== 'function') return;
+    rememberAnchor(window.getBounds());
+  }
+
+  function rememberAnchor(bounds) {
+    if (!bounds || !Number.isFinite(bounds.x) || !Number.isFinite(bounds.y) || !Number.isFinite(bounds.width)) return;
     customAnchor = { right: bounds.x + bounds.width, top: bounds.y };
   }
 
@@ -174,6 +188,8 @@ function createPulseWindowManager(options = {}) {
     screen.off?.('display-added', reposition);
     screen.off?.('display-removed', reposition);
     screen.off?.('display-metrics-changed', reposition);
+    geometryRevision += 1;
+    applyingGeometry = false;
     if (window && !window.isDestroyed()) window.destroy();
     window = null;
     rendererReady = false;
@@ -216,14 +232,6 @@ function pulseBounds(screen, options = {}) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), Math.max(min, max));
-}
-
-function sameBounds(left, right) {
-  return Boolean(left && right
-    && left.x === right.x
-    && left.y === right.y
-    && left.width === right.width
-    && left.height === right.height);
 }
 
 export { PULSE_EXPANDED_HEIGHT, PULSE_EXPANDED_WIDTH, PULSE_HEIGHT, PULSE_WIDTH, createPulseWindowManager, pulseBounds };

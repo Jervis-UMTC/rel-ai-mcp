@@ -88,9 +88,10 @@ function waitForProcessClose(childProcess, timeoutMs) {
 }
 
 async function waitForHealth(url) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
     if (await healthRequest(url)) return;
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error('HTTP server did not become healthy. ' + serverError);
 }

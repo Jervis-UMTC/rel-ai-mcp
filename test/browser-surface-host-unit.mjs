@@ -68,10 +68,12 @@ class FakeWebContentsView {
 
 function createHarness({ failOpen = false } = {}) {
   const sessions = [];
+  const views = [];
   const webContents = [];
   const HarnessWebContentsView = class extends FakeWebContentsView {
     constructor(options) {
       super(options);
+      views.push(this);
       webContents.push(this.webContents);
     }
   };
@@ -101,7 +103,7 @@ function createHarness({ failOpen = false } = {}) {
     },
     onEvent: event => events.push(event)
   });
-  return { host, sessions, webContents, childViews, routes, sent, events };
+  return { host, sessions, views, webContents, childViews, routes, sent, events };
 }
 
 {
@@ -111,10 +113,15 @@ function createHarness({ failOpen = false } = {}) {
 }
 
 {
-  const { host, sessions, childViews, routes, events } = createHarness();
+  const { host, sessions, views, childViews, routes, events } = createHarness();
   const started = await host.run({ action: 'start' });
   assert.deepEqual(routes, ['#browser']);
   const opened = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
+  assert.equal(
+    views[0].options.webPreferences.backgroundThrottling,
+    undefined,
+    'embedded browser views must not disable background throttling while the dashboard can still be hidden'
+  );
   const secondTab = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
   host.setBounds({ visible: true, x: 12, y: 34, width: 900, height: 600 });
   assert.equal(host.getState().visible, true);

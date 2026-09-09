@@ -9,12 +9,13 @@ import { routeMetadata } from '../../navigation-catalog.js';
 import { getWorkspaceFilter, routeHref } from '../../router.js';
 import { statusTone } from '../../status-tone.js';
 import { workSessionStateView } from '../../task-identity.js';
+import { classifyTaskActivity } from '../../../taskActivityPresentation.js';
 import { formatDuration, timeAgo } from '../../utils.js';
 import { buildTaskSemanticProgress } from '../../../taskSemanticProgress.js';
 import { completeDesktopSetup, desktopSetupSteps, dismissDesktopSetup, isDesktopSetupDismissed } from '../onboarding/index.js';
 import { CHATGPT_CONNECTOR_CREATE_URL, RELAI_CONNECTOR_ICON_FILENAME, RELAI_CONNECTOR_ICON_URL, chatGptFirstPrompt, chatGptGuideSteps } from '../settings/connection-guidance.js';
 import { loadAnalyticsData } from '../usage/data.js';
-import { activeTaskList, desktopSetupState, homeAnalyticsView, overviewState, overviewWorkspaceStatus } from './index.js';
+import { desktopSetupState, homeAnalyticsView, overviewState, overviewWorkspaceStatus } from './index.js';
 
 const h = React.createElement;
 const HOME_STORE_KEYS = Object.freeze(['config', 'health', 'connection', 'connectionState', 'desktopStatus', 'mcpConnection', 'tasks', 'taskActivity', 'live']);
@@ -58,8 +59,9 @@ function TaskActivityCard({ model }) {
   if (model.active) {
     const startedAt = task.startedAtIso || task.createdAt || task.startedAt || '';
     const startedAtMs = Date.parse(startedAt) || Number(task.startedAt || Date.now());
-    return h('section', { className: `card task-overview ${model.waiting ? 'waiting' : 'active'}`, 'data-home-live-activity': '' },
-      h('div', { className: 'task-overview-mark', 'aria-hidden': 'true' }, model.waiting ? '…' : h('span', { className: 'task-overview-spinner' })),
+    const stateClass = model.attention ? 'attention' : model.waiting ? 'waiting' : 'active';
+    return h('section', { className: `card task-overview ${stateClass}`, 'data-home-live-activity': '' },
+      h('div', { className: 'task-overview-mark', 'aria-hidden': 'true' }, model.attention ? '!' : model.waiting ? '…' : h('span', { className: 'task-overview-spinner' })),
       h('div', { className: 'task-overview-copy' },
         h('div', { className: 'overview-kicker' }, 'Current task'),
         h('h3', null, model.title),
@@ -88,15 +90,17 @@ function TaskActivityCard({ model }) {
 }
 
 function taskActivityModel(activity = {}, persistedTask = null) {
-  const activeTasks = activeTaskList(activity);
-  const active = activeTasks.length > 0;
+  const presentation = classifyTaskActivity(activity);
+  const activeTasks = presentation.tasks;
+  const active = presentation.category !== 'idle';
   const completedWithWarnings = persistedTask?.status === 'completed' && Number(persistedTask?.failedToolCallCount ?? persistedTask?.failures ?? 0) > 0;
   if (!active && !['failed', 'blocked', 'validation_failed'].includes(persistedTask?.status) && !completedWithWarnings) return null;
-  const task = active ? primaryActiveTask(activeTasks) : persistedTask || activity.lastTask;
+  const task = active ? presentation.primaryTask || primaryActiveTask(activeTasks) : persistedTask || activity.lastTask;
   if (!task) return null;
   if (active) {
-    const activeCalls = activeTasks.reduce((sum, item) => sum + Number(item.activeCalls || 0), 0);
-    const waiting = activeCalls === 0;
+    const activeCalls = presentation.activeCalls;
+    const attention = presentation.category === 'attention';
+    const waiting = presentation.category === 'waiting';
     const semantic = semanticProgressFor(task);
     const operation = semantic.currentActivity || task.currentActivity || task.operation || taskAction(task.lastTool || task.tool);
     const stage = String(semantic.currentStage || 'Task progress').trim();
@@ -105,10 +109,11 @@ function taskActivityModel(activity = {}, persistedTask = null) {
     let title = task.title || operation || 'Current task';
     let description = activityText && activityText !== stage ? `${stage} · ${activityText}` : stage || activityText || 'Task is open';
     description = location ? `${description} in ${location}.` : `${description}.`;
-    if (!task.title && !waiting && activeTasks.length > 1) title = `${activeCalls} Rel.AI actions are running.`;
-    if (!waiting && activeTasks.length > 1) description = `${activeCalls} ${pluralLabel(activeCalls, 'active action')} across ${activeTaskLocation(activeTasks)}.`;
+    if (!task.title && !attention && !waiting && activeTasks.length > 1) title = `${activeCalls} Rel.AI actions are running.`;
+    if (!attention && !waiting && activeTasks.length > 1) description = `${activeCalls} ${pluralLabel(activeCalls, 'active action')} across ${activeTaskLocation(activeTasks)}.`;
     return {
       active: true,
+      attention,
       waiting,
       task,
       title,
@@ -116,7 +121,11 @@ function taskActivityModel(activity = {}, persistedTask = null) {
       stage,
       activity: activityText,
       location,
-      activityLabel: waiting ? `${statusLabel(task.status)} · latest progress` : `${activeCalls} ${pluralLabel(activeCalls, 'active call')}`
+      activityLabel: attention
+        ? `Action required · ${statusLabel(task.status)}`
+        : waiting
+          ? `${statusLabel(task.status)} · latest progress`
+          : `${activeCalls} ${pluralLabel(activeCalls, 'active call')}`
     };
   }
   const attention = ['failed', 'blocked', 'validation_failed'].includes(task.status);

@@ -745,8 +745,11 @@ async function createDesktopHost(options = {}) {
     return serviceRuntime.stopServer(stopOptions);
   }
 
-  function buildDashboardConnection() {
-    return serviceRuntime.buildDashboardConnection();
+  async function buildDashboardConnection() {
+    const connection = await serviceRuntime.buildDashboardConnection();
+    const url = new URL(connection.url);
+    url.searchParams.set('theme', desktopLifecycle.getStatus().themePreference || 'system');
+    return { ...connection, url: url.href };
   }
 
   async function showDashboardWindow(routeHash = '', windowOptions = {}) {

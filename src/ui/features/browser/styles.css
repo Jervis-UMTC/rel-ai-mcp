@@ -24,6 +24,7 @@
   color: var(--ui-text-primary);
   font-size: 12px;
   font-weight: 700;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -138,7 +139,9 @@
 
 .browser-tab-title {
   display: block;
+  min-width: 0;
   overflow: hidden;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

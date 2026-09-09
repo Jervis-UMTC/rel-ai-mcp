@@ -17,6 +17,7 @@ const desktopContract = read('src/contracts/desktop.ts');
 const usageSource = read('src/ui/features/usage/index.js');
 const usageReact = read('src/ui/features/usage/react.js');
 const usageRender = read('src/ui/features/usage/render.js');
+const settingsReact = read('src/ui/features/settings/react.js');
 const reactMain = read('src/ui/react/main.js');
 const usageRange = read('src/ui/features/usage/range-model.js');
 const usageData = read('src/ui/features/usage/data.js');
@@ -45,7 +46,8 @@ assert.match(usageReact, /data-usage-privacy/, 'Analytics must disclose local re
 assert.match(usageSource, /External developer telemetry is off/, 'Analytics must make the default external-telemetry state explicit');
 assert.match(usageSource, /OTLP endpoint is configured, but the telemetry switch is disabled/, 'Analytics must distinguish a configured endpoint from an enabled exporter');
 assert.match(usageSource, /raw exception messages are not exported/, 'Analytics must disclose the external trace redaction boundary');
-assert.match(usageReact, /target: 'analytics', confirm: true/, 'Analytics must expose an explicit local-history clear action');
+assert.doesNotMatch(usageReact, /target: 'analytics', confirm: true/, 'Analytics page must not expose the destructive local-history clear action');
+assert.match(settingsReact, /target: 'analytics', confirm: true/, 'Settings must retain an explicit local-history clear action');
 assert.doesNotMatch(`${usageSource}\n${usageRender}`, /innerHTML|replaceChildren|insertAdjacentHTML/, 'Analytics model/view helpers must not retain the legacy DOM renderer');
 assert.match(usageReact, /'data-usage-status': true, role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true'/);
 assert.doesNotMatch(usageReact, /'data-usage-content'.*'aria-live'/);
@@ -67,6 +69,9 @@ assert.match(charts, /react-chartjs-2/, 'Analytics charts must use the canonical
 assert.match(charts, /chart\.js/, 'Analytics charts must use Chart.js instead of first-party SVG geometry');
 assert.doesNotMatch(charts, /\bBar(?:Element)?\b/, 'Temporal analytics must use line charts consistently');
 assert.match(charts, /spanGaps: false/, 'Missing rate and duration samples must remain visible as gaps');
+assert.match(charts, /trailingGapContinuation/, 'Trailing idle buckets must keep the timeline visually connected to the range end');
+assert.match(charts, /borderDash: \[4, 4\]/, 'Trailing idle continuation must be visually distinct from measured samples');
+assert.match(usageCss, /\.usage-metric-value \{[^}]*flex-wrap/, 'Analytics metric values and deltas must wrap instead of overlapping neighboring tiles');
 assert.ok(uiPackage.dependencies['chart.js'], 'Chart.js must be owned by the UI workspace');
 assert.ok(uiPackage.dependencies['react-chartjs-2'], 'The React Chart.js wrapper must be owned by the UI workspace');
 assert.doesNotMatch(`${usageReact}\n${homeReact}\n${workspacesReact}`, /h\(['"]svg['"]/, 'Analytics feature renderers must not retain first-party SVG chart markup');

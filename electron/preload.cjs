@@ -69,7 +69,7 @@ if (surface === 'dashboard') {
   });
 } else if (surface === 'pulse') {
   contextBridge.exposeInMainWorld('relaiPulse', {
-    openDashboard: routeHash => ipcRenderer.invoke('url:open-dashboard', routeHash),
+    openDashboard: () => ipcRenderer.invoke('url:open-dashboard'),
     setExpanded: expanded => ipcRenderer.invoke('pulse:set-expanded', expanded === true),
     onState: callback => subscribe('pulse:update', callback, 'Pulse-state')
   });

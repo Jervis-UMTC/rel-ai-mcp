@@ -9,6 +9,8 @@ assert.doesNotMatch(react, /activity-col-(?:tool|task|status|action)/, 'tool, ta
 assert.match(react, /activity-row-meta[\s\S]{0,500}StatusPill[\s\S]{0,300}activity-row-action[\s\S]{0,300}activity-row-task[\s\S]{0,300}activity-row-project/, 'Activity metadata must retain status, action, task, and project context');
 assert.match(css, /\.activity-table\s*\{[^}]*table-layout:\s*fixed/s, 'Activity table must use a stable fixed layout');
 assert.match(css, /\.activity-col-time\s*\{[^}]*width:\s*\d+px/s, 'Time must keep a bounded fixed-width column');
+assert.doesNotMatch(css, /^\.activity-time-column\s*\{[^}]*align-top/ms, 'the Time header must keep the table header vertical alignment');
+assert.match(css, /^\.activity-table tbody \.activity-time-column\s*\{[^}]*align-top/ms, 'only Activity body times should align to the top of multi-line rows');
 assert.match(css, /\.activity-col-message\s*\{[^}]*width:\s*auto/s, 'Activity content must consume the remaining width');
 assert.doesNotMatch(css, /\.activity-col-message\s*\{[^}]*width:\s*calc\(/s, 'Activity width must not depend on brittle calc chains');
 assert.match(css, /\.activity-message-copy\s*\{[^}]*min-width:/s, 'message text must retain an explicit readable minimum width');

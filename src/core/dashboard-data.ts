@@ -7,7 +7,7 @@ import * as productUx from '../productUx.js';
 import * as release from '../release.js';
 import { deriveConnectionState } from '../desktopUxContracts.js';
 import { getApplicationMetadata } from '../appMetadata.js';
-import { readTaskHistory } from '../taskHistoryStore.ts';
+import { readRecentTaskHistoryEvents, readTaskHistory } from '../taskHistoryStore.ts';
 import { buildSafeActivityProjection, sanitizeActivityEventRecord, sanitizeTaskRecordForProjection } from '../taskObservability.js';
 import { buildTaskSemanticProgress } from '../taskSemanticProgress.js';
 import { eventIdentityKey, eventTimestampMs, eventTimestampValue } from '../taskEvents.js';
@@ -62,10 +62,15 @@ function buildDashboardPayload(
   const connectionProjection = buildDashboardConnectionProjection(config, options);
   const limit = Math.max(Number(options.limit || 100), 200);
   const base = productUx.dashboardData(config, { limit });
-  const persistedTasks: TaskRecord[] = readTaskHistory(config, taskActivity, { limit: 500 });
+  const persistedTasks: TaskRecord[] = readTaskHistory(config, taskActivity, { limit: 500, summary: true });
+  const persistedActivityEvents = readRecentTaskHistoryEvents(config, limit * 2);
   const tasks = persistedTasks.map(summarizeDashboardTask);
   const liveActivityTasks = Array.isArray(taskActivity.tasks) ? taskActivity.tasks : [];
-  const auditTail = mergeDashboardActivity(base.auditTail || { entries: [] }, [...persistedTasks, ...liveActivityTasks], limit);
+  const auditTail = mergeDashboardActivity(
+    base.auditTail || { entries: [] },
+    [...persistedTasks, { events: persistedActivityEvents }, ...liveActivityTasks],
+    limit
+  );
   const workspaceStates = buildWorkspaceStates(config, tasks, taskActivity);
   const runtimeState = runtimeCompatibility(config, { activeTaskCount: taskActivity.activeTaskCount });
 
