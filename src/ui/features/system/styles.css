@@ -85,6 +85,17 @@
 .diagnostic-log-row.warning { box-shadow: inset 2px 0 var(--ui-status-warning-foreground); }
 .diagnostic-log-row.error { box-shadow: inset 2px 0 var(--ui-status-danger-foreground); }
 .diagnostic-log-row.debug { opacity: .82; }
+.diagnostic-doctor-card.warning { border-color: color-mix(in srgb, var(--ui-status-warning-foreground) 32%, var(--ui-border-default)); }
+.diagnostic-doctor-card .card-head p { @apply mt-1 text-[11px] leading-5; color: var(--ui-text-secondary); }
+.diagnostic-doctor-list { @apply grid gap-2; }
+.diagnostic-doctor-check { @apply grid min-w-0 gap-1 rounded-lg p-3 text-[11px]; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
+.diagnostic-doctor-check.pass { border-left: 3px solid var(--ui-status-success-foreground); }
+.diagnostic-doctor-check.fail { border-left: 3px solid var(--ui-status-danger-foreground); }
+.diagnostic-doctor-check-head { @apply flex min-w-0 items-center justify-between gap-3; }
+.diagnostic-doctor-check-head code { @apply min-w-0 break-words; }
+.diagnostic-doctor-check-head strong { @apply shrink-0 text-[10px] uppercase tracking-[.04em]; }
+.diagnostic-doctor-check p, .diagnostic-doctor-check ul { @apply m-0 leading-5; color: var(--ui-text-secondary); }
+.diagnostic-doctor-check ul { @apply pl-5; }
 
 .connection-controls-section { @apply mt-2 grid gap-3 border-t pt-4; border-color: var(--ui-border-default); }
 .copy-box { @apply min-h-24 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 text-[11px] leading-5; background: var(--ui-canvas); border: 1px solid var(--ui-border-default); color: var(--ui-text-primary); }

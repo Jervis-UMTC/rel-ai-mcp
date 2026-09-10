@@ -170,6 +170,58 @@ try {
   assert.equal(revokedRuntime.snapshot().errorCode, 'tunnel_authentication_failed');
   assert.equal(revokedStopped, true, 'a runtime key rejected after startup must stop the tunnel child instead of degrading forever');
 
+  let doctorSpawned = null;
+  const doctorRuntime = createSecureTunnelRuntime({
+    spawnImpl(executable, args, options) {
+      const doctorChild = new EventEmitter();
+      doctorChild.stdout = new EventEmitter();
+      doctorChild.stderr = new EventEmitter();
+      doctorChild.exitCode = null;
+      doctorSpawned = { executable, args, options, child: doctorChild };
+      queueMicrotask(() => {
+        doctorChild.stdout.emit('data', JSON.stringify({
+          result: 'fail',
+          failed_checks: ['mcp_server_reachable'],
+          checks: [
+            { id: 'config_source', status: 'PASS', summary: 'flags/environment only' },
+            {
+              id: 'mcp_server_reachable',
+              status: 'FAIL',
+              summary: 'Bearer local-secret api_key=sk-doctor-secret',
+              why: 'The local MCP target could not be reached.',
+              next: ['Start the local MCP service.']
+            }
+          ]
+        }));
+        doctorChild.exitCode = 2;
+        doctorChild.emit('exit', 2, null);
+      });
+      return doctorChild;
+    },
+    fetchImpl: fetchTunnel,
+    stopProcess: async child => { child.exitCode = 0; return { exited: true, forced: false }; },
+    resolveExecutable: () => process.execPath,
+    makeEnvironment: makeTunnelProcessEnvironment,
+    stateDir
+  });
+  const diagnosis = await doctorRuntime.doctor({
+    tunnelId: 'tunnel_example123456',
+    port: 3333,
+    localToken: 'local-secret',
+    apiKey: 'sk-doctor-secret'
+  });
+  assert.equal(doctorSpawned.args[0], 'doctor');
+  assert.ok(doctorSpawned.args.includes('--json'));
+  assert.ok(doctorSpawned.args.includes('--explain'));
+  assert.ok(doctorSpawned.args.includes('url=http://127.0.0.1:3333/mcp,channel=main'));
+  assert.equal(doctorSpawned.options.env.CONTROL_PLANE_API_KEY, 'sk-doctor-secret');
+  assert.equal(doctorSpawned.options.env.REL_AI_LOCAL_AUTH_HEADER, 'Bearer local-secret');
+  assert.equal(diagnosis.ok, false, 'failed doctor checks must remain a completed diagnostic result rather than a spawn failure');
+  assert.equal(diagnosis.exitCode, 2);
+  assert.deepEqual(diagnosis.failedChecks, ['mcp_server_reachable']);
+  assert.equal(diagnosis.checks.find(check => check.id === 'mcp_server_reachable')?.status, 'FAIL');
+  assert.doesNotMatch(JSON.stringify(diagnosis), /local-secret|sk-doctor-secret/, 'doctor results must redact tunnel credentials before reaching the renderer');
+
   const unavailableRuntime = createSecureTunnelRuntime({
     spawnImpl: fakeSpawn,
     fetchImpl: fetchTunnel,

@@ -35,10 +35,10 @@ function HomeView({ data = {} }) {
     activeCard ? h(TaskActivityCard, { model: activeCard }) : null,
     h(DesktopSetupChecklist, { setup }),
     h(ConnectionHero, { state: state.bridgeState }),
-    setup.firstRequestObserved ? h(HomeAnalytics, { taskRevision: Number(data.live?.revisions?.task || 0), workspace }) : null,
+    h(HomeAnalytics, { taskRevision: Number(data.live?.revisions?.task || 0), workspace }),
     h('div', { className: 'layout-grid' },
       h(WorkspaceSummaryCard, { workspaces: state.workspaces, findings: state.findings }),
-      setup.firstRequestObserved ? h(RecentTasksCard, { tasks: state.tasks }) : null
+      h(RecentTasksCard, { tasks: state.tasks })
     )
   );
 }

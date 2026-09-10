@@ -55,6 +55,24 @@ try {
   assert.equal(navigated.url, 'https://example.test/next');
   assert.equal(Object.hasOwn(navigated, 'loading'), false);
 
+  let websitePage = null;
+  let websitePageActive = null;
+  driver.onPageCreated?.((created, active) => {
+    websitePage = created;
+    websitePageActive = active;
+  });
+  dispatchBrowserNativeEvent({
+    resource: 'browser',
+    type: 'page_opened',
+    nativeSessionId: 'embedded_browser_abcdefghijklmnop',
+    nativePageId: 'embedded_page_websitecreated1234',
+    active: false
+  });
+  assert.ok(websitePage, 'website-created native pages must become service-side browser page proxies');
+  assert.equal(websitePageActive, false);
+  await websitePage.describe(controller.signal);
+  assert.ok(calls.some(call => call.action === 'describe' && call.nativePageId === 'embedded_page_websitecreated1234'), 'website-created page proxies must target the originating native page');
+
   let crashed = 0;
   page.onCrashed(() => { crashed += 1; });
   dispatchBrowserNativeEvent({

@@ -70,6 +70,7 @@ registerIpcHandlers({
   installUpdate: () => ({ ok: true }),
   exportDiagnosticState: value => ({ ok: true, value }),
   openDiagnosticsFolder: () => ({ ok: true }),
+  runTunnelDoctor: () => ({ ok: true, result: 'pass' }),
   getTaskCodeWorkspace: value => ({ ok: true, value }),
   readTaskCodeDiff: value => ({ ok: true, value }),
   listCodeEditors: () => ({ ok: true, editors: [{ id: 'system', label: 'File Explorer' }] }),

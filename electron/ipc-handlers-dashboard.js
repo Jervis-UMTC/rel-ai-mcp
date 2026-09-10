@@ -45,9 +45,10 @@ function registerUpdaterIpc({ ipc, channels, getUpdateStatus, checkForUpdates, d
   ipc.handle(channels.DESKTOP_UPDATE_INSTALL, 'Update install', () => installUpdate());
 }
 
-function registerDiagnosticsIpc({ ipc, channels, exportDiagnosticState, openDiagnosticsFolder }) {
+function registerDiagnosticsIpc({ ipc, channels, exportDiagnosticState, openDiagnosticsFolder, runTunnelDoctor }) {
   ipc.handle(channels.DESKTOP_DIAGNOSTICS_EXPORT, 'Diagnostic export', (_event, report) => exportDiagnosticState(report));
   ipc.handle(channels.DESKTOP_DIAGNOSTICS_OPEN_FOLDER, 'Diagnostics folder', () => openDiagnosticsFolder());
+  ipc.handle(channels.DESKTOP_DIAGNOSTICS_TUNNEL_DOCTOR, 'Secure MCP Tunnel diagnostics', () => runTunnelDoctor());
 }
 
 function registerLocalDataIpc({ ipc, channels, getLocalDataUsage, clearTemporaryLocalData, openLocalDataFolder }) {
@@ -62,7 +63,7 @@ function normalizeBrowserBounds(bounds) {
   const values = Object.fromEntries(['x', 'y', 'width', 'height'].map(key => [key, Number(bounds[key])]));
   if (!Object.values(values).every(Number.isFinite)) throw new Error('Embedded browser bounds require finite x, y, width, and height values.');
   if (values.width < 1 || values.height < 1 || values.width > 16384 || values.height > 16384 || values.x < 0 || values.y < 0 || values.x > 16384 || values.y > 16384) throw new Error('Embedded browser bounds are outside the supported desktop range.');
-  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, Math.round(value)]));
+  return { visible: true, ...Object.fromEntries(Object.entries(values).map(([key, value]) => [key, Math.round(value)])) };
 }
 
 function normalizeBrowserControl(owner) {

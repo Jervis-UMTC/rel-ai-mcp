@@ -11,7 +11,7 @@ app.commandLine.appendSwitch('disable-gpu');
 app.whenReady().then(async () => {
   const server = http.createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(`<!doctype html><html><head><title>Embedded fixture</title></head><body><main><h1>Embedded browser fixture</h1><label for="name">Name</label><input id="name" placeholder="Your name"><button id="save" type="button">Save</button></main></body></html>`);
+    response.end(`<!doctype html><html><head><title>Embedded fixture</title></head><body><main><h1>Embedded browser fixture</h1><label for="name">Name</label><input id="name" placeholder="Your name"><button id="save" type="button">Save</button><a href="/popup" target="_blank">Open child tab</a></main></body></html>`);
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -57,6 +57,19 @@ app.whenReady().then(async () => {
       url: targetUrl,
       timeoutMs: 10_000
     });
+    await host.run({
+      action: 'interact',
+      nativeSessionId: started.nativeSessionId,
+      nativePageId: opened.nativePageId,
+      interaction: 'click',
+      target: { by: 'text', value: 'Open child tab', exact: true },
+      timeoutMs: 10_000
+    });
+    const websiteTabState = await waitForState(() => {
+      const state = host.getState();
+      return state.tabs.length === 3 ? state : null;
+    });
+    const websitePageOpened = events.find(event => event.type === 'page_opened');
     const snapshot = await host.run({
       action: 'snapshot',
       nativeSessionId: started.nativeSessionId,
@@ -102,6 +115,8 @@ app.whenReady().then(async () => {
       started,
       positioned,
       tabState,
+      websiteTabState,
+      websitePageOpened,
       afterTabClose,
       navigated,
       snapshot: snapshot.snapshot,
@@ -129,6 +144,17 @@ app.whenReady().then(async () => {
     await new Promise(resolve => server.close(resolve));
     app.exit(process.exitCode || 0);
   }
+
+async function waitForState(read, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = read();
+    if (value) return value;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error('Timed out waiting for embedded browser state.');
+}
+
 }).catch(error => {
   fs.writeFileSync(outputPath, JSON.stringify({ error: error?.stack || String(error) }, null, 2));
   app.exit(1);

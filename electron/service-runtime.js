@@ -243,6 +243,21 @@ function createDesktopServiceRuntime(deps) {
     return getCurrentStatus();
   }
 
+  async function runTunnelDoctor() {
+    if (!isListening() || !activePort || !activeToken) {
+      throw new Error('Start or retry the connection before running Secure MCP Tunnel diagnostics.');
+    }
+    const prepared = prepareConnectionConfig({ createToken: false });
+    if (!prepared.ok) throw prepared.error;
+    const { guiConfig, apiKey } = prepared;
+    return secureTunnelRuntime.doctor({
+      tunnelId: guiConfig.tunnelId,
+      port: activePort,
+      localToken: activeToken,
+      apiKey
+    });
+  }
+
   function prepareConnectionConfig({ createToken }) {
     try {
       configModule.ensureConfig();
@@ -337,7 +352,7 @@ function createDesktopServiceRuntime(deps) {
     };
   }
 
-  return { startServer, restartConnection, stopServer, isListening, waitUntilListening, buildDashboardConnection };
+  return { startServer, restartConnection, stopServer, isListening, waitUntilListening, buildDashboardConnection, runTunnelDoctor };
 }
 
 async function waitForLocalApplicationReady(fetchImpl, port, token, timeoutMs = LOCAL_READY_TIMEOUT_MS) {

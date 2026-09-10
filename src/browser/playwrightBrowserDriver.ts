@@ -49,6 +49,7 @@ interface LocalBrowserDriver {
   createPage(signal?: AbortSignal): Promise<BrowserPageDriver>;
   close(): Promise<void>;
   onDisconnected(listener: () => void): void;
+  onPageCreated?(listener: (page: BrowserPageDriver, active: boolean) => void): void;
 }
 
 async function launchLocalBrowserDriver(options: LaunchBrowserDriverOptions): Promise<LocalBrowserDriver> {

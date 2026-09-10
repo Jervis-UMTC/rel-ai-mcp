@@ -25,6 +25,7 @@ function DiagnosticsView({ data = {} }) {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState('');
+  const [tunnelDoctor, setTunnelDoctor] = useState(null);
   const [liveAnnouncement, setLiveAnnouncement] = useState('');
   const reportRef = useRef(report);
   const liveRef = useRef(live);
@@ -150,6 +151,18 @@ function DiagnosticsView({ data = {} }) {
     } catch (error) { toast(messageOf(error), { variant: 'error' }); }
     finally { setBusy(''); }
   };
+  const runTunnelDoctor = async () => {
+    if (typeof window.relaiDesktop?.runTunnelDoctor !== 'function') return;
+    setBusy('doctor');
+    try {
+      const result = await window.relaiDesktop.runTunnelDoctor();
+      setTunnelDoctor(result);
+      toast(result?.ok ? 'Secure MCP Tunnel diagnostics passed.' : 'Secure MCP Tunnel diagnostics found a problem.', { variant: result?.ok ? 'success' : 'warn' });
+    } catch (error) {
+      setTunnelDoctor({ ok: false, error: messageOf(error), checks: [] });
+      toast(messageOf(error), { variant: 'error' });
+    } finally { setBusy(''); }
+  };
 
   return h('div', { className: 'settings-content system-content' },
     h('div', { className: 'diagnostic-page', 'data-diagnostics-react': '' },
@@ -158,6 +171,7 @@ function DiagnosticsView({ data = {} }) {
         h('div', { className: 'section-head-actions diagnostic-page-actions' },
           h('button', { className: 'secondary', type: 'button', disabled: !report?.reportText || busy === 'copy', onClick: () => void copyReport() }, busy === 'copy' ? 'Copying report…' : 'Copy report'),
           h('button', { className: 'secondary', type: 'button', disabled: !report || busy === 'export', onClick: () => void exportReport() }, busy === 'export' ? 'Exporting…' : 'Export support information'),
+          h('button', { className: 'secondary', type: 'button', disabled: typeof window.relaiDesktop?.runTunnelDoctor !== 'function' || busy === 'doctor', onClick: () => void runTunnelDoctor() }, typeof window.relaiDesktop?.runTunnelDoctor === 'function' ? (busy === 'doctor' ? 'Running tunnel diagnostics…' : 'Run tunnel diagnostics') : 'Tunnel diagnostics — desktop app only'),
           h('button', { className: 'secondary', type: 'button', disabled: typeof window.relaiDesktop?.openDiagnosticsFolder !== 'function' || busy === 'folder', onClick: () => void openFolder() }, typeof window.relaiDesktop?.openDiagnosticsFolder === 'function' ? (busy === 'folder' ? 'Opening folder…' : 'Support folder') : 'Support folder — desktop app only')
         )
       ),
@@ -169,6 +183,7 @@ function DiagnosticsView({ data = {} }) {
       loadError ? h(DiagnosticUnavailable, { error: loadError, onRetry: () => void load() }) : null,
       report ? h('div', { id: 'diagnosticSummary', className: 'diagnostic-summary' },
         h(DiagnosticMetrics, { findings: view.findings }),
+        tunnelDoctor ? h(TunnelDoctorResult, { result: tunnelDoctor }) : null,
         h(DiagnosticFindings, { findings: view.findings, total: view.totalFindings, onReload: load }),
         h(ClientCapability, { data }),
         h(DiagnosticLogs, { report, view, registerLog: (key, element) => { if (element) logRefs.current.set(key, element); else logRefs.current.delete(key); } })
@@ -303,6 +318,39 @@ function DiagnosticMetrics({ findings }) {
   );
 }
 function Metric({ label, count, severity }) { return h('div', { className: `diagnostic-metric ${severity}` }, h('span', null, label), h('strong', null, count)); }
+
+function TunnelDoctorResult({ result = {} }) {
+  const checks = Array.isArray(result.checks) ? result.checks : [];
+  const failed = result.ok !== true;
+  return h('section', { className: `card diagnostic-doctor-card${failed ? ' warning' : ''}`, 'data-diagnostic-region': 'tunnel-doctor', role: 'status' },
+    h('div', { className: 'card-head' },
+      h('div', null,
+        h('h3', null, 'Secure MCP Tunnel diagnostics'),
+        h('p', null, result.error || (result.ok ? 'All tunnel-client checks passed.' : 'One or more tunnel-client checks need attention.'))
+      ),
+      h('span', { className: `status-pill ${result.ok ? 'good' : 'warn'}` }, result.ok ? 'Passed' : 'Needs attention')
+    ),
+    h('div', { className: 'card-body diagnostic-doctor-list' },
+      checks.length ? checks.map((check, index) => {
+        const status = String(check?.status || 'UNKNOWN').toUpperCase();
+        const next = Array.isArray(check?.next) ? check.next.filter(Boolean) : [];
+        return h('article', { className: `diagnostic-doctor-check ${status === 'PASS' ? 'pass' : status === 'FAIL' ? 'fail' : ''}`, key: check?.id || index },
+          h('div', { className: 'diagnostic-doctor-check-head' }, h('code', null, check?.id || `check-${index + 1}`), h('strong', null, status)),
+          check?.summary ? h('p', null, check.summary) : null,
+          check?.why ? h('p', null, h('strong', null, 'Why: '), check.why) : null,
+          next.length ? h('ul', null, next.map((item, itemIndex) => h('li', { key: itemIndex }, item))) : null
+        );
+      }) : h('div', { className: 'diagnostic-log-empty' }, result.error || 'No individual tunnel checks were returned.'),
+      result.truncated ? h('small', null, 'Technical output was truncated to keep this diagnostic bounded.') : null,
+      result.rawOutput ? h('div', { className: 'diagnostic-copy diagnostic-doctor-raw' },
+        h('details', null,
+          h('summary', null, 'Technical output'),
+          h('pre', null, result.rawOutput)
+        )
+      ) : null
+    )
+  );
+}
 
 function DiagnosticFindings({ findings, total, onReload }) {
   if (!findings.length) return total === 0

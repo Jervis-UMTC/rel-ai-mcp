@@ -62,7 +62,7 @@ app.whenReady().then(async () => {
         fixedChoicesVisible
       };
     })()`);
-    await waitFor(win, `document.querySelectorAll('#__activity-filter-bar .filter-chip').length === 2 && !document.querySelector('.filter-drawer')`);
+    await waitFor(win, `document.querySelectorAll('#__activity-filter-bar .filter-chip').length === 2 && !document.querySelector('.filter-drawer') && /events shown/.test(document.querySelector('#__activity-filter-bar .filter-summary')?.textContent || '')`);
     const activityApplied = await win.webContents.executeJavaScript(`(() => {
       const chips = [...document.querySelectorAll('#__activity-filter-bar .filter-chip')];
       const freeze = document.getElementById('__activity-freeze');

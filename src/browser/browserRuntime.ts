@@ -181,6 +181,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
       sessions.set(sessionId, record);
       if (profileKey) activeProfiles.set(profileKey, sessionId);
       driver.onDisconnected(() => removeSession(record!));
+      driver.onPageCreated?.((page, active) => registerTab(record!, page, active));
 
       const tab = await createTab(record, options.signal);
       const initial = args.url
@@ -352,13 +353,17 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
   async function createTab(record: BrowserSessionRecord, signal?: AbortSignal): Promise<BrowserTabRecord> {
     throwIfAborted(signal);
     const page = await withAbortResource(record.driver.createPage(signal), signal, page => page.close());
+    return registerTab(record, page, true);
+  }
+
+  function registerTab(record: BrowserSessionRecord, page: BrowserPageDriver, active: boolean): BrowserTabRecord {
     const tab: BrowserTabRecord = {
       tabId: `tab_${crypto.randomBytes(24).toString('base64url')}`,
       page,
       createdAt: new Date().toISOString()
     };
     record.tabs.set(tab.tabId, tab);
-    record.activeTabId = tab.tabId;
+    if (active || !record.activeTabId) record.activeTabId = tab.tabId;
     const remove = () => {
       record.tabs.delete(tab.tabId);
       if (record.activeTabId === tab.tabId) record.activeTabId = firstTabId(record);

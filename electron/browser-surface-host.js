@@ -102,19 +102,15 @@ function createBrowserSurfaceHost(options = {}) {
     throwIfAborted(options.signal);
     const record = requireSession(payload.nativeSessionId);
     assertAiControl(record, 'open_page');
+    const page = createPage(record, { active: true });
+    return { ok: true, nativeSessionId: record.nativeSessionId, nativePageId: page.nativePageId, ...describePage(record, page) };
+  }
+
+  function createPage(record, options = {}) {
     const nativePageId = `embedded_page_${crypto.randomBytes(18).toString('base64url')}`;
-    const view = new WebContentsView({
-      webPreferences: {
-        session: record.electronSession,
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: true,
-        webSecurity: true,
-        allowRunningInsecureContent: false,
-        spellcheck: false,
-        navigateOnDragDrop: false
-      }
-    });
+    const view = options.webContents
+      ? new WebContentsView({ webContents: options.webContents })
+      : new WebContentsView({ webPreferences: browserWebPreferences(record, options.webPreferences) });
     const initialBounds = { x: 0, y: 0, width: record.viewport.width, height: record.viewport.height };
     view.setBounds(initialBounds);
     const page = {
@@ -128,12 +124,28 @@ function createBrowserSurfaceHost(options = {}) {
       createdAt: new Date().toISOString()
     };
     record.pages.set(nativePageId, page);
-    record.activePageId = nativePageId;
-    activeSessionId = record.nativeSessionId;
+    if (options.active !== false) {
+      record.activePageId = nativePageId;
+      activeSessionId = record.nativeSessionId;
+    }
     configurePage(record, page);
     attachActiveView();
     publishState();
-    return { ok: true, nativeSessionId: record.nativeSessionId, nativePageId, ...describePage(record, page) };
+    return page;
+  }
+
+  function browserWebPreferences(record, requested = {}) {
+    return {
+      ...(requested && typeof requested === 'object' && !Array.isArray(requested) ? requested : {}),
+      session: record.electronSession,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      spellcheck: false,
+      navigateOnDragDrop: false
+    };
   }
 
   async function withPage(payload, action, operation, options = {}) {
@@ -459,7 +471,36 @@ function createBrowserSurfaceHost(options = {}) {
 
   function configurePage(record, page) {
     const wc = page.webContents;
-    wc.setWindowOpenHandler?.(() => ({ action: 'deny' }));
+    wc.setWindowOpenHandler?.(details => {
+      const target = String(details?.url || '');
+      if (!supportedPageUrl(target, true)) return { action: 'deny' };
+      const background = details?.disposition === 'background-tab';
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: { webPreferences: browserWebPreferences(record) },
+        createWindow: options => {
+          const child = createPage(record, {
+            active: !background,
+            webContents: options?.webContents,
+            webPreferences: options?.webPreferences
+          });
+          onEvent({
+            resource: 'browser',
+            type: 'page_opened',
+            nativeSessionId: record.nativeSessionId,
+            nativePageId: child.nativePageId,
+            active: !background
+          });
+          if (!options?.webContents && target !== 'about:blank') {
+            void child.webContents.loadURL(target).catch(error => {
+              onError(error);
+              void destroyPage(record, child, { emit: true });
+            });
+          }
+          return child.webContents;
+        }
+      };
+    });
     const guardNavigation = (event, target) => {
       if (supportedPageUrl(target, true)) return;
       event.preventDefault();

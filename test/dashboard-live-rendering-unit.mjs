@@ -151,6 +151,8 @@ assert.match(workspaceModals, /markUnsaved\(formRef\.current, dirty\)/, 'Project
 assert.match(workspaceModals, /Forget stored activity for this project/, 'Project deletion must expose an explicit stored-activity cleanup choice');
 assert.match(workspaceModals, /forgetLocalData/, 'Project deletion must pass the cleanup choice to the workspace API');
 assert.doesNotMatch(diagnostics, /DiagnosticMaintenance|data-diagnostic-region': 'maintenance'/, 'Troubleshooting must not duplicate local-data cleanup controls owned by App settings');
+assert.match(diagnostics, /runTunnelDoctor/, 'Troubleshooting must expose the bundled Secure MCP Tunnel doctor through the desktop bridge');
+assert.match(diagnostics, /data-diagnostic-region': 'tunnel-doctor'/, 'Troubleshooting must render structured tunnel doctor results');
 assert.match(diagnostics, /role: 'log'/, 'Diagnostic log regions must retain explicit log semantics without making the whole stream aria-live');
 assert.doesNotMatch(diagnostics, /aria-live[^\n]*diagnostic-log-list|window\.prompt/, 'Diagnostics must not turn the full live log into an aria-live region or regress to a native prompt');
 {

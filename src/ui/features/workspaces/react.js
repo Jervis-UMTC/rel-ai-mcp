@@ -57,7 +57,7 @@ function WorkspacesView({ data = {} }) {
   const [recentRevision, setRecentRevision] = useState(0);
   const recent = useMemo(() => recentWorkspaceAliases(allWorkspaces), [allWorkspaces, recentRevision]);
   const analyticsAliases = useMemo(() => views.map(view => view.alias), [views]);
-  const analytics = useWorkspaceAnalytics(analyticsAliases, Number(data.live?.revisions?.task || 0));
+  const analyticsState = useWorkspaceAnalytics(analyticsAliases, Number(data.live?.revisions?.task || 0));
 
   useLayoutEffect(() => {
     const alias = routeParams.get('workspace') || '';
@@ -131,7 +131,8 @@ function WorkspacesView({ data = {} }) {
       h('div', { className: 'workspace-grid workspace-grid-detailed' },
         views.map(view => h(WorkspaceCard, {
           key: view.alias,
-          analytics: analytics.get(view.alias) || null,
+          analytics: analyticsState.scopes.get(view.alias) || null,
+          analyticsStatus: analyticsState.status,
           view,
           workspace: workspaceByAlias.get(view.alias),
           onEdit: openForm,
@@ -161,7 +162,7 @@ function WorkspacesView({ data = {} }) {
   );
 }
 
-const WorkspaceCard = memo(function WorkspaceCard({ analytics, view, workspace, onEdit, onRepair }) {
+const WorkspaceCard = memo(function WorkspaceCard({ analytics, analyticsStatus, view, workspace, onEdit, onRepair }) {
   const [folderBusy, setFolderBusy] = useState(false);
   const repository = repositorySummary(view.operational);
   const notices = [];
@@ -190,7 +191,13 @@ const WorkspaceCard = memo(function WorkspaceCard({ analytics, view, workspace, 
     ) : null,
     h(WorkspaceReadiness, { available: view.available, repository }),
     notices.length ? h('div', { className: 'workspace-notice' }, notices.map(item => h('span', { key: item }, item))) : null,
-    analytics ? h(WorkspaceAnalytics, { scope: analytics }) : null,
+    analytics
+      ? h(WorkspaceAnalytics, { scope: analytics })
+      : analyticsStatus === 'loading'
+        ? h(WorkspaceAnalyticsState, { label: 'Loading analytics…', loading: true })
+        : analyticsStatus === 'error'
+          ? h(WorkspaceAnalyticsState, { label: 'Analytics unavailable' })
+          : null,
     h('footer', { className: 'workspace-actions workspace-primary-actions' },
       document.documentElement.dataset.surface === 'desktop' ? h('button', {
         className: 'secondary', type: 'button', disabled: folderBusy, onClick: event => { void openFolder(event); }
@@ -290,27 +297,43 @@ function WorkspaceAnalytics({ scope }) {
 
 function MiniMetric({ label, value }) { return h('div', null, h('span', null, label), h('strong', null, value)); }
 
+function WorkspaceAnalyticsState({ label, loading = false }) {
+  return h('section', {
+    className: 'workspace-analytics-mini',
+    role: 'status',
+    'aria-live': 'polite',
+    'aria-busy': loading ? 'true' : undefined
+  },
+  h('div', { className: 'workspace-analytics-head' }, h('span', null, label)),
+  loading ? h('span', { className: 'workspace-analytics-sparkline-empty', 'aria-hidden': 'true' }) : null);
+}
+
 function useWorkspaceAnalytics(aliases, taskRevision = 0) {
   const key = aliases.join('\u0000');
-  const [scopes, setScopes] = useState(() => new Map());
+  const [state, setState] = useState(() => ({ scopes: new Map(), status: 'loading' }));
   useEffect(() => {
     const desktop = globalThis.window?.relaiDesktop;
     if (!aliases.length || !desktop?.getLocalUsage) {
-      setScopes(new Map());
+      setState({ scopes: new Map(), status: 'unavailable' });
       return undefined;
     }
     let active = true;
-    const timer = window.setTimeout(() => {
-      void loadAnalyticsModels({ desktop, range: '24h', now: new Date() })
-        .then(({ bounds, models }) => {
-          if (!active) return;
-          setScopes(new Map(aliases.map(alias => [alias, analyticsRangeScope(models, bounds, { workspace: alias })])));
-        })
-        .catch(() => { if (active) setScopes(new Map()); });
-    }, 180);
-    return () => { active = false; window.clearTimeout(timer); };
+    setState(current => ({ ...current, status: 'loading' }));
+    void loadAnalyticsModels({ desktop, range: '24h', now: new Date() })
+      .then(({ bounds, models }) => {
+        if (!active) return;
+        setState({
+          scopes: new Map(aliases.map(alias => [alias, analyticsRangeScope(models, bounds, { workspace: alias })])),
+          status: 'ready'
+        });
+      })
+      .catch(() => {
+        if (!active) return;
+        setState(current => ({ ...current, status: 'error' }));
+      });
+    return () => { active = false; };
   }, [key, taskRevision]);
-  return scopes;
+  return state;
 }
 
 function CanonicalIcon({ name }) {

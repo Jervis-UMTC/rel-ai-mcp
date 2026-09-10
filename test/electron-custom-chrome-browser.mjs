@@ -55,6 +55,7 @@ try {
     if (measurement.route === '#usage') {
       assert.equal(measurement.localAnalyticsLoaded, true, 'Usage must render from the local desktop bridge.');
       assert.equal(measurement.inlineUsageError, false, 'Local Usage must not show an unavailable error in the browser probe.');
+      assert.ok(measurement.usageMetricOverflow <= 0.5, `Analytics sparklines must stay inside their metric tiles: ${JSON.stringify(measurement)}`);
     }
     if (measurement.route === '#tools') {
       assert.equal(measurement.toolCategories.relai_exec, 'Execute');

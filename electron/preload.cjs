@@ -48,6 +48,7 @@ if (surface === 'dashboard') {
     setNotificationPreferences: patch => ipcRenderer.invoke('desktop:notification-preferences:set', patch),
     exportDiagnosticState: report => ipcRenderer.invoke('desktop:diagnostics:export', report),
     openDiagnosticsFolder: () => ipcRenderer.invoke('desktop:diagnostics:open-folder'),
+    runTunnelDoctor: () => ipcRenderer.invoke('desktop:diagnostics:tunnel-doctor'),
     getLocalDataUsage: () => ipcRenderer.invoke('desktop:local-data:get'),
     clearTemporaryLocalData: () => ipcRenderer.invoke('desktop:local-data:clear-temporary'),
     openLocalDataFolder: () => ipcRenderer.invoke('desktop:local-data:open-folder'),

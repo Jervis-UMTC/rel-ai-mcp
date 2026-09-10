@@ -32,6 +32,7 @@ type NativePageListeners = {
 const DOWNLOAD_TEMP_ROOT = path.resolve(os.tmpdir(), 'relai-browser-downloads');
 let nativeBrowserBridge: NativeBrowserBridge | null = null;
 const sessionDisconnectListeners = new Map<string, () => void>();
+const sessionPageCreatedListeners = new Map<string, (page: BrowserPageDriver, active: boolean) => void>();
 const pageListeners = new Map<string, NativePageListeners>();
 
 function configureBrowserNativeBridge(bridge: NativeBrowserBridge | null): void {
@@ -48,10 +49,17 @@ function dispatchBrowserNativeEvent(event: NativeBrowserEvent = {}): void {
   if (type === 'session_disconnected' && nativeSessionId) {
     const listener = sessionDisconnectListeners.get(nativeSessionId);
     sessionDisconnectListeners.delete(nativeSessionId);
+    sessionPageCreatedListeners.delete(nativeSessionId);
     for (const [pageId, entry] of pageListeners) {
       if (entry.nativeSessionId === nativeSessionId) pageListeners.delete(pageId);
     }
     listener?.();
+    return;
+  }
+
+  if (type === 'page_opened' && nativeSessionId && nativePageId) {
+    const listener = sessionPageCreatedListeners.get(nativeSessionId);
+    if (listener && nativeBrowserBridge) listener(createNativePageProxy(nativeBrowserBridge, nativeSessionId, nativePageId), event.active !== false);
     return;
   }
 
@@ -87,18 +95,24 @@ async function launchBrowserDriver(options: LaunchBrowserDriverOptions): Promise
     createPage: (signal?: AbortSignal) => createNativePage(bridge, nativeSessionId, signal),
     close: async () => {
       sessionDisconnectListeners.delete(nativeSessionId);
+      sessionPageCreatedListeners.delete(nativeSessionId);
       for (const [pageId, entry] of pageListeners) {
         if (entry.nativeSessionId === nativeSessionId) pageListeners.delete(pageId);
       }
       await bridge({ action: 'close_session', nativeSessionId });
     },
-    onDisconnected: (listener: () => void) => { onDisconnected = listener; }
+    onDisconnected: (listener: () => void) => { onDisconnected = listener; },
+    onPageCreated: (listener: (page: BrowserPageDriver, active: boolean) => void) => { sessionPageCreatedListeners.set(nativeSessionId, listener); }
   });
 }
 
 async function createNativePage(bridge: NativeBrowserBridge, nativeSessionId: string, signal?: AbortSignal): Promise<BrowserPageDriver> {
   const opened = objectValue(await bridge({ action: 'open_page', nativeSessionId }, signal ? { signal } : undefined));
   const nativePageId = requiredId(opened.nativePageId, 'Embedded browser page');
+  return createNativePageProxy(bridge, nativeSessionId, nativePageId);
+}
+
+function createNativePageProxy(bridge: NativeBrowserBridge, nativeSessionId: string, nativePageId: string): BrowserPageDriver {
   const listeners: NativePageListeners = { nativeSessionId, onClosed: null, onCrashed: null };
   pageListeners.set(nativePageId, listeners);
 

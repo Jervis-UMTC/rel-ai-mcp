@@ -377,6 +377,7 @@ async function createDesktopHost(options = {}) {
     updateNotificationPreferences: desktopNotifications.updatePreferences,
     exportDiagnosticState: diagnosticFiles.exportReport,
     openDiagnosticsFolder: diagnosticFiles.openFolder,
+    runTunnelDoctor: () => serviceRuntime.runTunnelDoctor(),
     getTaskCodeWorkspace: serviceProcessClient.getTaskCodeWorkspace,
     readTaskCodeDiff: serviceProcessClient.readTaskCodeDiff,
     listCodeEditors: () => ({ ok: true, editors: taskCodeIde.listEditors() }),

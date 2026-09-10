@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 
 import { createBrowserSurfaceHost } from '../electron/browser-surface-host.js';
+import { registerBrowserSurfaceIpc } from '../electron/ipc-handlers-dashboard.js';
 
 let nextWebContentsId = 100;
 
@@ -58,9 +59,9 @@ class FakeWebContents extends EventEmitter {
 }
 
 class FakeWebContentsView {
-  constructor(options) {
+  constructor(options = {}) {
     this.options = options;
-    this.webContents = new FakeWebContents();
+    this.webContents = options.webContents || new FakeWebContents();
     this.bounds = null;
   }
   setBounds(bounds) { this.bounds = bounds; }
@@ -104,6 +105,34 @@ function createHarness({ failOpen = false } = {}) {
     onEvent: event => events.push(event)
   });
   return { host, sessions, views, webContents, childViews, routes, sent, events };
+}
+
+{
+  const handlers = new Map();
+  const ipc = { handle: (channel, _label, handler) => handlers.set(channel, handler) };
+  const channels = {
+    DESKTOP_BROWSER_GET_STATE: 'get-state',
+    DESKTOP_BROWSER_SET_BOUNDS: 'set-bounds',
+    DESKTOP_BROWSER_SET_CONTROL: 'set-control',
+    DESKTOP_BROWSER_SELECT_SESSION: 'select-session',
+    DESKTOP_BROWSER_SELECT_TAB: 'select-tab',
+    DESKTOP_BROWSER_CLOSE_TAB: 'close-tab',
+    DESKTOP_BROWSER_STOP: 'stop'
+  };
+  let receivedBounds = null;
+  registerBrowserSurfaceIpc({
+    ipc,
+    channels,
+    getBrowserState: () => ({}),
+    setBrowserSurfaceBounds: bounds => { receivedBounds = bounds; return bounds; },
+    setBrowserControl: () => ({}),
+    selectBrowserSession: () => ({}),
+    selectBrowserTab: () => ({}),
+    closeBrowserTab: () => ({}),
+    stopActiveBrowserSession: () => ({})
+  });
+  handlers.get('set-bounds')({}, { visible: true, x: 12.4, y: 34.6, width: 900.2, height: 600.8 });
+  assert.deepEqual(receivedBounds, { visible: true, x: 12, y: 35, width: 900, height: 601 }, 'visible browser bounds must stay visible across the dashboard IPC boundary');
 }
 
 {
@@ -179,6 +208,42 @@ function createHarness({ failOpen = false } = {}) {
   assert.equal(sessions[0].cacheCleared, 1, 'ephemeral browser cache must be cleared on session close');
   assert.equal(sessions[1].storageCleared, 1, 'concurrent ephemeral browser storage must also be cleared');
   assert.equal(sessions[1].cacheCleared, 1, 'concurrent ephemeral browser cache must also be cleared');
+}
+
+{
+  const { host, views, webContents, events } = createHarness();
+  const started = await host.run({ action: 'start' });
+  const opened = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
+  const handler = webContents[0].windowOpenHandler;
+  assert.equal(typeof handler, 'function');
+  assert.deepEqual(handler({ url: 'mailto:test@example.com', disposition: 'foreground-tab' }), { action: 'deny' }, 'website-created tabs must reject unsupported URL schemes');
+
+  const foreground = handler({ url: 'https://foreground.example.test/', disposition: 'foreground-tab' });
+  assert.equal(foreground.action, 'allow');
+  assert.equal(foreground.overrideBrowserWindowOptions.webPreferences.nodeIntegration, false);
+  assert.equal(foreground.overrideBrowserWindowOptions.webPreferences.contextIsolation, true);
+  assert.equal(foreground.overrideBrowserWindowOptions.webPreferences.sandbox, true);
+  const childContents = new FakeWebContents();
+  const returnedContents = foreground.createWindow({ webContents: childContents, webPreferences: { nodeIntegration: true, sandbox: false } });
+  assert.equal(returnedContents, childContents, 'foreground website tabs must retain Electron child/opener semantics');
+  assert.equal(host.getState().tabs.length, 2);
+  assert.equal(host.getState().nativePageId, events.at(-1).nativePageId, 'foreground website tabs must become the visible active tab');
+  assert.equal(events.at(-1).type, 'page_opened');
+  assert.equal(events.at(-1).active, true);
+
+  host.selectTab(opened.nativePageId);
+  const background = handler({ url: 'https://background-tab.example.test/', disposition: 'background-tab' });
+  const backgroundContents = background.createWindow({ webPreferences: { nodeIntegration: true, contextIsolation: false, sandbox: false } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(host.getState().tabs.length, 3);
+  assert.equal(host.getState().nativePageId, opened.nativePageId, 'background website tabs must not steal the active tab');
+  assert.equal(backgroundContents.getURL(), 'https://background-tab.example.test/');
+  assert.equal(views.at(-1).options.webPreferences.nodeIntegration, false, 'website-created tabs must enforce the embedded browser security policy');
+  assert.equal(views.at(-1).options.webPreferences.contextIsolation, true);
+  assert.equal(views.at(-1).options.webPreferences.sandbox, true);
+  assert.equal(events.at(-1).type, 'page_opened');
+  assert.equal(events.at(-1).active, false);
+  await host.closeAll();
 }
 
 {

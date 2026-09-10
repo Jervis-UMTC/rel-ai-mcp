@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Icon } from '../../components/icons.js';
 
 const h = React.createElement;
 
@@ -158,8 +159,7 @@ function createBrowserRoute() {
             )
           )
         : null,
-      h('div', { className: 'browser-tabs' },
-        h('div', { className: 'browser-tabs-label' }, `${tabs.length} open ${tabs.length === 1 ? 'tab' : 'tabs'}`),
+      h('div', { className: 'browser-tabs', 'aria-label': `${tabs.length} open ${tabs.length === 1 ? 'tab' : 'tabs'}` },
         tabs.length
           ? h('div', { className: 'browser-tab-list', role: 'list', 'aria-label': 'Open browser tabs' },
               tabs.map((tab, index) => {
@@ -181,6 +181,7 @@ function createBrowserRoute() {
                     title: tab?.url || label,
                     onClick: () => { void run(`tab:${nativePageId}`, () => browser.selectTab(nativePageId)); }
                   },
+                    h(Icon, { name: 'browser', className: 'browser-tab-icon', size: 14 }),
                     h('span', { className: 'browser-tab-title' }, tab?.loading ? `${label} — Loading` : label)
                   ),
                   h('button', {
@@ -190,7 +191,7 @@ function createBrowserRoute() {
                     'aria-label': `Close ${label}`,
                     title: `Close ${label}`,
                     onClick: () => { void run(`close-tab:${nativePageId}`, () => browser.closeTab(nativePageId)); }
-                  }, '×')
+                  }, h(Icon, { name: 'close', size: 14 }))
                 );
               })
             )

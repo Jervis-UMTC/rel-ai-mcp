@@ -55,7 +55,7 @@ app.whenReady().then(async () => {
       window.dispatchEvent(new CustomEvent('relai:route-change', {
         detail: { section: 'code', path: 'code', params: new URLSearchParams('task=probe-task') }
       }));
-      for (let attempt = 0; attempt < 50 && !document.querySelector('.monaco-editor .view-lines'); attempt += 1) await wait(50);
+      for (let attempt = 0; attempt < 50 && (!document.querySelector('.monaco-editor .view-lines') || typeof window.monaco?.editor?.colorize !== 'function'); attempt += 1) await wait(50);
       await wait(300);
       const editorBefore = document.querySelector('.monaco-diff-editor');
       const editors = window.monaco?.editor?.getEditors?.() || [];
@@ -64,10 +64,6 @@ app.whenReady().then(async () => {
       const readOnly = liveEditor?.getOption?.(window.monaco.editor.EditorOption.readOnly) === true;
       const modelLanguage = model?.getLanguageId?.() || '';
       const modelValue = model?.getValue?.() || '';
-      const tokenized = typeof window.monaco?.editor?.tokenize === 'function'
-        ? window.monaco.editor.tokenize(modelValue, modelLanguage)
-        : [];
-      const tokenTypes = [...new Set(tokenized.flatMap(line => line.map(token => token.type)).filter(Boolean))];
       const editorHtml = editorBefore?.innerHTML || '';
       const theme = document.documentElement.dataset.theme === 'light' ? 'vs' : 'vs-dark';
       const colorizedHtml = await window.monaco.editor.colorize(modelValue, modelLanguage, { theme });
@@ -123,7 +119,6 @@ app.whenReady().then(async () => {
         sameEditorAfterLiveUpdate: editorBefore === document.querySelector('.monaco-diff-editor'),
         modelLanguage,
         modelValue,
-        tokenTypes,
         tokenColors,
         lineHeight,
         lineTops,

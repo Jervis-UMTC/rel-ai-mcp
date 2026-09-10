@@ -48,6 +48,15 @@ app.whenReady().then(async () => {
         const main = document.getElementById('main').getBoundingClientRect();
         const topbar = document.querySelector('.topbar').getBoundingClientRect();
         const title = document.getElementById('pageTitle').getBoundingClientRect();
+        const usageMetricOverflow = location.hash === '#usage'
+          ? Math.max(0, ...[...document.querySelectorAll('.usage-metric canvas')].map(canvas => {
+              const metric = canvas.closest('.usage-metric');
+              if (!metric) return 0;
+              const canvasRect = canvas.getBoundingClientRect();
+              const metricRect = metric.getBoundingClientRect();
+              return Math.max(0, canvasRect.right - metricRect.right, metricRect.left - canvasRect.left);
+            }))
+          : 0;
         return {
           route: location.hash,
           chrome: document.documentElement.dataset.windowChrome,
@@ -59,6 +68,7 @@ app.whenReady().then(async () => {
           titleTop: title.top,
           localAnalyticsLoaded: location.hash !== '#usage' || Boolean(document.querySelector('.usage-overview')),
           inlineUsageError: Boolean(document.querySelector('[data-usage-unavailable]')),
+          usageMetricOverflow,
           toolCategories: location.hash === '#tools' ? Object.fromEntries([...document.querySelectorAll('.tool-card')].map(card => [card.querySelector('code')?.textContent || '', card.querySelector('.tool-capability')?.textContent || ''])) : {},
           titleVisible: title.top >= titlebar.bottom - 0.5,
           shellClear: shell.top >= titlebar.bottom - 0.5,

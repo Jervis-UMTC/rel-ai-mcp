@@ -101,7 +101,8 @@ function registerIpcHandlers(deps) {
     ipc,
     channels: DESKTOP_IPC,
     exportDiagnosticState: deps.exportDiagnosticState,
-    openDiagnosticsFolder: deps.openDiagnosticsFolder
+    openDiagnosticsFolder: deps.openDiagnosticsFolder,
+    runTunnelDoctor: deps.runTunnelDoctor
   });
   registerLocalDataIpc({
     ipc,

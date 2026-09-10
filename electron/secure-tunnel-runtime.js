@@ -4,9 +4,12 @@ import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { resolveResourcePath } from './resource-path.js';
 import { createTunnelLogParser } from './tunnel-log-parser.js';
+import { sanitizeDiagnosticValue, sanitizeText } from '../src/diagnostics.js';
 import { assertTunnelLifecycleTransition } from '../src/runtimeLifecycle.js';
 
 const START_TIMEOUT_MS = 30_000;
+const DOCTOR_TIMEOUT_MS = 15_000;
+const DOCTOR_MAX_OUTPUT_BYTES = 128 * 1024;
 const START_POLL_MS = 200;
 const HEALTH_REQUEST_TIMEOUT_MS = 1_500;
 const MONITOR_INTERVAL_MS = 2_000;
@@ -84,12 +87,7 @@ function createSecureTunnelRuntime({
     await fs.promises.rm(healthUrlFile, { force: true });
 
     const args = [
-      'run',
-      '--control-plane.tunnel-id', tunnelId,
-      '--control-plane.api-key', 'env:CONTROL_PLANE_API_KEY',
-      '--mcp.server-url', `url=http://127.0.0.1:${port}/mcp,channel=main`,
-      '--mcp.extra-headers', 'Authorization: env:REL_AI_LOCAL_AUTH_HEADER',
-      '--mcp.discovery-extra-headers', 'Authorization: env:REL_AI_LOCAL_AUTH_HEADER',
+      ...tunnelConnectionArgs('run', tunnelId, port),
       '--health.listen-addr', '127.0.0.1:0',
       '--health.url-file', healthUrlFile,
       '--log.format', 'json',
@@ -294,6 +292,75 @@ function createSecureTunnelRuntime({
     }
   }
 
+  async function doctor(config = {}) {
+    const tunnelId = normalizeTunnelId(config.tunnelId);
+    const apiKey = normalizeRequiredSecret(config.apiKey, 'OpenAI tunnel runtime API key');
+    const localToken = normalizeRequiredSecret(config.localToken, 'Rel.AI local bearer token');
+    const port = normalizePort(config.port);
+    let executable;
+    try {
+      executable = await resolveExecutable();
+      if (!executable) throw new Error('Bundled OpenAI tunnel-client is missing. Fetch and verify vendor/tunnel-client before running diagnostics.');
+      await ensureExecutable(executable);
+    } catch (error) {
+      throw tunnelFailure(TUNNEL_RUNTIME_UNAVAILABLE_CODE, messageOf(error));
+    }
+
+    const args = [
+      ...tunnelConnectionArgs('doctor', tunnelId, port),
+      '--health.listen-addr', '127.0.0.1:0',
+      '--json',
+      '--explain'
+    ];
+    const startedAt = Date.now();
+    let doctorChild;
+    try {
+      const doctorCwd = path.resolve(stateDir);
+      await fs.promises.mkdir(doctorCwd, { recursive: true, mode: 0o700 });
+      doctorChild = spawnImpl(executable, args, {
+        cwd: doctorCwd,
+        env: makeEnvironment({
+          CONTROL_PLANE_API_KEY: apiKey,
+          REL_AI_LOCAL_AUTH_HEADER: `Bearer ${localToken}`
+        }),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+    } catch (error) {
+      throw tunnelFailure(TUNNEL_RUNTIME_UNAVAILABLE_CODE, messageOf(error));
+    }
+
+    const timeoutMs = Math.max(1_000, Math.min(30_000, Number(config.timeoutMs || DOCTOR_TIMEOUT_MS)));
+    const completed = await collectDoctorOutput(doctorChild, {
+      timeoutMs,
+      maxBytes: DOCTOR_MAX_OUTPUT_BYTES,
+      stopProcess
+    });
+    let parsed;
+    try {
+      parsed = JSON.parse(completed.stdout.trim());
+    } catch {
+      const detail = sanitizeText(completed.stderr || completed.stdout, 2_000);
+      throw new Error(`OpenAI tunnel-client doctor returned invalid JSON${detail ? `: ${detail}` : '.'}`);
+    }
+    const sanitized = sanitizeDiagnosticValue(parsed);
+    const checks = Array.isArray(sanitized?.checks) ? sanitized.checks : [];
+    const failedChecks = Array.isArray(sanitized?.failed_checks)
+      ? sanitized.failed_checks.map(value => String(value))
+      : checks.filter(check => String(check?.status || '').toUpperCase() === 'FAIL').map(check => String(check?.id || '')).filter(Boolean);
+    const result = String(sanitized?.result || (failedChecks.length ? 'fail' : 'unknown')).toLowerCase();
+    return {
+      ok: result === 'pass' && completed.exitCode === 0,
+      result,
+      exitCode: completed.exitCode,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      failedChecks,
+      checks,
+      truncated: completed.truncated,
+      rawOutput: sanitizeText([completed.stdout, completed.stderr].filter(Boolean).join('\n'), 64 * 1024)
+    };
+  }
+
   async function stop() {
     generation += 1;
     stopping = true;
@@ -322,7 +389,71 @@ function createSecureTunnelRuntime({
     onStatus(snapshot());
   }
 
-  return Object.freeze({ start, stop, snapshot });
+  return Object.freeze({ start, doctor, stop, snapshot });
+}
+
+function tunnelConnectionArgs(command, tunnelId, port) {
+  return [
+    command,
+    '--control-plane.tunnel-id', tunnelId,
+    '--control-plane.api-key', 'env:CONTROL_PLANE_API_KEY',
+    '--mcp.server-url', `url=http://127.0.0.1:${port}/mcp,channel=main`,
+    '--mcp.extra-headers', 'Authorization: env:REL_AI_LOCAL_AUTH_HEADER',
+    '--mcp.discovery-extra-headers', 'Authorization: env:REL_AI_LOCAL_AUTH_HEADER'
+  ];
+}
+
+function collectDoctorOutput(child, { timeoutMs, maxBytes, stopProcess }) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    let capturedBytes = 0;
+    let truncated = false;
+    let settled = false;
+    let timer = null;
+    const append = (current, chunk) => {
+      if (capturedBytes >= maxBytes) {
+        truncated = true;
+        return current;
+      }
+      const text = String(chunk ?? '');
+      const remaining = maxBytes - capturedBytes;
+      const bytes = Buffer.byteLength(text, 'utf8');
+      if (bytes <= remaining) {
+        capturedBytes += bytes;
+        return current + text;
+      }
+      truncated = true;
+      const clipped = Buffer.from(text, 'utf8').subarray(0, remaining).toString('utf8');
+      capturedBytes += Buffer.byteLength(clipped, 'utf8');
+      return current + clipped;
+    };
+    child.stdout?.on('data', chunk => { stdout = append(stdout, chunk); });
+    child.stderr?.on('data', chunk => { stderr = append(stderr, chunk); });
+    const finish = callback => {
+      if (settled) return false;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      callback();
+      return true;
+    };
+    child.once('error', error => finish(() => reject(error)));
+    child.once('exit', (code, signal) => finish(() => resolve({
+      exitCode: Number.isInteger(code) ? code : null,
+      signal: signal || null,
+      stdout,
+      stderr,
+      truncated
+    })));
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      void Promise.resolve(stopProcess(child, { graceMs: 500, forceWaitMs: 1_500 })).catch(() => {}).finally(() => {
+        reject(new Error(`OpenAI tunnel-client doctor timed out after ${Math.round(timeoutMs / 1000)} seconds.`));
+      });
+    }, timeoutMs);
+    timer.unref?.();
+  });
 }
 
 async function waitForOperational({ ownedChild, healthUrlFile, fetchImpl, tunnelId, timeoutMs, getFatalFailure, onPhase }) {
