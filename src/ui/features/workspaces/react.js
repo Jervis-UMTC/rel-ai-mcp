@@ -278,17 +278,20 @@ function StatusPill({ label, tone = '' }) {
 function WorkspaceAnalytics({ scope }) {
   const completed = Number(scope?.completed || 0);
   const toolCalls = Number(scope?.toolCalls || 0);
-  const reliabilityCalls = Number(scope?.reliabilityCalls || 0);
-  const reliabilityRate = Number(scope?.reliabilityRate || 0);
+  const successRate = Number(scope?.operationSuccessRate || 0);
+  const infrastructureFailures = Number(scope?.infrastructureFailures || 0);
   const averageDuration = Number(scope?.averageDuration || 0);
   const values = Array.isArray(scope?.points) ? scope.points.map(point => Number(point.toolCalls || 0)) : [];
   return h('section', { className: 'workspace-analytics-mini', 'aria-label': `${scope.workspace || 'Project'} analytics` },
     h('div', { className: 'workspace-analytics-head' }, h('span', null, '24h · hourly')),
     h('div', { className: 'workspace-analytics-metrics' },
       h(MiniMetric, { label: 'Actions', value: formatInteger(toolCalls) }),
-      h(MiniMetric, { label: 'Reliable', value: reliabilityCalls ? formatPercent(reliabilityRate) : '—' }),
+      h(MiniMetric, { label: 'Successful actions', value: completed ? formatPercent(successRate) : '—' }),
       h(MiniMetric, { label: 'Average time', value: completed ? formatDuration(averageDuration) : '—' })
     ),
+    infrastructureFailures
+      ? h('div', { className: 'connection-notice bad', role: 'status' }, `${formatInteger(infrastructureFailures)} Rel.AI internal ${infrastructureFailures === 1 ? 'error' : 'errors'}`)
+      : null,
     values.length
       ? h(SparkChart, { values, className: 'workspace-analytics-sparkline' })
       : h('span', { className: 'workspace-analytics-sparkline-empty', 'aria-hidden': 'true' })

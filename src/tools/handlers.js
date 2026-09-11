@@ -47,8 +47,8 @@ const startTaskHandler = inWorkspace(async (workspace, config, args, context) =>
     includeFiles: bootstrapMode === 'full',
     instructionPath: args.instructionPath
   });
-  const taskQuery = [task.objective, task.title].filter(Boolean).join(' ');
   const hostContextSummary = String(args.contextSummary || '').trim().slice(0, 3000);
+  const taskQuery = [task.objective, task.title, hostContextSummary].filter(Boolean).join(' ');
   const recoveredSession = context?.requestTaskContext?.session;
   const recoveredTask = recoveredSession && String(recoveredSession.id || recoveredSession.taskId || '') === task.work_id
     ? compactSessionSummary(recoveredSession)

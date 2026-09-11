@@ -105,7 +105,6 @@ export function desktopSetupState(data = {}) {
 export function homeAnalyticsView(scope = {}) {
   const completed = Number(scope.completed || 0);
   const actions = Number(scope.toolCalls || 0);
-  const reliabilityCalls = Number(scope.reliabilityCalls || 0);
   const internalErrors = Number(scope.infrastructureFailures || 0);
   const workspaceScoped = scope.kind === 'workspace';
   const activeProjects = (Array.isArray(scope.workspaces) ? scope.workspaces : []).filter(item => Number(item.toolCalls || 0) > 0).length;
@@ -116,9 +115,9 @@ export function homeAnalyticsView(scope = {}) {
     metrics: [
       { label: 'Actions', value: formatInteger(actions), detail: '' },
       {
-        label: 'Reliable actions',
-        value: reliabilityCalls ? formatPercent(scope.reliabilityRate) : '—',
-        detail: reliabilityCalls ? `${formatInteger(reliabilityCalls)} measured` : 'Measured after new actions run'
+        label: 'Successful actions',
+        value: completed ? formatPercent(scope.operationSuccessRate) : '—',
+        detail: completed ? `${formatInteger(completed)} completed` : 'No completed actions'
       },
       {
         label: 'Average time',
@@ -131,8 +130,8 @@ export function homeAnalyticsView(scope = {}) {
     ],
     contextSummary: analyticsContextSummary(scope, actions),
     errorSummary: internalErrors
-      ? `${formatInteger(internalErrors)} internal ${pluralLabel(internalErrors, 'error')}`
-      : 'No confirmed internal errors',
+      ? `${formatInteger(internalErrors)} Rel.AI internal ${pluralLabel(internalErrors, 'error')}`
+      : '',
     pulse: homeAnalyticsPulseView(scope.points)
   };
 }

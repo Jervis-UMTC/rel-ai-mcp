@@ -209,13 +209,18 @@ function HomeAnalyticsContent({ scope, refreshing }) {
     h('div', { className: 'home-analytics-body' },
       h('div', { className: 'home-analytics-metrics' }, view.metrics.map(metric => h('div', { className: 'home-analytics-metric', key: metric.label }, h('div', { className: 'home-analytics-metric-label' }, h(Icon, { name: homeAnalyticsMetricIcon(metric.label), size: 15 }), h('span', null, metric.label)), h('strong', null, metric.value), metric.detail ? h('small', null, metric.detail) : null))),
       h('div', { className: 'home-analytics-pulse' }, h('div', { className: 'home-analytics-pulse-head' }, h('div', null, h('span', null, 'Hourly activity'), h('strong', null, view.contextSummary)), h('small', null, 'UTC')), h(HomeAnalyticsPulse, { pulse: view.pulse })),
-      h('div', { className: 'home-analytics-foot' }, h('span', null, view.errorSummary))
+      view.errorSummary
+        ? h('div', { className: 'home-analytics-foot bad', role: 'status' },
+            h('span', null, view.errorSummary),
+            h('a', { href: routeHref('diagnostics') }, 'Open Troubleshooting')
+          )
+        : null
     )
   );
 }
 
 function homeAnalyticsMetricIcon(label) {
-  if (label === 'Reliable actions') return 'reliability';
+  if (label === 'Successful actions') return 'success';
   if (label === 'Average time' || label === 'Total execution time') return 'timer';
   if (label === 'Active projects') return 'workspaces';
   return 'activity';

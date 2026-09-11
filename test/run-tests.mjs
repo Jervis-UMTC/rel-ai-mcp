@@ -71,6 +71,7 @@ const files = [
   'task-history-storage-unit.mjs',
   'task-history-live-unit.mjs',
   'task-history-store-unit.mjs',
+  'task-retrieval-quality-unit.mjs',
   'task-observability-integration.mjs',
   'task-trace-unit.mjs',
   'task-integrity-unit.mjs',

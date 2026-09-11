@@ -157,7 +157,8 @@ function DiagnosticsView({ data = {} }) {
     try {
       const result = await window.relaiDesktop.runTunnelDoctor();
       setTunnelDoctor(result);
-      toast(result?.ok ? 'Secure MCP Tunnel diagnostics passed.' : 'Secure MCP Tunnel diagnostics found a problem.', { variant: result?.ok ? 'success' : 'warn' });
+      const presentation = tunnelDoctorPresentation(result);
+      toast(presentation.toastMessage, { variant: presentation.toastVariant });
     } catch (error) {
       setTunnelDoctor({ ok: false, error: messageOf(error), checks: [] });
       toast(messageOf(error), { variant: 'error' });
@@ -321,24 +322,31 @@ function Metric({ label, count, severity }) { return h('div', { className: `diag
 
 function TunnelDoctorResult({ result = {} }) {
   const checks = Array.isArray(result.checks) ? result.checks : [];
-  const failed = result.ok !== true;
-  return h('section', { className: `card diagnostic-doctor-card${failed ? ' warning' : ''}`, 'data-diagnostic-region': 'tunnel-doctor', role: 'status' },
+  const presentation = tunnelDoctorPresentation(result);
+  return h('section', { className: `card diagnostic-doctor-card${presentation.needsAttention ? ' warning' : ''}`, 'data-diagnostic-region': 'tunnel-doctor', role: 'status' },
     h('div', { className: 'card-head' },
       h('div', null,
         h('h3', null, 'Secure MCP Tunnel diagnostics'),
-        h('p', null, result.error || (result.ok ? 'All tunnel-client checks passed.' : 'One or more tunnel-client checks need attention.'))
+        h('p', null, presentation.message)
       ),
-      h('span', { className: `status-pill ${result.ok ? 'good' : 'warn'}` }, result.ok ? 'Passed' : 'Needs attention')
+      h('span', { className: `status-pill ${presentation.tone}`.trim() }, presentation.label)
     ),
     h('div', { className: 'card-body diagnostic-doctor-list' },
       checks.length ? checks.map((check, index) => {
-        const status = String(check?.status || 'UNKNOWN').toUpperCase();
+        const checkView = tunnelDoctorCheckPresentation(check);
         const next = Array.isArray(check?.next) ? check.next.filter(Boolean) : [];
-        return h('article', { className: `diagnostic-doctor-check ${status === 'PASS' ? 'pass' : status === 'FAIL' ? 'fail' : ''}`, key: check?.id || index },
-          h('div', { className: 'diagnostic-doctor-check-head' }, h('code', null, check?.id || `check-${index + 1}`), h('strong', null, status)),
-          check?.summary ? h('p', null, check.summary) : null,
-          check?.why ? h('p', null, h('strong', null, 'Why: '), check.why) : null,
-          next.length ? h('ul', null, next.map((item, itemIndex) => h('li', { key: itemIndex }, item))) : null
+        return h('article', { className: `diagnostic-doctor-check ${checkView.tone}`.trim(), key: check?.id || index },
+          h('div', { className: 'diagnostic-doctor-check-head' }, h('code', null, checkView.label || `check-${index + 1}`), h('strong', null, checkView.statusLabel)),
+          checkView.summary ? h('p', null, checkView.summary) : null,
+          checkView.why ? h('p', null, h('strong', null, 'Why: '), checkView.why) : null,
+          next.length
+            ? checkView.optionalSetup
+              ? h('details', { className: 'diagnostic-doctor-optional-setup' },
+                  h('summary', null, 'Optional setup'),
+                  h('ul', null, next.map((item, itemIndex) => h('li', { key: itemIndex }, item)))
+                )
+              : h('ul', null, next.map((item, itemIndex) => h('li', { key: itemIndex }, item)))
+            : null
         );
       }) : h('div', { className: 'diagnostic-log-empty' }, result.error || 'No individual tunnel checks were returned.'),
       result.truncated ? h('small', null, 'Technical output was truncated to keep this diagnostic bounded.') : null,
@@ -350,6 +358,69 @@ function TunnelDoctorResult({ result = {} }) {
       ) : null
     )
   );
+}
+
+function tunnelDoctorPresentation(result = {}) {
+  const checks = Array.isArray(result.checks) ? result.checks : [];
+  const statuses = checks.map(check => String(check?.status || 'UNKNOWN').toUpperCase());
+  const failedChecks = Array.isArray(result.failedChecks) ? result.failedChecks.filter(Boolean) : [];
+  const resultState = String(result.result || '').toLowerCase();
+  const exitCode = Number(result.exitCode);
+  const hasExitFailure = Number.isFinite(exitCode) && exitCode !== 0;
+  const hasCheckFailure = failedChecks.length > 0 || statuses.includes('FAIL');
+  const needsAttention = Boolean(result.error) || resultState === 'fail' || hasExitFailure || hasCheckFailure;
+  const skipped = statuses.filter(status => status === 'SKIP').length;
+  const passOrSkipOnly = statuses.length > 0 && statuses.every(status => status === 'PASS' || status === 'SKIP');
+  const healthy = !needsAttention && (result.ok === true || resultState === 'pass' || passOrSkipOnly);
+
+  if (!healthy) {
+    return {
+      needsAttention: true,
+      tone: 'warn',
+      label: 'Needs attention',
+      message: result.error || 'One or more tunnel-client checks need attention.',
+      toastMessage: result.error || 'Secure MCP Tunnel diagnostics found a problem.',
+      toastVariant: 'warn'
+    };
+  }
+  if (skipped > 0) {
+    const noun = skipped === 1 ? 'optional check' : 'optional checks';
+    return {
+      needsAttention: false,
+      tone: 'good',
+      label: 'Healthy',
+      message: `Tunnel checks passed. ${skipped} ${noun} ${skipped === 1 ? 'was' : 'were'} skipped because ${skipped === 1 ? 'it is' : 'they are'} not required.`,
+      toastMessage: `Secure MCP Tunnel is healthy. ${skipped} ${noun} ${skipped === 1 ? 'was' : 'were'} skipped.`,
+      toastVariant: 'success'
+    };
+  }
+  return {
+    needsAttention: false,
+    tone: 'good',
+    label: 'Passed',
+    message: 'All tunnel-client checks passed.',
+    toastMessage: 'Secure MCP Tunnel diagnostics passed.',
+    toastVariant: 'success'
+  };
+}
+
+function tunnelDoctorCheckPresentation(check = {}) {
+  const id = String(check?.id || '');
+  const status = String(check?.status || 'UNKNOWN').toUpperCase();
+  if (status === 'PASS') return { label: id, statusLabel: 'Passed', tone: 'pass', summary: check?.summary || '', why: check?.why || '', optionalSetup: false };
+  if (status === 'FAIL') return { label: id, statusLabel: 'Failed', tone: 'fail', summary: check?.summary || '', why: check?.why || '', optionalSetup: false };
+  if (status === 'SKIP' && id === 'codex_plugin') {
+    return {
+      label: 'Codex integration',
+      statusLabel: 'Optional',
+      tone: 'optional',
+      summary: 'Codex-native tunnel controls are optional and are not enabled.',
+      why: 'Rel.AI and the Secure MCP Tunnel work normally without this plugin. Install it only if you want Codex-native tunnel controls.',
+      optionalSetup: true
+    };
+  }
+  if (status === 'SKIP') return { label: id, statusLabel: 'Skipped', tone: 'skip', summary: check?.summary || '', why: check?.why || '', optionalSetup: false };
+  return { label: id, statusLabel: status, tone: '', summary: check?.summary || '', why: check?.why || '', optionalSetup: false };
 }
 
 function DiagnosticFindings({ findings, total, onReload }) {

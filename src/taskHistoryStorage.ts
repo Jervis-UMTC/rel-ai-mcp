@@ -30,6 +30,12 @@ interface TaskHistoryEventRow {
   payload: string;
 }
 
+interface SessionTextSearchOptions {
+  limit?: number;
+  workspace?: string;
+  excludeWorkspace?: string;
+}
+
 function getTaskHistoryDir(config: TaskHistoryConfig = {}): string {
   return path.join(getStateDir(config), 'sessions');
 }
@@ -76,6 +82,37 @@ function listSessionSummaries(directory: string, limit = MAX_SESSIONS): StoredTa
       ORDER BY updated_at_ms DESC,id ASC
       LIMIT ?
     `).all(Math.max(0, Math.floor(Number(limit) || 0))) as unknown as TaskHistoryRow[];
+    return parseSessionRows(db, rows);
+  }, { transaction: true }) as StoredTaskSession[];
+}
+
+function findSessionsContaining(directory: string, values: unknown, options: SessionTextSearchOptions = {}): StoredTaskSession[] {
+  const needles = [...new Set((Array.isArray(values) ? values : [])
+    .map(value => String(value || '').replace(/\p{Cc}+/gu, ' ').trim().toLowerCase())
+    .filter(value => value.length >= 4)
+    .map(value => value.slice(0, 500)))]
+    .slice(0, 12);
+  if (!needles.length) return [];
+  const config = configForDirectory(directory);
+  migrateLegacyTaskHistory(config);
+  return withStateDatabase(config, (db: DatabaseSync) => {
+    const filters = [`(${needles.map(() => 'instr(lower(payload), ?) > 0').join(' OR ')})`];
+    const parameters: Array<string | number> = [...needles];
+    const workspace = String(options.workspace || '').trim();
+    const excludeWorkspace = String(options.excludeWorkspace || '').trim();
+    if (workspace) {
+      filters.push("COALESCE(json_extract(payload, '$.workspace'), '') = ?");
+      parameters.push(workspace);
+    } else if (excludeWorkspace) {
+      filters.push("COALESCE(json_extract(payload, '$.workspace'), '') <> ?");
+      parameters.push(excludeWorkspace);
+    }
+    const limit = Math.min(MAX_SESSIONS, Math.max(1, Math.floor(Number(options.limit) || 40)));
+    parameters.push(limit);
+    const rows = db.prepare(`SELECT id,payload FROM task_history
+      WHERE ${filters.join(' AND ')}
+      ORDER BY updated_at_ms DESC,id ASC
+      LIMIT ?`).all(...parameters) as unknown as TaskHistoryRow[];
     return parseSessionRows(db, rows);
   }, { transaction: true }) as StoredTaskSession[];
 }
@@ -319,6 +356,7 @@ export {
   MAX_SESSIONS,
   clearTaskHistory,
   ensureCurrentHistory,
+  findSessionsContaining,
   getTaskHistoryDir,
   listRecentSessionEvents,
   listSessionSummaries,

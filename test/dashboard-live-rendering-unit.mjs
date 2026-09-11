@@ -45,6 +45,24 @@ function exerciseRuntimeLogDelta(runtime, change) {
   return context.applyRuntimeLogDelta(runtime, change);
 }
 
+function exerciseTunnelDoctorPresentation(result) {
+  const context = {};
+  vm.runInNewContext(`
+    ${functionSource(diagnostics, 'tunnelDoctorPresentation')}
+    globalThis.tunnelDoctorPresentation = tunnelDoctorPresentation;
+  `, context);
+  return context.tunnelDoctorPresentation(result);
+}
+
+function exerciseTunnelDoctorCheckPresentation(check) {
+  const context = {};
+  vm.runInNewContext(`
+    ${functionSource(diagnostics, 'tunnelDoctorCheckPresentation')}
+    globalThis.tunnelDoctorCheckPresentation = tunnelDoctorCheckPresentation;
+  `, context);
+  return context.tunnelDoctorCheckPresentation(check);
+}
+
 assert.doesNotMatch(dashboard, /syncLiveView|updateLiveView|renderViewIfChanged|viewRevisionKey|scheduleLiveViewSync|ensureRouteRoot/, 'dashboard bootstrap must not retain a second route rendering coordinator');
 assert.doesNotMatch(dashboard, /from ['"]\.\/ui\/store\.js['"]/, 'the production dashboard bootstrap must not load the Zustand-backed store outside the Vite bundle');
 assert.match(reactMain, /from ['"]\.\.\/store\.js['"]/, 'the Vite-built dashboard entry must own the canonical store dependency');
@@ -153,6 +171,38 @@ assert.match(workspaceModals, /forgetLocalData/, 'Project deletion must pass the
 assert.doesNotMatch(diagnostics, /DiagnosticMaintenance|data-diagnostic-region': 'maintenance'/, 'Troubleshooting must not duplicate local-data cleanup controls owned by App settings');
 assert.match(diagnostics, /runTunnelDoctor/, 'Troubleshooting must expose the bundled Secure MCP Tunnel doctor through the desktop bridge');
 assert.match(diagnostics, /data-diagnostic-region': 'tunnel-doctor'/, 'Troubleshooting must render structured tunnel doctor results');
+{
+  const skippedOnly = exerciseTunnelDoctorPresentation({
+    ok: false,
+    result: 'skip',
+    exitCode: 0,
+    failedChecks: [],
+    checks: [{ id: 'codex_plugin', status: 'SKIP' }]
+  });
+  assert.equal(skippedOnly.needsAttention, false, 'optional-only doctor skips must not look like a tunnel problem');
+  assert.equal(skippedOnly.label, 'Healthy');
+  assert.equal(skippedOnly.toastVariant, 'success');
+  const codexPlugin = exerciseTunnelDoctorCheckPresentation({
+    id: 'codex_plugin',
+    status: 'SKIP',
+    summary: 'Codex detected; Tunnel MCP plugin not installed',
+    next: ['tunnel-client codex plugin install']
+  });
+  assert.equal(codexPlugin.statusLabel, 'Optional');
+  assert.equal(codexPlugin.tone, 'optional');
+  assert.equal(codexPlugin.optionalSetup, true);
+  assert.match(codexPlugin.why, /work normally without this plugin/i);
+  const failedDoctor = exerciseTunnelDoctorPresentation({
+    ok: false,
+    result: 'fail',
+    exitCode: 2,
+    failedChecks: ['mcp_server_reachable'],
+    checks: [{ id: 'mcp_server_reachable', status: 'FAIL' }]
+  });
+  assert.equal(failedDoctor.needsAttention, true, 'real tunnel failures must remain visually actionable');
+  assert.equal(failedDoctor.label, 'Needs attention');
+}
+assert.match(diagnostics, /Optional setup/, 'Optional Codex installation guidance must stay collapsed behind calm optional copy');
 assert.match(diagnostics, /role: 'log'/, 'Diagnostic log regions must retain explicit log semantics without making the whole stream aria-live');
 assert.doesNotMatch(diagnostics, /aria-live[^\n]*diagnostic-log-list|window\.prompt/, 'Diagnostics must not turn the full live log into an aria-live region or regress to a native prompt');
 {

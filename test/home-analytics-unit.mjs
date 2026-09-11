@@ -14,6 +14,7 @@ const scope = {
   reliabilityCalls: 18,
   reliableCalls: 17,
   reliabilityRate: 94.444,
+  operationSuccessRate: 88.889,
   infrastructureFailures: 1,
   averageDuration: 240,
   workspaces: [
@@ -39,13 +40,14 @@ assert.equal(desktopSetupSteps({ hasWorkspace: true, endpointReady: true, chatgp
 
 const view = homeAnalyticsView(scope);
 assert.equal(view.heading, 'Activity');
-assert.deepEqual(view.metrics.map(metric => metric.label), ['Actions', 'Reliable actions', 'Average time', 'Active projects']);
+assert.deepEqual(view.metrics.map(metric => metric.label), ['Actions', 'Successful actions', 'Average time', 'Active projects']);
 assert.equal(view.metrics[0].value, '18');
-assert.equal(view.metrics[1].value, '94.4%');
+assert.equal(view.metrics[1].value, '88.9%');
 assert.equal(view.metrics[2].value, '240 ms');
 assert.equal(view.metrics[3].value, '2');
 assert.equal(view.contextSummary, 'Most active project: rel-ai-mcp');
-assert.equal(view.errorSummary, '1 internal error');
+assert.equal(view.errorSummary, '1 Rel.AI internal error');
+assert.equal(homeAnalyticsView({ ...scope, infrastructureFailures: 0 }).errorSummary, '', 'Healthy overview analytics must not show a permanent no-errors message');
 assert.equal(view.pulse.empty, false);
 assert.match(view.pulse.summary, /Current hour 10 actions/);
 assert.match(view.pulse.summary, /Overall trend increasing/);

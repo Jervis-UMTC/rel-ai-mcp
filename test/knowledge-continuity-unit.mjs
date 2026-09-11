@@ -91,6 +91,23 @@ try {
   assert(second.bootstrap.conversationContinuity?.every(item => !('workId' in item) && !('workspace' in item)));
   await callTool('relai_work', { action: 'cancel', workspace: 'app', work_id: second.work_id, reason: 'continuity regression complete' }, context);
 
+  const retrievalSource = await callTool('relai_work', {
+    action: 'begin', workspace: 'app', title: 'Overview analytics initial mount failure',
+    objective: 'Repair overview analytics initial rendering failure', bootstrap: 'none'
+  }, { publicHttpOnly: true, conversationId: 'retrieval-source-chat' });
+  await callTool('relai_work', {
+    action: 'finish', workspace: 'app', work_id: retrievalSource.work_id,
+    summary: 'Fixed the overview analytics first render so data appears without navigation.'
+  }, { publicHttpOnly: true, conversationId: 'retrieval-source-chat' });
+  await flushTaskHistoryPersistence();
+  const retrievalConsumer = await callTool('relai_work', {
+    action: 'begin', workspace: 'app', title: 'Investigate dashboard display', objective: 'Investigate dashboard display behavior',
+    contextSummary: 'The analytics panel is blank until I switch tabs.', bootstrap: 'compact'
+  }, { publicHttpOnly: true, conversationId: 'retrieval-consumer-chat' });
+  assert(retrievalConsumer.bootstrap?.relatedTasks?.some(item => /overview analytics/i.test(item.goal || '')),
+    'task bootstrap must use host context to recall the same completed task even when title/objective wording differs');
+  await callTool('relai_work', { action: 'cancel', workspace: 'app', work_id: retrievalConsumer.work_id, reason: 'retrieval bootstrap regression complete' }, { publicHttpOnly: true, conversationId: 'retrieval-consumer-chat' });
+
   const peerAContext = { publicHttpOnly: true, conversationId: 'peer-worker-a' };
   const peerBContext = { publicHttpOnly: true, conversationId: 'peer-worker-b' };
   const peerA = await callTool('relai_work', {

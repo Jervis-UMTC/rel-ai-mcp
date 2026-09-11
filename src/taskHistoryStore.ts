@@ -16,6 +16,7 @@ import {
   MAX_SESSIONS,
   clearTaskHistory as clearStoredTaskHistory,
   ensureCurrentHistory,
+  findSessionsContaining,
   getTaskHistoryDir,
   listRecentSessionEvents,
   listSessionSummaries,
@@ -30,7 +31,7 @@ import {
   type TaskHistoryConfig
 } from './taskHistoryStorage.ts';
 import { OPERATION_IDS as OP } from './tools/operationIds.js';
-import { matchingRelevanceTerms, relevanceTerms } from './context/relevance.js';
+import { queryTaskSignature, taskEpisodeMatch } from './context/taskEpisodeRelevance.js';
 
 const STORE_VERSION = 3;
 const MAX_SESSION_EVENTS = 200;
@@ -63,7 +64,6 @@ interface ReadHistoryOptions {
 interface EpisodeOptions {
   excludeTaskId?: unknown;
   limit?: number;
-  scanLimit?: number;
 }
 
 interface ContinuityOptions {
@@ -307,33 +307,52 @@ function readRecentTaskHistoryEvents(config: TaskHistoryConfig, limit = 200): Hi
 
 function readRelevantTaskEpisodes(config: TaskHistoryConfig, workspace: unknown, query: unknown, options: EpisodeOptions = {}): Record<string, any>[] {
   const workspaceAlias = String((workspace as Record<string, any>)?.alias || workspace || '').trim();
-  const queryTerms = relevanceTerms(query);
-  if (!workspaceAlias || !queryTerms.length) return [];
+  if (!workspaceAlias || !String(query || '').trim()) return [];
   const excludeTaskId = cleanTaskId(options.excludeTaskId);
   const limit = clamp(options.limit || 3, 1, 5);
-  const scanLimit = clamp(options.scanLimit || 80, limit, MAX_SESSIONS);
-  return readTaskHistory(config, {}, { limit: MAX_SESSIONS })
+  return retrievalCandidateSessions(config, workspaceAlias, query)
     .filter((session: TaskRecord) => String(session.workspace || '') === workspaceAlias)
-    .slice(0, scanLimit)
-    .map((session: TaskRecord, index: number) => ({ session, index, score: taskEpisodeScore(session, workspaceAlias, queryTerms, excludeTaskId) }))
-    .filter((item: { score: number }) => item.score > 0)
-    .sort((left: { score: number; index: number }, right: { score: number; index: number }) => right.score - left.score || left.index - right.index)
+    .filter((session: TaskRecord) => !excludeTaskId || cleanTaskId(session.id) !== excludeTaskId)
+    .filter((session: TaskRecord) => session.status === 'completed' && session.completionKnown === true)
+    .map((session: TaskRecord, index: number) => ({ session, index, match: taskEpisodeMatch(session, query) }))
+    .filter((item): item is { session: TaskRecord; index: number; match: NonNullable<ReturnType<typeof taskEpisodeMatch>> } => Boolean(item.match))
+    .sort((left, right) => right.match.score - left.match.score || left.index - right.index)
     .slice(0, limit)
-    .map((item: { session: TaskRecord }) => compactTaskEpisode(item.session));
+    .map(item => compactTaskEpisode(item.session, item.match));
 }
 
 function readCrossWorkspaceTaskEpisodes(config: TaskHistoryConfig, workspace: unknown, query: unknown, options: EpisodeOptions = {}): Record<string, any>[] {
   const workspaceAlias = String((workspace as Record<string, any>)?.alias || workspace || '').trim();
-  const queryTerms = relevanceTerms(query);
-  if (!queryTerms.length) return [];
+  if (!String(query || '').trim()) return [];
   const excludeTaskId = cleanTaskId(options.excludeTaskId);
   const limit = clamp(options.limit || 2, 1, 4);
-  return readTaskHistory(config, {}, { limit: MAX_SESSIONS })
-    .map((session: TaskRecord, index: number) => ({ session, index, score: crossWorkspaceEpisodeScore(session, workspaceAlias, queryTerms, excludeTaskId) }))
-    .filter((item: { score: number }) => item.score > 0)
-    .sort((left: { score: number; index: number }, right: { score: number; index: number }) => right.score - left.score || left.index - right.index)
+  return retrievalCandidateSessions(config, workspaceAlias, query, { portable: true })
+    .filter((session: TaskRecord) => !workspaceAlias || String(session.workspace || '') !== workspaceAlias)
+    .filter((session: TaskRecord) => !excludeTaskId || cleanTaskId(session.id) !== excludeTaskId)
+    .filter((session: TaskRecord) => session.status === 'completed' && session.completionKnown === true)
+    .map((session: TaskRecord, index: number) => ({ session, index, match: taskEpisodeMatch(session, query, { portable: true }) }))
+    .filter((item): item is { session: TaskRecord; index: number; match: NonNullable<ReturnType<typeof taskEpisodeMatch>> } => Boolean(item.match))
+    .sort((left, right) => right.match.score - left.match.score || left.index - right.index)
     .slice(0, limit)
-    .map((item: { session: TaskRecord }) => compactPortableTaskEpisode(item.session));
+    .map(item => compactPortableTaskEpisode(item.session, item.match));
+}
+
+function retrievalCandidateSessions(config: TaskHistoryConfig, workspaceAlias: string, query: unknown, options: { portable?: boolean } = {}): TaskRecord[] {
+  const summaries = readTaskHistory(config, {}, { limit: MAX_SESSIONS, summary: true });
+  const signature = queryTaskSignature(query);
+  const exactNeedles = uniqueStrings([...signature.identifiers, ...signature.paths])
+    .filter(value => value.length >= 4)
+    .slice(0, 12);
+  if (!exactNeedles.length) return summaries;
+  const exact = findSessionsContaining(getTaskHistoryDir(config), exactNeedles, {
+    limit: Math.min(MAX_SESSIONS, Math.max(24, exactNeedles.length * 8)),
+    ...(options.portable === true
+      ? (workspaceAlias ? { excludeWorkspace: workspaceAlias } : {})
+      : { workspace: workspaceAlias })
+  });
+  const byId = new Map(summaries.map(session => [session.id, session]));
+  for (const session of exact) byId.set(session.id, publicSession(session as TaskRecord));
+  return [...byId.values()];
 }
 
 function readConversationContinuity(config: TaskHistoryConfig, conversationId: unknown, options: ContinuityOptions = {}): Record<string, any>[] {
@@ -346,49 +365,31 @@ function readConversationContinuity(config: TaskHistoryConfig, conversationId: u
     .filter((session: TaskRecord) => !excludeTaskId || cleanTaskId(session.id) !== excludeTaskId)
     .filter((session: TaskRecord) => session.status === 'completed' && session.completionKnown === true)
     .slice(0, limit)
-    .map(compactPortableTaskEpisode);
+    .map((session: TaskRecord) => compactPortableTaskEpisode(session));
 }
 
-function crossWorkspaceEpisodeScore(session: TaskRecord, workspaceAlias: string, queryTerms: string[], excludeTaskId: string): number {
-  if (!session || (workspaceAlias && String(session.workspace || '') === workspaceAlias)) return 0;
-  if (excludeTaskId && cleanTaskId(session.id) === excludeTaskId) return 0;
-  if (session.status !== 'completed' || session.completionKnown !== true) return 0;
-  const primary = matchingRelevanceTerms(queryTerms, `${session.objective || ''} ${session.title || ''}`);
-  const secondary = matchingRelevanceTerms(queryTerms, `${session.resultSummary || ''} ${session.summary || ''}`);
-  const score = (primary.length * 3) + secondary.length;
-  const distinctMatches = new Set([...primary, ...secondary]).size;
-  return distinctMatches >= 2 && score >= 4 ? score : 0;
-}
-
-function taskEpisodeScore(session: TaskRecord, workspaceAlias: string, queryTerms: string[], excludeTaskId: string): number {
-  if (!session || String(session.workspace || '') !== workspaceAlias) return 0;
-  if (excludeTaskId && cleanTaskId(session.id) === excludeTaskId) return 0;
-  if (session.status !== 'completed' || session.completionKnown !== true) return 0;
-  const primary = matchingRelevanceTerms(queryTerms, `${session.objective || ''} ${session.title || ''}`);
-  const secondary = matchingRelevanceTerms(queryTerms, `${session.resultSummary || ''} ${session.summary || ''} ${(session.changedFiles || []).join(' ')}`);
-  return (primary.length * 3) + secondary.length;
-}
-
-function compactTaskEpisode(session: TaskRecord): Record<string, any> {
-  const changes = uniqueStrings(session.changedFiles).slice(0, 8);
+function compactTaskEpisode(session: TaskRecord, match: { confidence: number; strength: string; reasons: string[] } | null = null): Record<string, any> {
+  const changes = uniqueStrings(session.changedFiles).slice(0, 6).map(file => compactText(file, 160));
   const goal = compactText(session.objective || session.title, 300);
   const outcome = compactText(session.resultSummary || session.summary, 600);
   return {
     ...(goal ? { goal } : {}),
     ...(outcome ? { outcome } : {}),
     ...(changes.length ? { changes } : {}),
-    ...(String(session.validation || '').trim() ? { validation: String(session.validation).trim() } : {})
+    ...(String(session.validation || '').trim() ? { validation: String(session.validation).trim() } : {}),
+    ...(match ? { confidence: match.confidence, matchStrength: match.strength, matchReasons: match.reasons } : {})
   };
 }
 
-function compactPortableTaskEpisode(session: TaskRecord): Record<string, any> {
+function compactPortableTaskEpisode(session: TaskRecord, match: { confidence: number; strength: string; reasons: string[] } | null = null): Record<string, any> {
   const goal = compactText(session.objective || session.title, 260);
   const outcome = compactText(session.resultSummary || session.summary, 520);
   const validation = String(session.validation || '').trim();
   return {
     ...(goal ? { goal } : {}),
     ...(outcome ? { outcome } : {}),
-    ...(validation ? { validation } : {})
+    ...(validation ? { validation } : {}),
+    ...(match ? { confidence: match.confidence, matchStrength: match.strength, matchReasons: match.reasons } : {})
   };
 }
 

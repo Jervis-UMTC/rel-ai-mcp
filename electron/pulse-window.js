@@ -85,7 +85,6 @@ function createPulseWindowManager(options = {}) {
       return;
     }
     const win = getOrCreateWindow();
-    if (!wayland) reposition();
     if (rendererReady) win.webContents.send('pulse:update', pulseModel());
     if (!win.isVisible()) {
       if (typeof win.showInactive === 'function') win.showInactive();
@@ -152,6 +151,7 @@ function createPulseWindowManager(options = {}) {
       window.setSize?.(bounds.width, bounds.height, false);
       return;
     }
+    if (typeof window.getBounds === 'function' && sameBounds(window.getBounds(), bounds)) return;
     const revision = ++geometryRevision;
     applyingGeometry = true;
     window.setBounds?.(bounds, false);
@@ -228,6 +228,13 @@ function pulseBounds(screen, options = {}) {
     width,
     height
   };
+}
+
+function sameBounds(left, right) {
+  return left?.x === right?.x
+    && left?.y === right?.y
+    && left?.width === right?.width
+    && left?.height === right?.height;
 }
 
 function clamp(value, min, max) {

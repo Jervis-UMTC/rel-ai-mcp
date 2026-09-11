@@ -101,8 +101,14 @@ assert.match(pulseHtml, /id="pulseTaskCount"/, 'compact Pulse markup must expose
 assert.match(pulseHtml, /<span class="pulse-context-label">Tasks<\/span><strong id="pulseTasks">/, 'expanded Pulse must expose task names');
 assert.match(pulseCss, /\.pulse-bar\s*\{[^}]*-webkit-app-region:\s*drag/s, 'Pulse header must provide one stable native drag surface in compact and expanded states');
 assert.match(pulseCss, /\.pulse-compact-copy\s*\{[^}]*-webkit-app-region:\s*no-drag/s, 'compact click-to-expand content must stay interactive inside the native drag surface');
-assert.doesNotMatch(pulseCss, /\.pulse-shell\s*\{[^}]*transition:\s*[^;]*(?:width|height)/s, 'Pulse shell must not animate layout-triggering width or height properties');
-assert.match(pulseCss, /will-change:\s*transform, opacity/, 'Pulse morphing should stay on compositor-friendly properties');
+assert.doesNotMatch(pulseCss, /\.pulse-shell\s*\{[^}]*transition:/s, 'Pulse shell styling must not run a second CSS geometry transition alongside the compositor motion');
+assert.match(pulseCss, /body\.pulse-page\s*\{[^}]*padding:\s*0/s, 'Pulse surface must fill the native transparent window instead of leaving a rectangular gutter');
+assert.match(pulseCss, /\.pulse-shell\s*\{[^}]*width:\s*100%[^}]*height:\s*100%/s, 'compact and expanded Pulse geometry must use the exact native window bounds');
+assert.doesNotMatch(pulseCss, /backdrop-filter|box-shadow:\s*var\(--ui-shadow-(?:window|popover)\)/, 'Pulse must not paint clipped glass or external shadows that reveal the rectangular native window');
+assert.doesNotMatch(pulseCss, /pulseActivity|animation:\s*[^;]*infinite/, 'working state must not keep the transparent overlay continuously compositing');
+assert.doesNotMatch(pulseCss, /\.pulse-island\s*\{[^}]*(?:transform:|transition:)/s, 'Pulse details must share the shell motion instead of running a second geometry transition');
+assert.doesNotMatch(pulseCss, /data-collapsing="true"\][^{]*\{[^}]*(?:opacity|visibility|border-radius):/s, 'collapse state must not visually detach the contents or corners from the final expanded structure');
+assert.doesNotMatch(pulseCss, /will-change:\s*transform, opacity/, 'Pulse must not permanently reserve a compositor layer between transitions');
 assert.match(pulseCss, /user-select:\s*none/, 'Pulse text must not be selectable during pointer interaction');
 const nativeExpandIndex = pulseRenderer.indexOf('setExpanded?.(true)');
 const visualExpandIndex = pulseRenderer.indexOf('startExpandMorph()');
@@ -110,8 +116,12 @@ assert.ok(nativeExpandIndex >= 0 && visualExpandIndex > nativeExpandIndex, 'nati
 const collapseLayoutIndex = pulseRenderer.indexOf('applyExpandedLayout(false)');
 const nativeCollapseIndex = pulseRenderer.lastIndexOf('setExpanded?.(false)');
 assert.ok(collapseLayoutIndex >= 0 && nativeCollapseIndex > collapseLayoutIndex, 'the visual morph must reach compact layout before the native window contracts');
-assert.match(pulseRenderer, /shell\.animate\(/, 'Pulse geometry must use the Web Animations compositor path instead of CSS width/height interpolation');
-assert.match(pulseRenderer, /morphAnimation\.reverse\(\)/, 'rapid open/close changes must reverse the active morph instead of restarting from a jump');
+assert.match(pulseRenderer, /shell\.animate\(/, 'Pulse open and close transitions must stay on opacity and compositor transforms instead of CSS width/height interpolation');
+assert.match(pulseRenderer, /translateY\(-5px\) scale\(\.985\)/, 'Pulse transition must preserve the final panel proportions instead of stretching between unrelated aspect ratios');
+assert.doesNotMatch(pulseRenderer, /(?:before|target)\.width\s*\/\s*(?:after|from)\.width|(?:before|target)\.height\s*\/\s*(?:after|from)\.height/, 'Pulse must not non-uniformly scale the expanded structure into pill geometry');
+assert.match(pulseRenderer, /morphAnimation\.reverse\(\)/, 'rapid open/close changes must reverse the active transition instead of restarting from a jump');
+assert.match(pulseRenderer, /animation\.finished\.then\(\(\) => finishMorph\(animation\)/, 'Pulse must use the animation finished promise when Electron delivers it promptly');
+assert.match(pulseRenderer, /setTimeout\(\(\) => finishMorph\(animation\), PULSE_TRANSITION_MS \+ 24\)/, 'Pulse must have a bounded completion fallback so native collapse cannot remain expanded after the visual transition ends');
 assert.match(pulseRenderer, /model\?\.expanded === false && expanded[^\n]*resetExpandedFromHost\(\)/, 'a hidden native collapse must reset stale renderer expansion before Pulse is shown again');
 assert.match(pulseRenderer, /prefers-reduced-motion:\s*reduce/, 'Pulse motion must honor the reduced-motion preference');
 assert.match(pulseRenderer, /taskCountElement\.textContent = taskCount === 1 \? '1 task' : `\$\{taskCount\} tasks`;/, 'compact Pulse must render the current task count');
@@ -235,6 +245,15 @@ assert.equal(window.sent.at(-1).channel, 'pulse:update');
 assert.equal(window.sent.at(-1).payload.tone, 'working');
 assert.equal(window.sent.at(-1).payload.themePreference, 'dark');
 assert.equal(window.sent.at(-1).payload.expanded, false, 'Pulse state sent to the renderer must include authoritative native expansion state');
+const idleGeometryWrites = window.boundsWrites.length;
+manager.update({
+  serverRunning: true, tunnelStatus: 'running',
+  taskActivity: {
+    state: 'working', activeCalls: 1, activeTaskCount: 1, operation: 'Running tests',
+    tasks: [{ taskId: 'task-active', workspace: 'repo', title: 'Fix tests', status: 'running', activeCalls: 1 }]
+  }
+});
+assert.equal(window.boundsWrites.length, idleGeometryWrites, 'status-only Pulse updates must not reapply unchanged native bounds');
 assert.equal(manager.setExpanded(true), true);
 assert.deepEqual(window.boundsWrites.at(-1), pulseBounds(fakeScreen, { expanded: true }));
 assert.equal(manager.setExpanded(false), false);

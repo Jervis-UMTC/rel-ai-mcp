@@ -29,7 +29,7 @@ const uiPackage = JSON.parse(read('src/ui/package.json'));
 const usageCombined = `${usageSource}\n${usageReact}\n${usageRender}\n${usageRange}\n${usageData}`;
 
 assert.match(navigationCatalog, /route\(['"]usage['"], ['"]Analytics['"]/);
-assert.match(navigationCatalog, /See activity trends, reliability, and problem areas/i);
+assert.match(navigationCatalog, /See activity trends, success rates, timing, and problem areas/i);
 assert.doesNotMatch(dashboard, /usage: systemSection\(['"]usage['"]\)/, 'Analytics must not retain the legacy System renderer');
 assert.match(reactMain, /registerReactSection\('usage'/, 'Analytics must be registered as a canonical React route');
 assert.match(preload, /getLocalUsage: month => ipcRenderer\.invoke\(['"]desktop:analytics:local['"], month\)/);
@@ -73,10 +73,12 @@ assert.match(charts, /event\.key === 'ArrowRight'/, 'Analytics timeline must sup
 assert.match(charts, /react-chartjs-2/, 'Analytics charts must use the canonical React Chart.js wrapper');
 assert.match(charts, /chart\.js/, 'Analytics charts must use Chart.js instead of first-party SVG geometry');
 assert.doesNotMatch(charts, /\bBar(?:Element)?\b/, 'Temporal analytics must use line charts consistently');
-assert.match(charts, /spanGaps: false/, 'Missing rate and duration samples must remain visible as gaps');
+assert.match(charts, /export function SparkChart[\s\S]{0,1500}spanGaps: true/, 'Compact analytics sparklines must stay visually continuous across missing samples');
+assert.match(charts, /spanGaps: false/, 'Missing rate and duration samples must remain visible as gaps in the detailed timeline');
 assert.match(charts, /trailingGapContinuation/, 'Trailing idle buckets must keep the timeline visually connected to the range end');
 assert.match(charts, /borderDash: \[4, 4\]/, 'Trailing idle continuation must be visually distinct from measured samples');
 assert.match(usageCss, /\.usage-metric-value \{[^}]*flex-wrap/, 'Analytics metric values and deltas must wrap instead of overlapping neighboring tiles');
+assert.match(usageCss, /\.usage-metrics \{[^}]*repeat\(4,minmax\(0,1fr\)\)/, 'The four primary Analytics metrics must use the full-width four-column desktop grid');
 assert.ok(uiPackage.dependencies['chart.js'], 'Chart.js must be owned by the UI workspace');
 assert.ok(uiPackage.dependencies['react-chartjs-2'], 'The React Chart.js wrapper must be owned by the UI workspace');
 assert.doesNotMatch(`${usageReact}\n${homeReact}\n${workspacesReact}`, /h\(['"]svg['"]/, 'Analytics feature renderers must not retain first-party SVG chart markup');
@@ -97,12 +99,12 @@ const previousWithoutRateBaselines = {
   operationSuccessRate: 0, averageDuration: 0
 };
 const noBaselineMetrics = analyticsMetrics(currentMetricScope, previousWithoutRateBaselines);
-assert.equal(noBaselineMetrics.find(metric => metric.key === 'reliabilityRate')?.help.length > 0, true, 'Rate metrics must retain contextual help');
-assert.equal(noBaselineMetrics.find(metric => metric.key === 'reliabilityRate')?.delta, null, 'A missing prior reliability baseline must not be displayed as a 0% comparison');
+assert.equal(noBaselineMetrics.some(metric => metric.key === 'reliabilityRate'), false, 'Reliability remains diagnostic instrumentation, not a normal Analytics metric');
+assert.equal(noBaselineMetrics.some(metric => metric.key === 'infrastructureFailures'), false, 'Internal errors must not occupy a normal Analytics metric tile');
+assert.equal(noBaselineMetrics.find(metric => metric.key === 'operationSuccessRate')?.help.length > 0, true, 'Rate metrics must retain contextual help');
 assert.equal(noBaselineMetrics.find(metric => metric.key === 'operationSuccessRate')?.delta, null, 'A missing prior success-rate baseline must not be displayed as a 0% comparison');
 
 const comparedMetrics = analyticsMetrics(currentMetricScope, { ...previousWithoutRateBaselines, toolCalls: 10, reliabilityCalls: 10, reliableCalls: 9, reliabilityRate: 90, completed: 10, operationSuccessRate: 90, averageDuration: 7000 });
-assert.equal(comparedMetrics.find(metric => metric.key === 'reliabilityRate')?.delta?.text, '+6.8 pp', 'Measured reliability rates must compare in percentage points');
 assert.equal(comparedMetrics.find(metric => metric.key === 'operationSuccessRate')?.delta?.text, '+2.7 pp', 'Measured success rates must compare in percentage points');
 const timeline = timelineModel([1, 3, 2], 'Actions');
 assert.match(timeline.summary, /Peak 3/);
@@ -122,9 +124,15 @@ assert.equal(pointMetric({ successes: 0, failures: 0 }, 'operationSuccessRate'),
 assert.equal(pointMetric({ successes: 0, failures: 0, executionMs: 0 }, 'averageDuration'), null, 'empty duration buckets must remain missing rather than becoming 0 ms');
 assert.equal(formatChartValue(null, 'Successful actions'), '—');
 
-for (const label of ['Actions', 'Reliable actions', 'Internal errors', 'Retryable problems', 'Successful actions', 'Average time']) {
+for (const label of ['Actions', 'Retryable problems', 'Successful actions', 'Average time']) {
   assert.match(usageCombined, new RegExp(label), `Usage must render ${label}.`);
 }
+assert.doesNotMatch(usageRender, /metric\('Reliable actions'|metric\('Internal errors'/, 'Reliability and internal errors must not occupy normal Analytics metric tiles');
+assert.doesNotMatch(usageReact, /\['infrastructureFailures', 'Internal errors'/, 'Internal errors must not remain in the normal timeline metric switcher');
+assert.match(usageReact, /usage-infrastructure-alert/, 'Confirmed infrastructure failures must surface only as an exceptional Analytics warning');
+assert.match(usageReact, /Open Troubleshooting/, 'Infrastructure warnings must link to Troubleshooting');
+assert.match(workspacesReact, /Successful actions/, 'Project analytics must show normal success rate instead of the reliability percentage');
+assert.doesNotMatch(workspacesReact, /label: 'Reliable'/, 'Project analytics must not expose the diagnostic reliability percentage');
 for (const field of ['requests', 'toolCalls', 'successes', 'failures', 'executionMs', 'activeDays']) {
   assert.match(usageCombined, new RegExp(`\\b${field}\\b`), `Analytics must consume ${field}.`);
 }

@@ -91,11 +91,19 @@
 .diagnostic-doctor-check { @apply grid min-w-0 gap-1 rounded-lg p-3 text-[11px]; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
 .diagnostic-doctor-check.pass { border-left: 3px solid var(--ui-status-success-foreground); }
 .diagnostic-doctor-check.fail { border-left: 3px solid var(--ui-status-danger-foreground); }
+.diagnostic-doctor-check.skip, .diagnostic-doctor-check.optional { border-left: 3px solid var(--ui-border-control); }
+.diagnostic-doctor-check.optional { background: var(--ui-surface-primary); }
 .diagnostic-doctor-check-head { @apply flex min-w-0 items-center justify-between gap-3; }
 .diagnostic-doctor-check-head code { @apply min-w-0 break-words; }
 .diagnostic-doctor-check-head strong { @apply shrink-0 text-[10px] uppercase tracking-[.04em]; }
+.diagnostic-doctor-check.pass .diagnostic-doctor-check-head strong { color: var(--ui-status-success-foreground); }
+.diagnostic-doctor-check.fail .diagnostic-doctor-check-head strong { color: var(--ui-status-danger-foreground); }
+.diagnostic-doctor-check.skip .diagnostic-doctor-check-head strong, .diagnostic-doctor-check.optional .diagnostic-doctor-check-head strong { color: var(--ui-text-tertiary); }
 .diagnostic-doctor-check p, .diagnostic-doctor-check ul { @apply m-0 leading-5; color: var(--ui-text-secondary); }
 .diagnostic-doctor-check ul { @apply pl-5; }
+.diagnostic-doctor-optional-setup { @apply mt-1 text-[11px]; color: var(--ui-text-secondary); }
+.diagnostic-doctor-optional-setup summary { @apply w-fit cursor-pointer font-semibold; color: var(--ui-text-tertiary); }
+.diagnostic-doctor-optional-setup[open] summary { @apply mb-1; }
 
 .connection-controls-section { @apply mt-2 grid gap-3 border-t pt-4; border-color: var(--ui-border-default); }
 .copy-box { @apply min-h-24 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 text-[11px] leading-5; background: var(--ui-canvas); border: 1px solid var(--ui-border-default); color: var(--ui-text-primary); }

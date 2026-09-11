@@ -55,7 +55,8 @@ try {
   assert.equal(legacyScope.reliabilityCalls, 0);
 
   const legacyMetrics = analyticsMetrics(legacyScope, analyticsRangeScope([], bounds));
-  assert.equal(legacyMetrics.find(metric => metric.key === 'reliabilityRate')?.detail, 'Measured after new actions run');
+  assert.equal(legacyMetrics.some(metric => metric.key === 'reliabilityRate'), false, 'Reliability classification must remain diagnostic rather than a normal metric tile');
+  assert.equal(legacyMetrics.some(metric => metric.key === 'infrastructureFailures'), false, 'Internal errors must remain exceptional rather than a normal metric tile');
   assert.equal(legacyMetrics.some(metric => metric.label === 'Operation success'), false);
 
   const legacyStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-reliability-v1-'));
@@ -139,9 +140,11 @@ try {
   }
 
   const metrics = analyticsMetrics(scope, analyticsRangeScope([], bounds));
-  assert.equal(metrics.some(metric => metric.label === 'Reliable actions'), true);
+  assert.equal(metrics.some(metric => metric.label === 'Reliable actions'), false);
+  assert.equal(metrics.some(metric => metric.label === 'Internal errors'), false);
+  assert.equal(metrics.some(metric => metric.label === 'Successful actions'), true);
+  assert.equal(metrics.some(metric => metric.label === 'Retryable problems'), true);
   assert.equal(metrics.some(metric => metric.label === 'Operation success'), false);
-  assert.equal(metrics.find(metric => metric.label === 'Internal errors')?.detail, 'Confirmed Rel.AI infrastructure failures only');
   assert.equal(metrics.some(metric => metric.label === 'Retryable errors'), false);
 
   await flushLocalAnalytics(config);

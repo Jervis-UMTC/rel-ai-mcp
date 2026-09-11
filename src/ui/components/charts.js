@@ -43,7 +43,7 @@ export function SparkChart({ values = [], className = '', tone = '', ariaLabel =
       cubicInterpolationMode: 'monotone',
       tension: 0.32,
       fill: true,
-      spanGaps: false,
+      spanGaps: true,
       pointRadius: 0,
       pointHoverRadius: 0
     }]

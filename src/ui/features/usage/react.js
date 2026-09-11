@@ -11,14 +11,12 @@ const h = React.createElement;
 const USAGE_STORE_KEYS = Object.freeze(['live']);
 const CHART_METRICS = Object.freeze([
   ['toolCalls', 'Actions', 'activity'],
-  ['infrastructureFailures', 'Internal errors', 'warning'],
+  ['recoverableFailures', 'Retryable problems', 'refresh'],
   ['operationSuccessRate', 'Successful actions', 'success'],
   ['averageDuration', 'Average time', 'timer']
 ]);
 const METRIC_ICONS = Object.freeze({
   toolCalls: 'activity',
-  reliabilityRate: 'reliability',
-  infrastructureFailures: 'warning',
   recoverableFailures: 'refresh',
   operationSuccessRate: 'success',
   averageDuration: 'timer'
@@ -220,9 +218,18 @@ function UsageContent({ bounds, current, previous }) {
   const [chartKey, setChartKey] = useState('toolCalls');
   const chart = CHART_METRICS.find(([key]) => key === chartKey) || CHART_METRICS[0];
   const fallback = current.usedMonthlyFallback && current.points.every(point => point.toolCalls === 0 && point.requests === 0);
+  const infrastructureFailures = Number(current.infrastructureFailures || 0);
   return h(React.Fragment, null,
     h('section', { className: 'usage-overview', 'aria-label': `${current.label} analytics for ${bounds.label}` },
       fallback ? h('p', { className: 'usage-series-note' }, 'Hourly trends are unavailable for older monthly totals.') : null,
+      infrastructureFailures
+        ? h('div', { className: 'connection-notice bad usage-infrastructure-alert', role: 'status' },
+            h(Icon, { name: 'warning', size: 16 }),
+            h('strong', null, `${integer(infrastructureFailures)} Rel.AI internal ${infrastructureFailures === 1 ? 'error' : 'errors'}`),
+            h('span', null, `Confirmed infrastructure ${infrastructureFailures === 1 ? 'failure' : 'failures'} in this range.`),
+            h('a', { href: routeHref('diagnostics') }, 'Open Troubleshooting')
+          )
+        : null,
       h('div', { className: 'usage-metrics' }, analyticsMetrics(current, previous).map(metric => h(Metric, { key: metric.key, metric })))
     ),
     h('section', { className: 'card usage-timeline-card', 'data-usage-timeline': true },

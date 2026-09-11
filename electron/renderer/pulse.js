@@ -2,9 +2,9 @@ let currentModel = { route: '#home' };
 let expanded = false;
 let morphAnimation = null;
 let morphDirection = '';
-let compactSize = null;
+let morphCompletionTimer = null;
 
-const PULSE_TRANSITION_MS = 220;
+const PULSE_TRANSITION_MS = 180;
 const PULSE_EASING = 'cubic-bezier(.16,1,.3,1)';
 
 const shell = document.getElementById('pulseShell');
@@ -92,13 +92,12 @@ function setExpanded(next) {
     if ((value && morphDirection === 'collapse') || (!value && morphDirection === 'expand')) {
       morphDirection = value ? 'expand' : 'collapse';
       morphAnimation.reverse();
+      scheduleMorphCompletion(morphAnimation);
     }
     return;
   }
 
   if (value) {
-    const before = shell.getBoundingClientRect();
-    compactSize = { width: before.width, height: before.height };
     Promise.resolve(window.relaiPulse?.setExpanded?.(true))
       .then(() => {
         if (!expanded) {
@@ -118,14 +117,12 @@ function setExpanded(next) {
 }
 
 function startExpandMorph() {
-  const before = compactSize || shell.getBoundingClientRect();
   applyExpandedLayout(true);
   shell.dataset.collapsing = 'false';
-  const after = shell.getBoundingClientRect();
-  if (prefersReducedMotion() || !canAnimateMorph(before, after)) return;
+  if (prefersReducedMotion() || !canAnimateMorph()) return;
   startMorph([
-    { transform: `scale(${before.width / after.width}, ${before.height / after.height})`, borderRadius: '999px' },
-    { transform: 'scale(1, 1)', borderRadius: '18px' }
+    { opacity: 0, transform: 'translateY(-5px) scale(.985)' },
+    { opacity: 1, transform: 'translateY(0) scale(1)' }
   ], 'expand');
 }
 
@@ -136,15 +133,13 @@ function startCollapseMorph() {
     return;
   }
   shell.dataset.collapsing = 'true';
-  const from = shell.getBoundingClientRect();
-  const target = compactSize;
-  if (prefersReducedMotion() || !canAnimateMorph(target, from)) {
+  if (prefersReducedMotion() || !canAnimateMorph()) {
     finishCollapsedLayout();
     return;
   }
   startMorph([
-    { transform: 'scale(1, 1)', borderRadius: '18px' },
-    { transform: `scale(${target.width / from.width}, ${target.height / from.height})`, borderRadius: '999px' }
+    { opacity: 1, transform: 'translateY(0) scale(1)' },
+    { opacity: 0, transform: 'translateY(-5px) scale(.985)' }
   ], 'collapse');
 }
 
@@ -157,18 +152,32 @@ function startMorph(keyframes, direction) {
     fill: 'both'
   });
   morphAnimation = animation;
-  animation.addEventListener('finish', () => finishMorph(animation), { once: true });
+  scheduleMorphCompletion(animation);
+  void animation.finished.then(() => finishMorph(animation), () => {});
   animation.addEventListener('cancel', () => {
     if (morphAnimation === animation) {
+      clearMorphCompletionTimer();
       morphAnimation = null;
       morphDirection = '';
     }
   }, { once: true });
 }
 
+function scheduleMorphCompletion(animation) {
+  clearMorphCompletionTimer();
+  morphCompletionTimer = window.setTimeout(() => finishMorph(animation), PULSE_TRANSITION_MS + 24);
+}
+
+function clearMorphCompletionTimer() {
+  if (morphCompletionTimer === null) return;
+  window.clearTimeout(morphCompletionTimer);
+  morphCompletionTimer = null;
+}
+
 function finishMorph(animation) {
   if (morphAnimation !== animation) return;
   const direction = morphDirection;
+  clearMorphCompletionTimer();
   morphAnimation = null;
   morphDirection = '';
   if (direction === 'collapse' && !expanded) {
@@ -190,6 +199,7 @@ function finishCollapsedLayout() {
 
 function resetExpandedFromHost() {
   const animation = morphAnimation;
+  clearMorphCompletionTimer();
   morphAnimation = null;
   morphDirection = '';
   animation?.cancel();
@@ -210,11 +220,8 @@ function applyExpandedLayout(value) {
   shell.dataset.expanded = String(value);
 }
 
-function canAnimateMorph(compact, expandedRect) {
-  return Boolean(compact && expandedRect
-    && compact.width > 0 && compact.height > 0
-    && expandedRect.width > 0 && expandedRect.height > 0
-    && typeof shell.animate === 'function');
+function canAnimateMorph() {
+  return typeof shell.animate === 'function';
 }
 
 function prefersReducedMotion() {

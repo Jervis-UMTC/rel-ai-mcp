@@ -2,10 +2,8 @@ import { deltaFor } from './range-model.js';
 
 const METRIC_HELP = Object.freeze({
   toolCalls: 'Total Rel.AI tool actions recorded in this range. The change compares with the previous equivalent period.',
-  reliabilityRate: 'Share of measured actions without a confirmed Rel.AI infrastructure failure. Cancellations and unclassified failures are excluded. “pp” means percentage points. A change from 90% to 95% is +5 pp.',
-  infrastructureFailures: 'Actions with confirmed Rel.AI infrastructure failures. Expected command failures, check failures, cancellations, and unclassified failures are excluded.',
   recoverableFailures: 'Actions with a recoverable task or context problem. A retry or context refresh can usually resolve the problem.',
-  operationSuccessRate: 'Share of recorded actions where the requested command or check succeeded. Rate changes use percentage points (pp).',
+  operationSuccessRate: 'Share of recorded actions where the requested command or check succeeded. Rate changes use percentage points (pp); 90% to 95% is +5 pp.',
   averageDuration: 'Average elapsed time per completed action in this range. The change compares with the previous equivalent period when available.'
 });
 
@@ -21,8 +19,6 @@ export function analyticsMetrics(scope, previous) {
   });
   return [
     metric('Actions', 'toolCalls', integer(scope.toolCalls), '', { neutral: true }),
-    metric('Reliable actions', 'reliabilityRate', scope.reliabilityCalls ? percent(scope.reliabilityRate) : '—', scope.reliabilityCalls ? `${integer(scope.reliabilityCalls)} measured actions` : 'Measured after new actions run', { rate: true, available: scope.reliabilityCalls > 0, previousAvailable: Number(previous?.reliabilityCalls || 0) > 0, spark: false }),
-    metric('Internal errors', 'infrastructureFailures', integer(scope.infrastructureFailures), 'Confirmed Rel.AI infrastructure failures only', { inverse: true, metricTone: scope.infrastructureFailures ? 'bad' : 'good' }),
     metric('Retryable problems', 'recoverableFailures', integer(scope.recoverableFailures), 'Usually fixed by retrying or refreshing context', { inverse: true }),
     metric('Successful actions', 'operationSuccessRate', scope.completed ? percent(scope.operationSuccessRate) : '—', 'Whether the command or check itself succeeded', { rate: true, sparkKey: 'operationSuccessRate', available: scope.completed > 0, previousAvailable: Number(previous?.completed || 0) > 0 }),
     metric('Average time', 'averageDuration', duration(scope.averageDuration), scope.completed ? 'Per completed action' : '', { inverse: true, sparkKey: 'averageDuration', available: scope.completed > 0, previousAvailable: Number(previous?.completed || 0) > 0 })
@@ -85,7 +81,7 @@ export function duration(value) {
 
 export function formatChartValue(value, metricLabel) {
   if (value == null || !Number.isFinite(Number(value))) return '—';
-  if (metricLabel === 'Reliable actions' || metricLabel === 'Successful actions' || metricLabel === 'Success rate') return percent(value);
+  if (metricLabel === 'Successful actions' || metricLabel === 'Success rate') return percent(value);
   if (/duration|tool time|average time/i.test(metricLabel)) return duration(value);
   return integer(value);
 }
