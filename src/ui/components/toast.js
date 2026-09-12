@@ -1,10 +1,10 @@
 import { upsertToastOverlay } from '../overlay-store.js';
 
 const TOAST_VARIANTS = Object.freeze({
-  info: { symbol: 'i', label: 'Information', role: 'status', duration: 5000 },
-  success: { symbol: '✓', label: 'Success', role: 'status', duration: 4000 },
-  warn: { symbol: '!', label: 'Warning', role: 'status', duration: 8000 },
-  error: { symbol: '×', label: 'Error', role: 'alert', duration: 0 }
+  info: { icon: 'info', label: 'Information', role: 'status', duration: 5000 },
+  success: { icon: 'success', label: 'Success', role: 'status', duration: 4000 },
+  warn: { icon: 'warning', label: 'Warning', role: 'status', duration: 8000 },
+  error: { icon: 'warning', label: 'Error', role: 'alert', duration: 0 }
 });
 
 export function toast(message, { variant = 'info', duration } = {}) {
@@ -15,7 +15,7 @@ export function toast(message, { variant = 'info', duration } = {}) {
   return upsertToastOverlay({
     key: `${tone}\u0000${text}`,
     tone,
-    symbol: metadata.symbol,
+    icon: metadata.icon,
     text,
     role: metadata.role,
     ariaLabel: `${metadata.label}: ${text}`,

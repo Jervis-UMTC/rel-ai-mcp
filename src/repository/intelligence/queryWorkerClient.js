@@ -36,7 +36,8 @@ function runRepositoryQuery(kind, workspace, config = {}, payload = {}, options 
 
 function needsPeerRepositoryState(kind, payload = {}) {
   if (kind === 'cachedContext' || kind === 'cachedSummary' || kind === 'searchGraphContext') return true;
-  return kind === 'codeInspect' && String(payload?.args?.action || '').toLowerCase() === 'architecture';
+  const action = String(payload?.args?.action || '').toLowerCase();
+  return kind === 'codeInspect' && (action === 'architecture' || action === 'audit');
 }
 
 function repositoryQueryPool() {

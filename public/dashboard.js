@@ -1,5 +1,5 @@
 import { fetchJson, invalidateCache, DASHBOARD_DATA_URL } from './ui/api.js';
-import { applyLiveEvent, clearShellDashboardState, clearShellRecoveryNotice, getSnapshot as getStore, init as initStore, initConnectorRefreshModal, initUpdateAvailableModal, mountReactFoundation, patchLocalConnection, preloadReactRoutes, setShellConnectionOverride, setShellLastEventAt, setShellNow, showShellDashboardState, showShellRecoveryNotice, subscribe as subscribeStore } from './dashboard-react.js';
+import { applyLiveEvent, clearShellDashboardState, clearShellRecoveryNotice, getSnapshot as getStore, init as initStore, initConnectorRefreshModal, initUpdateAvailableModal, mountReactFoundation, patchLocalConnection, preloadReactRoute, preloadReactRoutes, setShellConnectionOverride, setShellLastEventAt, setShellNow, showShellDashboardState, showShellRecoveryNotice, subscribe as subscribeStore } from './dashboard-react.js';
 import { initRouter } from './ui/router.js';
 import { initEvents, startSSE } from './ui/events.js';
 import { initUiPreferences } from './ui/preferences.js';
@@ -71,8 +71,19 @@ async function boot() {
   }).start();
   window.addEventListener('pagehide', () => _dashboardClock?.stop(), { once: true });
   const initialPayload = readInitialPayload();
-  const initial = initialPayload?.ok !== false ? withConnectionState(initialPayload || {}, _liveState) : initialPayload;
+  const initial = initialPayload == null
+    ? null
+    : initialPayload.ok !== false
+      ? withConnectionState(initialPayload, _liveState)
+      : initialPayload;
   initStore(initial?.ok !== false ? initial || {} : {});
+  if (!initial) {
+    showShellDashboardState({
+      kind: 'loading',
+      title: 'Loading Rel.AI…',
+      description: 'Checking your connection and project access.'
+    });
+  }
   mountReactFoundation(ensureDashboardRoot(), { getSnapshot: getStore, subscribe: subscribeStore }, {
     desktop: window.relaiDesktop || null,
     onAddWorkspace: async () => {
@@ -88,12 +99,6 @@ async function boot() {
   if (initial && initial.ok !== false) {
     activateRouter();
     updateShell(initial);
-  } else {
-    showShellDashboardState({
-      kind: 'loading',
-      title: 'Loading Rel.AI…',
-      description: 'Checking your connection and project access.'
-    });
   }
   if (initial?.ok === false || !initial) {
     const refreshed = await recoverDashboard({ source: 'boot' });
@@ -111,7 +116,20 @@ function activateRouter() {
   if (_routerReady) return;
   _routerReady = true;
   initRouter();
-  void preloadReactRoutes();
+  const initialSection = currentRouteSection();
+  void preloadReactRoutes(initialSection);
+  window.addEventListener('relai:route-change', event => {
+    const section = String(event?.detail?.section || '').trim();
+    if (section) void preloadReactRoute(section);
+  });
+}
+
+function currentRouteSection() {
+  try {
+    const raw = String(location.hash || '').slice(1);
+    const key = normalizeRouteKey(raw || 'home');
+    return key.split('?')[0].split('/')[0] || 'home';
+  } catch { return 'home'; }
 }
 
 function initDesktopBridge() {

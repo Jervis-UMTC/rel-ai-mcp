@@ -29,48 +29,49 @@ for (const localOwned of ['files/repos', 'Git', 'CLI/processes', 'LAN/intranet',
 }
 
 const read = descriptions.get('relai_read');
-assert.match(read, /authorized local workspace.*ordinary folder or a Git repository/i);
-assert.match(read, /already uploaded to the AI host.*host-side inputs/i);
-assert.match(read, /file still lives on the user's machine|must be transferred from it/i);
+assert.match(read, /local workspace files/i);
+assert.match(read, /Host-uploaded files stay host-owned/i);
+assert.match(read, /asResource:true.*resource_link.*transfer or download/i);
 
 const edit = descriptions.get('relai_edit');
-assert.match(edit, /authorized local workspace.*ordinary folders and repositories/i);
-assert.match(edit, /Host-side document authoring remains host-owned/i);
-assert.match(edit, /native ChatGPT file import.*host-generated artifact.*stored locally/i);
+assert.match(edit, /Mutates authorized workspace files or environment/i);
+assert.match(edit, /host file import/i);
 
 const ui = descriptions.get('relai_ui');
-assert.match(ui, /bounded QA evidence/i);
-assert.match(ui, /use relai_browser for general machine-local browsing/i);
+assert.match(ui, /Bounded QA.*allowed localhost app/i);
+assert.match(ui, /machine-local browsing belongs in relai_browser/i);
+assert.match(ui, /public web stays host-owned/i);
 
 const browser = descriptions.get('relai_browser');
-assert.match(browser, /browser running on the user's local machine/i);
-assert.match(browser, /localhost or LAN\/intranet resources/i);
-assert.match(browser, /local VPN access/i);
-assert.match(browser, /machine-local authenticated browser state/i);
-assert.match(browser, /upload from or download into an authorized local workspace/i);
-assert.match(browser, /Do not use it merely to research the public internet/i);
-const browserActions = publicTools.get('relai_browser')?.inputSchema?.properties?.action?.enum || [];
-for (const action of ['status', 'start', 'tabs', 'navigate', 'upload', 'download', 'stop']) {
+assert.match(browser, /Local browser/i);
+assert.match(browser, /localhost\/LAN\/intranet\/VPN/i);
+assert.match(browser, /machine-authenticated sessions/i);
+assert.match(browser, /workspace file transfer/i);
+assert.match(browser, /public web stays host-owned/i);
+const browserTool = publicTools.get('relai_browser');
+const browserActions = browserTool?.inputSchema?.properties?.action?.enum || [];
+assert.deepEqual(browserTool?.inputSchema?.properties?.detail?.enum, ['semantic', 'layout'], 'relai_browser must expose semantic and layout snapshot detail modes');
+for (const action of ['status', 'start', 'tabs', 'navigate', 'snapshot', 'upload', 'download', 'stop']) {
   assert.ok(browserActions.includes(action), `relai_browser must expose ${action}`);
 }
 
 const desktop = descriptions.get('relai_desktop');
-assert.match(desktop, /structured local desktop actions/i);
-assert.match(desktop, /Prefer this over relai_computer/i);
+assert.match(desktop, /Structured local OS actions/i);
+assert.match(desktop, /relai_computer is the UI fallback/i);
 
 const computer = descriptions.get('relai_computer');
-assert.match(computer, /final fallback for local desktop interaction/i);
-assert.match(computer, /structured local capabilities.*local browser surface/i);
-assert.match(computer, /not a substitute for host-native reasoning, public web search, image generation, uploaded-file analysis, or cloud connectors/i);
+assert.match(computer, /final fallback for local desktop input/i);
+assert.match(computer, /structured local and browser capabilities/i);
+assert.match(computer, /per-app approval/i);
 
 const decisions = [
-  ['Research today\'s AI news', /Public-web research/i, /Do not use.*public/i],
+  ['Research today\'s AI news', /Public-web research/i, null],
   ['Check Gmail', /AI-host plugin\/connector/i, null],
   ['Run tests in C:\\repo', /CLI\/processes/i, null],
   ['Read D:\\contract.pdf', /files\/repos/i, null],
-  ['Open our internal 192.168.x.x dashboard', /LAN\/intranet/i, /browser running on the user's local machine/i],
-  ['Save a host-generated artifact into the local workspace', /Rel\.AI structured local/i, /native ChatGPT file import.*host-generated artifact.*stored locally/i],
-  ['Change a setting in a native desktop application', /\bapps\b/i, /Prefer this over relai_computer/i]
+  ['Open our internal 192.168.x.x dashboard', /LAN\/intranet/i, /Local browser.*localhost\/LAN\/intranet\/VPN/i],
+  ['Save a host-generated artifact into the local workspace', /Rel\.AI structured local/i, /host file import/i],
+  ['Change a setting in a native desktop application', /\bapps\b/i, /Structured local OS actions/i]
 ];
 for (const [scenario, contextPattern, toolPattern] of decisions) {
   assert.match(STATIC_CONTEXT, contextPattern, `${scenario} must be decidable from the canonical host/local contract`);

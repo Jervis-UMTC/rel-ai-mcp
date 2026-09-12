@@ -4,6 +4,13 @@ import type { DatabaseSync } from 'node:sqlite';
 import { statePath } from './stateLayout.js';
 import { setStateMeta, stateMetaValue, withStateDatabase } from './stateDatabase.ts';
 import { failureCategoryFromCode, normalizeFailureCategory } from './analyticsFailureCategory.ts';
+import {
+  analyticsUseCaseForOperation,
+  normalizeAnalyticsTaskIntent,
+  normalizeAnalyticsUseCase,
+  type AnalyticsTaskIntent,
+  type AnalyticsUseCase
+} from './analyticsTaxonomy.ts';
 import { classifyAnalyticsOutcome, reliabilityCountersForOutcome } from './analyticsOutcome.ts';
 import { telemetryStatus } from './telemetry.ts';
 import { sanitizePerformancePhases } from './performanceObservability.ts';
@@ -16,8 +23,9 @@ import {
   type TelemetryConfig
 } from './telemetry.types.ts';
 
-const SCHEMA_VERSION = 3;
-const PREVIOUS_SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 4;
+const PREVIOUS_SCHEMA_VERSION = 3;
+const PRE_RELIABILITY_SCHEMA_VERSION = 2;
 const LEGACY_SCHEMA_VERSION = 1;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -53,6 +61,24 @@ interface WorkspaceToolAggregate extends AnalyticsAggregate {
   tool: string;
 }
 
+interface ActivityMatrixAggregate extends AnalyticsAggregate {
+  intent: AnalyticsTaskIntent;
+  useCase: AnalyticsUseCase;
+}
+
+interface WorkspaceActivityMatrixAggregate extends ActivityMatrixAggregate {
+  workspace: string;
+}
+
+interface TaskIntentAggregate {
+  intent: AnalyticsTaskIntent;
+  tasks: number;
+}
+
+interface WorkspaceTaskIntentAggregate extends TaskIntentAggregate {
+  workspace: string;
+}
+
 interface FailureCategoryAggregate {
   category: AnalyticsFailureCategory;
   failures: number;
@@ -67,6 +93,10 @@ interface AnalyticsHour extends AnalyticsAggregate {
   tools: NamedAggregate<'tool'>[];
   workspaces: NamedAggregate<'workspace'>[];
   workspaceTools: WorkspaceToolAggregate[];
+  activityMatrix: ActivityMatrixAggregate[];
+  workspaceActivityMatrix: WorkspaceActivityMatrixAggregate[];
+  taskIntents: TaskIntentAggregate[];
+  workspaceTaskIntents: WorkspaceTaskIntentAggregate[];
   failureCategories: FailureCategoryAggregate[];
   workspaceFailureCategories: WorkspaceFailureCategoryAggregate[];
   performancePhases: PerformancePhaseDurations;
@@ -79,6 +109,10 @@ interface AnalyticsDocument {
   tools: NamedAggregate<'tool'>[];
   workspaces: NamedAggregate<'workspace'>[];
   workspaceTools: WorkspaceToolAggregate[];
+  activityMatrix: ActivityMatrixAggregate[];
+  workspaceActivityMatrix: WorkspaceActivityMatrixAggregate[];
+  taskIntents: TaskIntentAggregate[];
+  workspaceTaskIntents: WorkspaceTaskIntentAggregate[];
   failureCategories: FailureCategoryAggregate[];
   workspaceFailureCategories: WorkspaceFailureCategoryAggregate[];
   performancePhases: PerformancePhaseDurations;
@@ -99,6 +133,8 @@ function recordLocalToolOutcome(config: AnalyticsConfig = {}, event: LocalToolOu
     const hour = hourKey(at);
     const tool = boundedLabel(event.tool, 160) || 'unknown-tool';
     const workspace = boundedLabel(event.workspace, 160);
+    const useCase = analyticsUseCaseForOperation(event.operationName || event.tool);
+    const intent = normalizeAnalyticsTaskIntent(event.taskIntent, 'untracked');
     const durationMs = boundedDuration(event.durationMs);
     const success = event.ok === true ? 1 : 0;
     const failure = success ? 0 : 1;
@@ -112,9 +148,11 @@ function recordLocalToolOutcome(config: AnalyticsConfig = {}, event: LocalToolOu
       incrementTotals(document.totals, success, failure, durationMs, reliability);
       incrementPerformancePhases(document.performancePhases, performancePhases);
       incrementNamed(document.tools, 'tool', tool, success, failure, durationMs, reliability);
+      incrementActivityMatrix(document.activityMatrix, intent, useCase, success, failure, durationMs, reliability);
       if (workspace) {
         incrementNamed(document.workspaces, 'workspace', workspace, success, failure, durationMs, reliability);
         incrementWorkspaceTool(document.workspaceTools, workspace, tool, success, failure, durationMs, reliability);
+        incrementWorkspaceActivityMatrix(document.workspaceActivityMatrix, workspace, intent, useCase, success, failure, durationMs, reliability);
       }
       if (failure) {
         incrementFailureCategory(document.failureCategories, category);
@@ -127,6 +165,10 @@ function recordLocalToolOutcome(config: AnalyticsConfig = {}, event: LocalToolOu
         tools: [],
         workspaces: [],
         workspaceTools: [],
+        activityMatrix: [],
+        workspaceActivityMatrix: [],
+        taskIntents: [],
+        workspaceTaskIntents: [],
         failureCategories: [],
         workspaceFailureCategories: [],
         performancePhases: {}
@@ -134,14 +176,53 @@ function recordLocalToolOutcome(config: AnalyticsConfig = {}, event: LocalToolOu
       incrementTotals(hourly, success, failure, durationMs, reliability);
       incrementPerformancePhases(hourly.performancePhases, performancePhases);
       incrementNamed(hourly.tools, 'tool', tool, success, failure, durationMs, reliability);
+      incrementActivityMatrix(hourly.activityMatrix, intent, useCase, success, failure, durationMs, reliability);
       if (workspace) {
         incrementNamed(hourly.workspaces, 'workspace', workspace, success, failure, durationMs, reliability);
         incrementWorkspaceTool(hourly.workspaceTools, workspace, tool, success, failure, durationMs, reliability);
+        incrementWorkspaceActivityMatrix(hourly.workspaceActivityMatrix, workspace, intent, useCase, success, failure, durationMs, reliability);
       }
       if (failure) {
         incrementFailureCategory(hourly.failureCategories, category);
         if (workspace) incrementWorkspaceFailureCategory(hourly.workspaceFailureCategories, workspace, category);
       }
+      upsertDocument(db, document);
+    }, { transaction: true });
+    scheduleRetentionPrune(config);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function recordLocalTaskCompletion(config: AnalyticsConfig = {}, event: { workspace?: unknown; taskIntent?: unknown; at?: unknown } = {}): boolean {
+  try {
+    const at = boundedDate(event.at);
+    const month = monthKey(at);
+    const hour = hourKey(at);
+    const workspace = boundedLabel(event.workspace, 160);
+    const intent = normalizeAnalyticsTaskIntent(event.taskIntent, 'auto');
+    migrateLegacyLocalAnalytics(config);
+    withStateDatabase(config, (db: StateDatabase) => {
+      const document = readDocumentFromDatabase(db, month);
+      incrementTaskIntent(document.taskIntents, intent);
+      if (workspace) incrementWorkspaceTaskIntent(document.workspaceTaskIntents, workspace, intent);
+      const hourly = findOrCreate(document.hours, row => row.hour === hour, () => ({
+        hour,
+        ...emptyAggregate(true),
+        tools: [],
+        workspaces: [],
+        workspaceTools: [],
+        activityMatrix: [],
+        workspaceActivityMatrix: [],
+        taskIntents: [],
+        workspaceTaskIntents: [],
+        failureCategories: [],
+        workspaceFailureCategories: [],
+        performancePhases: {}
+      } as AnalyticsHour));
+      incrementTaskIntent(hourly.taskIntents, intent);
+      if (workspace) incrementWorkspaceTaskIntent(hourly.workspaceTaskIntents, workspace, intent);
       upsertDocument(db, document);
     }, { transaction: true });
     scheduleRetentionPrune(config);
@@ -187,6 +268,23 @@ function projectLocalUsageSnapshot(config: AnalyticsConfig, month: string, docum
       tool: row.tool,
       ...aggregateDto(row)
     })),
+    activityMatrix: document.activityMatrix.map(row => ({
+      intent: row.intent,
+      useCase: row.useCase,
+      ...aggregateDto(row)
+    })),
+    workspaceActivityMatrix: document.workspaceActivityMatrix.map(row => ({
+      workspace: row.workspace,
+      intent: row.intent,
+      useCase: row.useCase,
+      ...aggregateDto(row)
+    })),
+    taskIntents: document.taskIntents.map(row => ({ intent: row.intent, tasks: number(row.tasks) })),
+    workspaceTaskIntents: document.workspaceTaskIntents.map(row => ({
+      workspace: row.workspace,
+      intent: row.intent,
+      tasks: number(row.tasks)
+    })),
     series: document.hours.map(row => ({
       hour: row.hour,
       requests: number(row.requests),
@@ -203,6 +301,30 @@ function projectLocalUsageSnapshot(config: AnalyticsConfig, month: string, docum
       workspace: item.workspace,
       tool: item.tool,
       ...aggregateDto(item)
+    }))),
+    activityMatrixSeries: document.hours.flatMap(row => row.activityMatrix.map(item => ({
+      hour: row.hour,
+      intent: item.intent,
+      useCase: item.useCase,
+      ...aggregateDto(item)
+    }))),
+    workspaceActivityMatrixSeries: document.hours.flatMap(row => row.workspaceActivityMatrix.map(item => ({
+      hour: row.hour,
+      workspace: item.workspace,
+      intent: item.intent,
+      useCase: item.useCase,
+      ...aggregateDto(item)
+    }))),
+    taskIntentSeries: document.hours.flatMap(row => row.taskIntents.map(item => ({
+      hour: row.hour,
+      intent: item.intent,
+      tasks: number(item.tasks)
+    }))),
+    workspaceTaskIntentSeries: document.hours.flatMap(row => row.workspaceTaskIntents.map(item => ({
+      hour: row.hour,
+      workspace: item.workspace,
+      intent: item.intent,
+      tasks: number(item.tasks)
     }))),
     performance: { phaseMs: sanitizePerformancePhases(document.performancePhases) },
     failureCategories: document.failureCategories.map(item => ({ category: item.category, failures: number(item.failures) })),
@@ -249,9 +371,9 @@ function upsertDocument(db: StateDatabase, document: AnalyticsDocument, updatedA
 function parseDocument(text: string, month: string): AnalyticsDocument {
   const parsed = asRecord(JSON.parse(text) as unknown);
   const schemaVersion = Number(parsed.schemaVersion);
-  const supportedSchema = [SCHEMA_VERSION, PREVIOUS_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION].includes(schemaVersion);
+  const supportedSchema = [SCHEMA_VERSION, PREVIOUS_SCHEMA_VERSION, PRE_RELIABILITY_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION].includes(schemaVersion);
   return supportedSchema && parsed.month === month
-    ? sanitizeDocument(parsed, month, { resetReliability: schemaVersion !== SCHEMA_VERSION })
+    ? sanitizeDocument(parsed, month, { resetReliability: schemaVersion < PREVIOUS_SCHEMA_VERSION })
     : emptyDocument(month);
 }
 
@@ -350,36 +472,54 @@ function removeWorkspaceLocalAnalytics(config: AnalyticsConfig = {}, workspaceVa
 
       const workspaceAggregate = document.workspaces.find(item => item.workspace === workspace);
       const workspaceTools = document.workspaceTools.filter(item => item.workspace === workspace);
+      const workspaceMatrix = document.workspaceActivityMatrix.filter(item => item.workspace === workspace);
+      const workspaceTaskIntents = document.workspaceTaskIntents.filter(item => item.workspace === workspace);
       const workspaceFailures = document.workspaceFailureCategories.filter(item => item.workspace === workspace);
       const hasHourlyData = document.hours.some(hour =>
         hour.workspaces.some(item => item.workspace === workspace)
         || hour.workspaceTools.some(item => item.workspace === workspace)
+        || hour.workspaceActivityMatrix.some(item => item.workspace === workspace)
+        || hour.workspaceTaskIntents.some(item => item.workspace === workspace)
         || hour.workspaceFailureCategories.some(item => item.workspace === workspace));
-      if (!workspaceAggregate && !workspaceTools.length && !workspaceFailures.length && !hasHourlyData) continue;
+      if (!workspaceAggregate && !workspaceTools.length && !workspaceMatrix.length && !workspaceTaskIntents.length && !workspaceFailures.length && !hasHourlyData) continue;
 
       const removedCalls = number(workspaceAggregate?.toolCalls)
         || workspaceTools.reduce((sum, item) => sum + number(item.toolCalls), 0);
       removedToolCalls += removedCalls;
       if (workspaceAggregate) subtractAggregate(document.totals, workspaceAggregate, true);
       subtractToolRows(document.tools, workspaceTools);
+      subtractActivityRows(document.activityMatrix, workspaceMatrix);
+      subtractTaskIntentRows(document.taskIntents, workspaceTaskIntents);
       subtractFailureRows(document.failureCategories, workspaceFailures);
       document.workspaces = document.workspaces.filter(item => item.workspace !== workspace);
       document.workspaceTools = document.workspaceTools.filter(item => item.workspace !== workspace);
+      document.workspaceActivityMatrix = document.workspaceActivityMatrix.filter(item => item.workspace !== workspace);
+      document.workspaceTaskIntents = document.workspaceTaskIntents.filter(item => item.workspace !== workspace);
       document.workspaceFailureCategories = document.workspaceFailureCategories.filter(item => item.workspace !== workspace);
       document.tools = document.tools.filter(item => number(item.toolCalls) > 0);
+      document.activityMatrix = document.activityMatrix.filter(item => number(item.toolCalls) > 0);
+      document.taskIntents = document.taskIntents.filter(item => number(item.tasks) > 0);
       document.failureCategories = document.failureCategories.filter(item => number(item.failures) > 0);
 
       for (const hour of document.hours) {
         const hourlyAggregate = hour.workspaces.find(item => item.workspace === workspace);
         const hourlyTools = hour.workspaceTools.filter(item => item.workspace === workspace);
+        const hourlyMatrix = hour.workspaceActivityMatrix.filter(item => item.workspace === workspace);
+        const hourlyTaskIntents = hour.workspaceTaskIntents.filter(item => item.workspace === workspace);
         const hourlyFailures = hour.workspaceFailureCategories.filter(item => item.workspace === workspace);
         if (hourlyAggregate) subtractAggregate(hour, hourlyAggregate, true);
         subtractToolRows(hour.tools, hourlyTools);
+        subtractActivityRows(hour.activityMatrix, hourlyMatrix);
+        subtractTaskIntentRows(hour.taskIntents, hourlyTaskIntents);
         subtractFailureRows(hour.failureCategories, hourlyFailures);
         hour.workspaces = hour.workspaces.filter(item => item.workspace !== workspace);
         hour.workspaceTools = hour.workspaceTools.filter(item => item.workspace !== workspace);
+        hour.workspaceActivityMatrix = hour.workspaceActivityMatrix.filter(item => item.workspace !== workspace);
+        hour.workspaceTaskIntents = hour.workspaceTaskIntents.filter(item => item.workspace !== workspace);
         hour.workspaceFailureCategories = hour.workspaceFailureCategories.filter(item => item.workspace !== workspace);
         hour.tools = hour.tools.filter(item => number(item.toolCalls) > 0);
+        hour.activityMatrix = hour.activityMatrix.filter(item => number(item.toolCalls) > 0);
+        hour.taskIntents = hour.taskIntents.filter(item => number(item.tasks) > 0);
         hour.failureCategories = hour.failureCategories.filter(item => number(item.failures) > 0);
       }
       document.hours = document.hours.filter(hour => number(hour.toolCalls) > 0);
@@ -424,6 +564,10 @@ function emptyDocument(month: string): AnalyticsDocument {
     tools: [],
     workspaces: [],
     workspaceTools: [],
+    activityMatrix: [],
+    workspaceActivityMatrix: [],
+    taskIntents: [],
+    workspaceTaskIntents: [],
     failureCategories: [],
     workspaceFailureCategories: [],
     performancePhases: {},
@@ -438,6 +582,10 @@ function sanitizeDocument(value: unknown, month: string, { resetReliability = fa
   doc.tools = sanitizeNamedRows(source.tools, 'tool', resetReliability);
   doc.workspaces = sanitizeNamedRows(source.workspaces, 'workspace', resetReliability);
   doc.workspaceTools = sanitizeWorkspaceTools(source.workspaceTools, resetReliability);
+  doc.activityMatrix = sanitizeActivityMatrix(source.activityMatrix, resetReliability);
+  doc.workspaceActivityMatrix = sanitizeWorkspaceActivityMatrix(source.workspaceActivityMatrix, resetReliability);
+  doc.taskIntents = sanitizeTaskIntents(source.taskIntents);
+  doc.workspaceTaskIntents = sanitizeWorkspaceTaskIntents(source.workspaceTaskIntents);
   doc.failureCategories = sanitizeFailureCategories(source.failureCategories);
   doc.performancePhases = sanitizePerformancePhases(source.performancePhases);
   doc.workspaceFailureCategories = sanitizeWorkspaceFailureCategories(source.workspaceFailureCategories);
@@ -453,6 +601,10 @@ function sanitizeDocument(value: unknown, month: string, { resetReliability = fa
         tools: sanitizeNamedRows(row.tools, 'tool', resetReliability),
         workspaces: sanitizeNamedRows(row.workspaces, 'workspace', resetReliability),
         workspaceTools: sanitizeWorkspaceTools(row.workspaceTools, resetReliability),
+        activityMatrix: sanitizeActivityMatrix(row.activityMatrix, resetReliability),
+        workspaceActivityMatrix: sanitizeWorkspaceActivityMatrix(row.workspaceActivityMatrix, resetReliability),
+        taskIntents: sanitizeTaskIntents(row.taskIntents),
+        workspaceTaskIntents: sanitizeWorkspaceTaskIntents(row.workspaceTaskIntents),
         failureCategories: sanitizeFailureCategories(row.failureCategories),
         workspaceFailureCategories: sanitizeWorkspaceFailureCategories(row.workspaceFailureCategories),
         performancePhases: sanitizePerformancePhases(row.performancePhases)
@@ -475,6 +627,47 @@ function sanitizeWorkspaceTools(rows: unknown, resetReliability = false): Worksp
     const row = asRecord(value);
     return { workspace: boundedLabel(row.workspace, 160), tool: boundedLabel(row.tool, 160), ...sanitizeAggregate(row, false, resetReliability) };
   }).filter(row => Boolean(row.workspace && row.tool));
+}
+
+function sanitizeActivityMatrix(rows: unknown, resetReliability = false): ActivityMatrixAggregate[] {
+  const values = Array.isArray(rows) ? rows : [];
+  return values.slice(0, 256).map(value => {
+    const row = asRecord(value);
+    return {
+      intent: normalizeAnalyticsTaskIntent(row.intent, 'untracked'),
+      useCase: normalizeAnalyticsUseCase(row.useCase),
+      ...sanitizeAggregate(row, false, resetReliability)
+    };
+  }).filter(row => row.toolCalls > 0);
+}
+
+function sanitizeWorkspaceActivityMatrix(rows: unknown, resetReliability = false): WorkspaceActivityMatrixAggregate[] {
+  const values = Array.isArray(rows) ? rows : [];
+  return values.slice(0, 4096).map(value => {
+    const row = asRecord(value);
+    return {
+      workspace: boundedLabel(row.workspace, 160),
+      intent: normalizeAnalyticsTaskIntent(row.intent, 'untracked'),
+      useCase: normalizeAnalyticsUseCase(row.useCase),
+      ...sanitizeAggregate(row, false, resetReliability)
+    };
+  }).filter(row => Boolean(row.workspace) && row.toolCalls > 0);
+}
+
+function sanitizeTaskIntents(rows: unknown): TaskIntentAggregate[] {
+  const values = Array.isArray(rows) ? rows : [];
+  return values.slice(0, 32).map(value => {
+    const row = asRecord(value);
+    return { intent: normalizeAnalyticsTaskIntent(row.intent, 'auto'), tasks: number(row.tasks) };
+  }).filter(row => row.tasks > 0);
+}
+
+function sanitizeWorkspaceTaskIntents(rows: unknown): WorkspaceTaskIntentAggregate[] {
+  const values = Array.isArray(rows) ? rows : [];
+  return values.slice(0, 1024).map(value => {
+    const row = asRecord(value);
+    return { workspace: boundedLabel(row.workspace, 160), intent: normalizeAnalyticsTaskIntent(row.intent, 'auto'), tasks: number(row.tasks) };
+  }).filter(row => Boolean(row.workspace) && row.tasks > 0);
 }
 
 function sanitizeFailureCategories(rows: unknown): FailureCategoryAggregate[] {
@@ -560,6 +753,26 @@ function incrementWorkspaceTool(rows: WorkspaceToolAggregate[], workspace: strin
   incrementAggregate(row, success, failure, durationMs, reliability);
 }
 
+function incrementActivityMatrix(rows: ActivityMatrixAggregate[], intent: AnalyticsTaskIntent, useCase: AnalyticsUseCase, success: number, failure: number, durationMs: number, reliability: ReliabilityCounters): void {
+  const row = findOrCreate(rows, item => item.intent === intent && item.useCase === useCase, () => ({ intent, useCase, ...emptyAggregate() }));
+  incrementAggregate(row, success, failure, durationMs, reliability);
+}
+
+function incrementWorkspaceActivityMatrix(rows: WorkspaceActivityMatrixAggregate[], workspace: string, intent: AnalyticsTaskIntent, useCase: AnalyticsUseCase, success: number, failure: number, durationMs: number, reliability: ReliabilityCounters): void {
+  const row = findOrCreate(rows, item => item.workspace === workspace && item.intent === intent && item.useCase === useCase, () => ({ workspace, intent, useCase, ...emptyAggregate() }));
+  incrementAggregate(row, success, failure, durationMs, reliability);
+}
+
+function incrementTaskIntent(rows: TaskIntentAggregate[], intent: AnalyticsTaskIntent): void {
+  const row = findOrCreate(rows, item => item.intent === intent, () => ({ intent, tasks: 0 }));
+  row.tasks = number(row.tasks) + 1;
+}
+
+function incrementWorkspaceTaskIntent(rows: WorkspaceTaskIntentAggregate[], workspace: string, intent: AnalyticsTaskIntent): void {
+  const row = findOrCreate(rows, item => item.workspace === workspace && item.intent === intent, () => ({ workspace, intent, tasks: 0 }));
+  row.tasks = number(row.tasks) + 1;
+}
+
 function incrementFailureCategory(rows: FailureCategoryAggregate[], category: unknown): void {
   const normalized = normalizeFailureCategory(category);
   const row = findOrCreate(rows, item => item.category === normalized, () => ({ category: normalized, failures: 0 }));
@@ -597,6 +810,20 @@ function subtractToolRows(targetRows: Array<NamedAggregate<'tool'>>, workspaceRo
   for (const workspaceRow of workspaceRows) {
     const target = targetRows.find(item => item.tool === workspaceRow.tool);
     if (target) subtractAggregate(target, workspaceRow);
+  }
+}
+
+function subtractActivityRows(targetRows: ActivityMatrixAggregate[], workspaceRows: WorkspaceActivityMatrixAggregate[]): void {
+  for (const workspaceRow of workspaceRows) {
+    const target = targetRows.find(item => item.intent === workspaceRow.intent && item.useCase === workspaceRow.useCase);
+    if (target) subtractAggregate(target, workspaceRow);
+  }
+}
+
+function subtractTaskIntentRows(targetRows: TaskIntentAggregate[], workspaceRows: WorkspaceTaskIntentAggregate[]): void {
+  for (const workspaceRow of workspaceRows) {
+    const target = targetRows.find(item => item.intent === workspaceRow.intent);
+    if (target) target.tasks = Math.max(0, number(target.tasks) - number(workspaceRow.tasks));
   }
 }
 
@@ -670,9 +897,9 @@ export {
   clearLocalAnalytics,
   flushLocalAnalytics,
   pruneLocalAnalytics,
+  recordLocalTaskCompletion,
   recordLocalToolOutcome,
   removeWorkspaceLocalAnalytics,
   readLocalUsageSnapshot,
   readLocalUsageSnapshotAsync
 };
-

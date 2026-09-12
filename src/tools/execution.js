@@ -43,6 +43,7 @@ async function executeToolCall({ config, name, executionName = name, effectiveAr
           requestHeaders: context?.requestHeaders || {},
           mcp: context?.mcp || {},
           conversationId: context?.conversationId,
+          transportSessionId: context?.transportSessionId,
           signal: context?.signal,
           principal: context?.principal,
           nativeTaskId: context?.nativeTaskId,

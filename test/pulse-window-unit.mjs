@@ -77,6 +77,10 @@ assert.equal(working.progressLabel, 'Frontend tests');
 assert.equal(working.taskCount, 2);
 assert.equal(working.otherTaskCount, 1);
 assert.deepEqual(working.taskNames, ['Fix tests', 'Prepare notes']);
+assert.equal(working.taskItems.length, 2, 'expanded Pulse must receive per-task rows');
+assert.equal(working.taskItems[0].statusLabel, 'Running');
+assert.equal(working.workspacesLabel, 'repo +1');
+assert.ok(typeof working.activityLine === 'string');
 
 const ordinaryWaiting = projectPulseStatus({
   taskActivity: {
@@ -98,12 +102,15 @@ const pulseCss = readFileSync(new URL('../electron/renderer/pulse.css', import.m
 const pulseRenderer = readFileSync(new URL('../electron/renderer/pulse.js', import.meta.url), 'utf8');
 const preloadSource = readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
 assert.match(pulseHtml, /id="pulseTaskCount"/, 'compact Pulse markup must expose the active task count');
-assert.match(pulseHtml, /<span class="pulse-context-label">Tasks<\/span><strong id="pulseTasks">/, 'expanded Pulse must expose task names');
+assert.match(pulseHtml, /id="pulseTaskList"/, 'expanded Pulse must expose a task list');
+assert.match(pulseHtml, /id="pulseActivity"/, 'expanded Pulse must expose the current activity line');
+assert.doesNotMatch(pulseHtml, /id="pulseCopy"/, 'expanded Pulse must not expose a redundant copy-details action');
+assert.match(pulseHtml, /id="pulseCompactProgressFill"/, 'compact Pulse must expose a glanceable progress hairline');
 assert.match(pulseCss, /\.pulse-bar\s*\{[^}]*-webkit-app-region:\s*drag/s, 'Pulse header must provide one stable native drag surface in compact and expanded states');
 assert.match(pulseCss, /\.pulse-compact-copy\s*\{[^}]*-webkit-app-region:\s*no-drag/s, 'compact click-to-expand content must stay interactive inside the native drag surface');
 assert.doesNotMatch(pulseCss, /\.pulse-shell\s*\{[^}]*transition:/s, 'Pulse shell styling must not run a second CSS geometry transition alongside the compositor motion');
 assert.match(pulseCss, /body\.pulse-page\s*\{[^}]*padding:\s*0/s, 'Pulse surface must fill the native transparent window instead of leaving a rectangular gutter');
-assert.match(pulseCss, /\.pulse-shell\s*\{[^}]*width:\s*100%[^}]*height:\s*100%/s, 'compact and expanded Pulse geometry must use the exact native window bounds');
+assert.match(pulseCss, /\.pulse-shell\s*\{[^}]*width:\s*100%[^}]*height:\s*100%/s, 'compact and expanded Pulse geometry must use the exact native window bounds'); // rigidity-ok: the shell must exactly fill the transparent native window to avoid exposed rectangular gutters.
 assert.doesNotMatch(pulseCss, /backdrop-filter|box-shadow:\s*var\(--ui-shadow-(?:window|popover)\)/, 'Pulse must not paint clipped glass or external shadows that reveal the rectangular native window');
 assert.doesNotMatch(pulseCss, /pulseActivity|animation:\s*[^;]*infinite/, 'working state must not keep the transparent overlay continuously compositing');
 assert.doesNotMatch(pulseCss, /\.pulse-island\s*\{[^}]*(?:transform:|transition:)/s, 'Pulse details must share the shell motion instead of running a second geometry transition');
@@ -141,11 +148,21 @@ const fakeScreen = {
   off(name, listener) { if (displayListeners.get(name) === listener) displayListeners.delete(name); }
 };
 assert.deepEqual(pulseBounds(fakeScreen), { x: 1196, y: 68, width: 286, height: 48 });
-assert.deepEqual(pulseBounds(fakeScreen, { expanded: true }), { x: 1118, y: 68, width: 364, height: 288 });
+assert.deepEqual(pulseBounds(fakeScreen, { expanded: true }), { x: 1118, y: 68, width: 364, height: 384 });
 assert.deepEqual(
   pulseBounds(fakeScreen, { expanded: true, anchor: { right: 150, top: 0 } }),
-  { x: 100, y: 50, width: 364, height: 288 },
+  { x: 100, y: 50, width: 364, height: 384 },
   'expanded Pulse must clamp safely to the active display when the saved anchor is too close to an edge'
+);
+const tinyWorkArea = { x: 0, y: 0, width: 320, height: 240 };
+const tinyScreen = {
+  getPrimaryDisplay: () => ({ workArea: tinyWorkArea }),
+  getDisplayNearestPoint: () => ({ workArea: tinyWorkArea })
+};
+assert.deepEqual(
+  pulseBounds(tinyScreen, { expanded: true, anchor: { right: 320, top: 0 } }),
+  { x: 0, y: 0, width: 364, height: 384 },
+  'expanded Pulse must never produce negative coordinates when the work area is smaller than the window'
 );
 
 const windows = [];
@@ -262,13 +279,13 @@ assert.deepEqual(window.boundsWrites.at(-1), pulseBounds(fakeScreen));
 window.currentBounds = { x: 500, y: 200, width: 286, height: 48 };
 window.events.get('will-move')?.({}, { x: 500, y: 200, width: 286, height: 48 });
 assert.equal(manager.setExpanded(true), true);
-assert.deepEqual(window.boundsWrites.at(-1), { x: 422, y: 200, width: 364, height: 288 }, 'expansion must preserve the right edge and top of a user-moved Pulse');
+assert.deepEqual(window.boundsWrites.at(-1), { x: 422, y: 200, width: 364, height: 384 }, 'expansion must preserve the right edge and top of a user-moved Pulse');
 assert.equal(manager.setExpanded(false), false);
 assert.deepEqual(window.boundsWrites.at(-1), { x: 500, y: 200, width: 286, height: 48 }, 'collapse must return to the user-moved compact position');
 window.events.get('move')?.();
 assert.equal(manager.setExpanded(true), true);
-assert.deepEqual(window.boundsWrites.at(-1), { x: 422, y: 200, width: 364, height: 288 }, 'programmatic move notifications must not rewrite the manual anchor');
-window.events.get('will-move')?.({}, { x: 700, y: 300, width: 364, height: 288 });
+assert.deepEqual(window.boundsWrites.at(-1), { x: 422, y: 200, width: 364, height: 384 }, 'programmatic move notifications must not rewrite the manual anchor');
+window.events.get('will-move')?.({}, { x: 700, y: 300, width: 364, height: 384 });
 assert.equal(manager.setExpanded(false), false);
 assert.deepEqual(window.boundsWrites.at(-1), { x: 778, y: 300, width: 286, height: 48 }, 'dragging the expanded Pulse must preserve the same right/top anchor when it collapses');
 
@@ -314,7 +331,7 @@ waylandManager.update({
 assert.equal(waylandWindows[0].options.alwaysOnTop, false, 'Wayland must not claim unsupported always-on-top behavior');
 assert.equal(waylandWindows[0].boundsWrites.length, 0, 'Wayland must not issue unsupported global reposition requests');
 waylandManager.setExpanded(true);
-assert.deepEqual(waylandWindows[0].sizeWrites.at(-1), { width: 364, height: 288 }, 'Wayland may resize locally without claiming global positioning');
+assert.deepEqual(waylandWindows[0].sizeWrites.at(-1), { width: 364, height: 384 }, 'Wayland may resize locally without claiming global positioning');
 waylandManager.stop();
 
 console.log('Rel.AI Pulse state projection, security, focus behavior, positioning, and Wayland fallback tests passed.');

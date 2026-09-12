@@ -33,4 +33,3 @@ export const FAILURE_OPERATION = Object.freeze({
   COMMIT: 'commit',
   REVIEW: 'review'
 } as const);
-

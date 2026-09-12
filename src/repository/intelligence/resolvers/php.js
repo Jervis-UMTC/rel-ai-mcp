@@ -1,11 +1,11 @@
-import { dedupeRelations, descendantsOfTypes, fieldNode, importBindingMap, nodeText, nodesOfTypes, relation, simpleName, symbolForNode } from './common.js';
+import { dedupeRelations, descendantsOfTypes, fieldNode, importBindingMap, nodeText, nodesOfTypes, projectImports, relation, simpleName, symbolForNode } from './common.js';
 import { frameworkRelations } from './frameworks.js';
 
 const PROVIDER = 'resolver-php-v2';
 const CAPABILITIES = Object.freeze(['ast-use-bindings', 'ast-requires', 'ast-inheritance', 'ast-interfaces', 'ast-constructor-types', 'ast-imported-calls', 'framework-http']);
 const phpResolver = Object.freeze({ id: PROVIDER, capabilities: CAPABILITIES, enrich({ root, facts, language }) {
   const imports = parseImports(root); const bindings = importBindingMap(imports); const symbols = facts.symbols || [];
-  return { provider: PROVIDER, capabilities: CAPABILITIES, imports: enrichImports(imports), relations: dedupeRelations([
+  return { provider: PROVIDER, capabilities: CAPABILITIES, imports: projectImports(imports, PROVIDER, 0.97), relations: dedupeRelations([
     ...classRelations(root, symbols, bindings), ...constructorRelations(root, symbols, bindings), ...callRelations(root, symbols, bindings),
     ...frameworkRelations(language, { root, symbols, provider: PROVIDER })
   ]) };
@@ -45,5 +45,4 @@ function callRelations(root, symbols, bindings) {
   }
   return result;
 }
-function enrichImports(imports) { return imports.map(({ bindings: _bindings, ...item }) => ({ ...item, provider: PROVIDER, confidence: 0.97 })); }
 export { phpResolver };

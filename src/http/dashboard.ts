@@ -60,12 +60,19 @@ function handleStaticAsset(ctx: HttpRouteContext): void {
     const content = readCachedStaticAsset(filePath);
     const contentType = contentTypeForStaticAsset(safePath);
     const charset = contentType.startsWith('text/') || contentType === 'application/javascript' ? '; charset=utf-8' : '';
-    ctx.res.writeHead(200, { 'Content-Type': contentType + charset, 'Cache-Control': 'private, max-age=60' });
+    ctx.res.writeHead(200, { 'Content-Type': contentType + charset, 'Cache-Control': cacheControlForStaticAsset(safePath) });
     ctx.res.end(content);
   } catch {
     ctx.res.writeHead(404);
     ctx.res.end('Not found');
   }
+}
+
+function cacheControlForStaticAsset(safePath: string): string {
+  if (safePath.startsWith('/public/dashboard-chunks/') || safePath.startsWith('/public/dashboard-assets/')) {
+    return 'public, max-age=31536000, immutable';
+  }
+  return 'private, max-age=60';
 }
 
 function handleDashboard(ctx: HttpRouteContext): void {

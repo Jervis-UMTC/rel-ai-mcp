@@ -62,6 +62,22 @@ assert.equal(result.structuredContent.image.mimeType, 'image/png');
 assert.equal(result.structuredContent.image.bytes, 32);
 assert.equal(result.structuredContent.work_id, 'work_contract');
 
+const nestedPng = Buffer.from('nested-image-contract').toString('base64');
+const batchResult = toolResult({
+  ok: true,
+  action: 'batch',
+  results: [
+    { ok: true, action: 'click', executed: true },
+    { ok: true, action: 'screenshot', image: { mimeType: 'image/png', data: png, bytes: 32, width: 800, height: 600 } },
+    { ok: true, action: 'screenshot', image: { mimeType: 'image/png', data: nestedPng, bytes: 21, width: 400, height: 300 } }
+  ]
+}, false);
+assert.equal(batchResult.content.length, 3, 'nested batch screenshots must become independent MCP image content items');
+assert.deepEqual(batchResult.content[1], { type: 'image', data: png, mimeType: 'image/png' });
+assert.deepEqual(batchResult.content[2], { type: 'image', data: nestedPng, mimeType: 'image/png' });
+assert.equal(batchResult.structuredContent.results[1].image.data, undefined, 'nested screenshot base64 must not remain in structured content');
+assert.equal(batchResult.structuredContent.results[2].image.data, undefined, 'every nested screenshot must be sanitized');
+
 const uiActions = getToolActionCatalog().filter(entry => entry.publicTool === 'relai_ui');
 assert.deepEqual(uiActions.map(entry => entry.action), [
   'start', 'navigate', 'snapshot', 'interact', 'screenshot',

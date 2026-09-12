@@ -8,6 +8,7 @@ for (const entry of actionCatalog) {
   const args = entry.action === 'default' ? {} : { action: entry.action };
   if (entry.behavior.taskScope === 'required') args.work_id = 'work_output';
   Object.assign(args, requiredArgs(entry));
+  if (entry.publicTool === 'relai_computer' && entry.required?.includes('app') && !args.app) args.app = 'example-app';
   await assert.doesNotReject(() => validateToolOutput({}, entry.publicTool, args, {
     ok: false,
     error: 'Expected failure.'
@@ -197,8 +198,10 @@ await assert.doesNotReject(() => validateToolOutput({}, 'relai_exec', {
 for (const [action, args, result] of [
   ['status', {}, { ok: true, workspace: 'repo', action: 'status', platform: 'win32', enabled: true, available: true, engine: '@midscene/computer', displays: 2 }],
   ['displays', {}, { ok: true, workspace: 'repo', action: 'displays', platform: 'win32', engine: '@midscene/computer', displays: [{ id: 'display-1', width: 1920, height: 1080 }], count: 1 }],
-  ['screenshot', { displayId: 'display-1' }, { ok: true, workspace: 'repo', action: 'screenshot', platform: 'win32', engine: '@midscene/computer', displayId: 'display-1', image: { mimeType: 'image/png', data: 'fixture' } }],
-  ['click', { x: 10, y: 20, displayId: 'display-1' }, { ok: true, workspace: 'repo', action: 'click', platform: 'win32', displayId: 'display-1', x: 10, y: 20, executed: true }]
+  ['observe', { app: 'example-app' }, { ok: true, workspace: 'repo', action: 'observe', platform: 'win32', engine: 'windows-uia', app: 'example-app', semanticAvailable: true, semanticObservationId: 'uia_fixture', elements: [{ targetId: 'e1', role: 'Button', name: 'Save' }], count: 1, truncated: false }],
+  ['activate', { app: 'example-app', semanticObservationId: 'uia_fixture', targetId: 'e1' }, { ok: true, workspace: 'repo', action: 'activate', platform: 'win32', app: 'example-app', semanticObservationId: 'uia_fixture', targetId: 'e1', displayId: 'display-1', x: 10, y: 20, method: 'semantic-center-click', executed: true }],
+  ['screenshot', { app: 'example-app', displayId: 'display-1' }, { ok: true, workspace: 'repo', action: 'screenshot', platform: 'win32', engine: '@midscene/computer', displayId: 'display-1', image: { mimeType: 'image/png', data: 'fixture' } }],
+  ['click', { app: 'example-app', x: 10, y: 20, displayId: 'display-1' }, { ok: true, workspace: 'repo', action: 'click', platform: 'win32', displayId: 'display-1', x: 10, y: 20, executed: true }]
 ]) {
   await assert.doesNotReject(() => validateToolOutput({}, 'relai_computer', { action, workspace: 'repo', ...args }, result));
 }
@@ -329,6 +332,11 @@ function requiredArgs(entry) {
     case 'relai_computer:type': return { text: 'hello' };
     case 'relai_computer:key': return { key: 'enter' };
     case 'relai_computer:hotkey': return { keys: ['ctrl', 's'] };
+    case 'relai_computer:activate': return { semanticObservationId: 'uia_fixture', targetId: 'e1' };
+    case 'relai_computer:batch': return { actions: [{ action: 'move', x: 10, y: 20 }] };
+    case 'relai_computer:stop': return {};
+    case 'relai_computer:approve_app':
+    case 'relai_computer:revoke_app': return { app: 'example-app' };
     case 'relai_process:read':
     case 'relai_process:stop': return { processId: 'proc_output' };
     case 'relai_process:write': return { processId: 'proc_output', input: 'status\n' };

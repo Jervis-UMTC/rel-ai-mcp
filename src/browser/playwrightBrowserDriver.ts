@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream';
 import { chromium, type Browser, type BrowserContext, type Download, type Page } from 'playwright-core';
 import { taskError } from '../toolActivity.js';
 import { MAX_SNAPSHOT_CHARS, boundText, sanitizeUiUrl } from '../computer/webPolicy.ts';
+import { layoutSnapshotExpression, normalizeBrowserSnapshotDetail } from './layoutSnapshot.js';
 import {
   performStructuredInteraction,
   resolveChromiumRuntime,
@@ -14,6 +15,7 @@ import {
 type Viewport = Readonly<{ width: number; height: number }>;
 
 type BrowserPageResult = Record<string, unknown> & Readonly<{ url: string }>;
+type BrowserSnapshotDetail = 'semantic' | 'layout';
 
 type LaunchBrowserDriverOptions = Readonly<{
   headless: boolean;
@@ -34,7 +36,7 @@ interface BrowserDownloadHandle {
 interface BrowserPageDriver {
   describe(signal?: AbortSignal): Promise<BrowserPageResult>;
   navigate(url: string, timeoutMs: number, signal?: AbortSignal): Promise<BrowserPageResult>;
-  snapshot(timeoutMs: number, signal?: AbortSignal): Promise<BrowserPageResult>;
+  snapshot(timeoutMs: number, detail?: BrowserSnapshotDetail, signal?: AbortSignal): Promise<BrowserPageResult>;
   interact(args: StructuredInteractionArgs, timeoutMs: number, signal?: AbortSignal): Promise<BrowserPageResult>;
   screenshot(fullPage: boolean, signal?: AbortSignal): Promise<BrowserPageResult>;
   upload(args: StructuredInteractionArgs, filePath: string, timeoutMs: number, signal?: AbortSignal): Promise<BrowserPageResult>;
@@ -117,11 +119,14 @@ function wrapPage(page: Page): BrowserPageDriver {
       assertSupportedPageUrl(page);
       return pageResult(page, { statusCode: response?.status() ?? null, title: await safeTitle(page) });
     },
-    snapshot: async (timeoutMs: number, _signal?: AbortSignal) => {
+    snapshot: async (timeoutMs: number, detail: BrowserSnapshotDetail = 'semantic', _signal?: AbortSignal) => {
       assertSupportedPageUrl(page);
-      const yaml = await page.locator('body').ariaSnapshot({ timeout: timeoutMs });
-      const bounded = boundText(yaml, MAX_SNAPSHOT_CHARS);
-      return pageResult(page, { title: await safeTitle(page), snapshot: bounded.text, truncated: bounded.truncated });
+      const normalizedDetail = normalizeBrowserSnapshotDetail(detail) as BrowserSnapshotDetail;
+      const raw = normalizedDetail === 'layout'
+        ? String(await page.evaluate(layoutSnapshotExpression()))
+        : await page.locator('body').ariaSnapshot({ timeout: timeoutMs });
+      const bounded = boundText(raw, MAX_SNAPSHOT_CHARS);
+      return pageResult(page, { title: await safeTitle(page), detail: normalizedDetail, snapshot: bounded.text, truncated: bounded.truncated });
     },
     interact: async (args: StructuredInteractionArgs, timeoutMs: number, _signal?: AbortSignal) => {
       assertSupportedPageUrl(page);

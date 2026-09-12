@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { SERVER_INFO_META_KEY } from '@modelcontextprotocol/server';
 import { TASKS_EXTENSION_REVISION } from '../src/mcp/protocol.js';
 import { recordTaskValidationAffinity, learnedValidationChecks } from '../src/knowledgeStore.js';
-import { readLocalUsageSnapshot, recordLocalToolOutcome } from '../src/localAnalytics.js';
+import { readLocalUsageSnapshot, recordLocalTaskCompletion, recordLocalToolOutcome } from '../src/localAnalytics.js';
 import { repositoryIndexPath } from '../src/repository/intelligence/database.js';
 import { withStateDatabase } from '../src/stateDatabase.ts';
 import { getTaskHistoryDir, writeSession } from '../src/taskHistoryStorage.ts';
@@ -91,9 +91,9 @@ try {
   assert.match(serverInstructions, /approval/i);
   assert.match(serverInstructions, /authoritative evidence/i);
   assert.match(serverInstructions, /validation is factual evidence, not execution permission/i);
-  assert.match(serverInstructions, /brief normal assistant progress messages/i);
-  assert.match(serverInstructions, /Native tool invocation labels are supplemental status only/i);
-  assert.match(serverInstructions, /Do not poll relai_work status merely to refresh UI/i);
+  assert.match(serverInstructions, /work_id omission never selects another task/i);
+  assert.doesNotMatch(serverInstructions, /workspace-resolution error|brief normal assistant progress|Native tool invocation labels|private chain-of-thought|poll relai_work status/i,
+    'global MCP instructions must omit conditional recovery and host presentation guidance');
   assert.doesNotMatch(serverInstructions, /Start each objective|Inspect relevant files|Validate after changes|recovery guidance/i, 'global MCP instructions must contain universal invariants rather than specialist workflow tactics');
   assert.equal(discovery.body.result?.cacheScope, 'private');
   assert.ok(Number.isFinite(discovery.body.result?.ttlMs) && discovery.body.result.ttlMs > 0, 'discovery cache TTL must remain finite and positive');
@@ -279,12 +279,18 @@ try {
     id: 'secondary-history', workspace: 'secondary', status: 'completed', title: 'Secondary workspace history'
   });
   assert.equal(recordLocalToolOutcome(workspaceStateConfig, {
-    tool: 'relai_read', workspace: 'secondary', ok: true, durationMs: 7, at: new Date().toISOString()
+    tool: 'relai_read', operationName: 'read', taskIntent: 'review', workspace: 'secondary', ok: true, durationMs: 7, at: new Date().toISOString()
+  }), true);
+  assert.equal(recordLocalTaskCompletion(workspaceStateConfig, {
+    workspace: 'secondary', taskIntent: 'review', at: new Date().toISOString()
   }), true);
   const analyticsMonth = new Date().toISOString().slice(0, 7);
   const analyticsBeforeDelete = readLocalUsageSnapshot(workspaceStateConfig, analyticsMonth);
   const secondaryAnalyticsCalls = Number(analyticsBeforeDelete.workspaces.find(row => row.workspace === 'secondary')?.toolCalls || 0);
+  const secondaryCompletedTasks = Number(analyticsBeforeDelete.workspaceTaskIntents.filter(row => row.workspace === 'secondary').reduce((sum, row) => sum + Number(row.tasks || 0), 0));
   assert.ok(secondaryAnalyticsCalls > 0, 'workspace deletion regression must seed workspace-scoped analytics');
+  assert.ok(analyticsBeforeDelete.workspaceActivityMatrix.some(row => row.workspace === 'secondary' && row.useCase === 'explore'), 'workspace deletion regression must seed workspace use-case analytics');
+  assert.ok(secondaryCompletedTasks > 0, 'workspace deletion regression must seed workspace work-type analytics');
   withStateDatabase(workspaceStateConfig, db => {
     db.prepare('INSERT OR REPLACE INTO task_integrity_tasks(task_id,updated_at_ms,payload) VALUES(?,?,?)')
       .run('secondary-history', Date.now(), JSON.stringify({ version: 1, taskId: 'secondary-history', workspace: 'secondary' }));
@@ -313,9 +319,16 @@ try {
   const analyticsAfterDelete = readLocalUsageSnapshot(workspaceStateConfig, analyticsMonth);
   assert.equal(analyticsAfterDelete.workspaces.some(row => row.workspace === 'secondary'), false,
     'deleting a project must remove its workspace analytics dimension');
+  assert.equal(analyticsAfterDelete.workspaceActivityMatrix.some(row => row.workspace === 'secondary'), false,
+    'deleting a project must remove its workspace use-case analytics');
+  assert.equal(analyticsAfterDelete.workspaceTaskIntents.some(row => row.workspace === 'secondary'), false,
+    'deleting a project must remove its workspace work-type analytics');
   assert.equal(analyticsAfterDelete.totals.toolCalls,
     Number(analyticsBeforeDelete.totals.toolCalls || 0) - secondaryAnalyticsCalls,
     'deleted workspace analytics must no longer inflate global tool-call totals');
+  assert.equal(analyticsAfterDelete.taskIntents.reduce((sum, row) => sum + Number(row.tasks || 0), 0),
+    analyticsBeforeDelete.taskIntents.reduce((sum, row) => sum + Number(row.tasks || 0), 0) - secondaryCompletedTasks,
+    'deleted workspace work-type analytics must no longer inflate global completed-task totals');
   withStateDatabase(workspaceStateConfig, db => {
     assert.equal(Number(db.prepare('SELECT COUNT(*) AS count FROM task_integrity_tasks WHERE task_id=?').get('secondary-history')?.count || 0), 0,
       'deleting a project must remove its task integrity state');

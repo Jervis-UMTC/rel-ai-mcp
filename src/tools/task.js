@@ -1,7 +1,7 @@
 
 import * as crypto from 'node:crypto';
 import { getCurrentToolActivityContext, getToolActivity, taskError } from '../toolActivity.js';
-import { readTaskHistory, readTaskHistorySessionRecord } from '../taskHistoryStore.ts';
+import { findTaskReuseCandidates, readTaskHistory, readTaskHistorySessionRecord } from '../taskHistoryStore.ts';
 import { principalFingerprint } from '../mcp/principal.js';
 import { isTerminalTaskStatus } from '../taskState.js';
 import { classifyTaskIntent } from '../workflow/intent.js';
@@ -29,7 +29,18 @@ function findReusableTask(config, workspace, args = {}, principal, conversationI
   const activity = getToolActivity();
   const live = activity.tasks.find(matches);
   if (live) return live;
-  const persisted = readTaskHistory(config, activity, { limit: 500 })
+  const narrowed = findTaskReuseCandidates(config, workspaceAlias, conversation, 24)
+    .filter(session => !isTerminalTaskStatus(session?.status))
+    .filter(session => String(session?.workspace || '') === workspaceAlias)
+    .filter(session => String(session?.correlation?.conversationId || '') === conversation)
+    .filter(session => objective
+      ? normalizeTaskGoal(session?.objective) === objective
+      : normalizeTaskGoal(session?.title) === title)
+    .filter(matches);
+  if (narrowed.length) return reuseResult(narrowed);
+  // Fallback for short conversation ids (<4 chars, skipped by the SQL needle
+  // search) or search quirks: bounded recent scan instead of the full 500.
+  const persisted = readTaskHistory(config, activity, { limit: 50, summary: true })
     .filter(session => !isTerminalTaskStatus(session?.status))
     .filter(session => String(session?.workspace || '') === workspaceAlias)
     .filter(session => String(session?.correlation?.conversationId || '') === conversation)
@@ -38,13 +49,17 @@ function findReusableTask(config, workspace, args = {}, principal, conversationI
       : normalizeTaskGoal(session?.title) === title)
     .map(session => readTaskHistorySessionRecord(config, session.id, { reconcileInactive: false }))
     .filter(matches);
-  if (persisted.length > 1) {
+  return reuseResult(persisted);
+}
+
+function reuseResult(candidates) {
+  if (candidates.length > 1) {
     throw taskError(
       'TASK_RECOVERY_AMBIGUOUS',
       'Multiple unfinished Rel.AI work sessions match this ChatGPT conversation, project, and goal. Rel.AI will not create another duplicate task automatically.',
       {
         retryable: false,
-        candidateCount: persisted.length,
+        candidateCount: candidates.length,
         allowedAlternatives: [
           'Open Rel.AI Tasks and continue one of the matching unfinished work sessions by its work_id.',
           'Cancel obsolete matching tasks, then retry relai_work begin for this goal.'
@@ -52,7 +67,7 @@ function findReusableTask(config, workspace, args = {}, principal, conversationI
       }
     );
   }
-  return persisted[0] || null;
+  return candidates[0] || null;
 }
 
 function normalizeTaskGoal(value) {

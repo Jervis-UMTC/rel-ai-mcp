@@ -11,6 +11,7 @@ const MAX_TOTAL_SPILL_BYTES = 256 * 1024 * 1024;
 const MAX_SPILL_FILES = 100;
 const SPILL_TTL_MS = 24 * 60 * 60 * 1000;
 const spillUsageByRoot = new Map();
+const activeSpillsByRoot = new Map();
 
 function outputSpillOwner({ taskId = '', workspace = '', principal = '' } = {}) {
   const task = String(taskId || '').trim();
@@ -31,13 +32,32 @@ function createOutputSpillWriter(config = {}, ownerId = '') {
 
   function start(initial) {
     if (!owner || fd !== null) return;
-    spillUsageByRoot.set(root, pruneOutputSpills(root));
+    const usage = pruneOutputSpills(root);
+    spillUsageByRoot.set(root, usage);
+    if (usage.files >= MAX_SPILL_FILES || usage.bytes >= MAX_TOTAL_SPILL_BYTES) {
+      spillTruncated = true;
+      return;
+    }
     const directory = path.join(root, taskDirectoryName(owner));
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     outputRef = `spill_${crypto.randomBytes(18).toString('base64url')}`;
     file = path.join(directory, `${outputRef}.log`);
-    fd = fs.openSync(file, 'wx', 0o600);
-    append(initial);
+    try {
+      fd = fs.openSync(file, 'wx', 0o600);
+      activeSpills(root, true).add(file);
+      spillUsageByRoot.set(root, { bytes: usage.bytes, files: usage.files + 1 });
+      append(initial);
+    } catch (error) {
+      if (fd !== null) {
+        try { fs.closeSync(fd); } catch {}
+        fd = null;
+      }
+      activeSpills(root)?.delete(file);
+      try { fs.rmSync(file, { force: true }); } catch {}
+      outputRef = '';
+      file = '';
+      throw error;
+    }
   }
 
   function append(value) {
@@ -45,7 +65,8 @@ function createOutputSpillWriter(config = {}, ownerId = '') {
     const chunk = Buffer.isBuffer(value) ? value : Buffer.from(String(value ?? ''), 'utf8');
     if (!chunk.length) return;
     const fileRemaining = Math.max(0, MAX_OUTPUT_SPILL_BYTES - bytes);
-    const totalBytes = spillUsageByRoot.get(root) ?? MAX_TOTAL_SPILL_BYTES;
+    const usage = spillUsageByRoot.get(root) || { bytes: MAX_TOTAL_SPILL_BYTES, files: MAX_SPILL_FILES };
+    const totalBytes = usage.bytes;
     const globalRemaining = Math.max(0, MAX_TOTAL_SPILL_BYTES - totalBytes);
     const remaining = Math.min(fileRemaining, globalRemaining);
     if (!remaining) {
@@ -55,7 +76,7 @@ function createOutputSpillWriter(config = {}, ownerId = '') {
     const accepted = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
     fs.writeSync(fd, accepted);
     bytes += accepted.length;
-    spillUsageByRoot.set(root, totalBytes + accepted.length);
+    spillUsageByRoot.set(root, { bytes: totalBytes + accepted.length, files: usage.files });
     if (accepted.length < chunk.length) spillTruncated = true;
   }
 
@@ -64,6 +85,9 @@ function createOutputSpillWriter(config = {}, ownerId = '') {
       try { fs.closeSync(fd); } catch {}
       fd = null;
     }
+    const active = activeSpills(root);
+    active?.delete(file);
+    if (active?.size === 0) activeSpillsByRoot.delete(root);
     if (!outputRef) return null;
     return { outputRef, bytes, spillTruncated };
   }
@@ -95,11 +119,20 @@ function taskDirectoryName(taskId) {
   return crypto.createHash('sha256').update(String(taskId)).digest('hex').slice(0, 32);
 }
 
+function activeSpills(root, create = false) {
+  let active = activeSpillsByRoot.get(root) || null;
+  if (!active && create) {
+    active = new Set();
+    activeSpillsByRoot.set(root, active);
+  }
+  return active;
+}
+
 function pruneOutputSpills(root) {
   let files = [];
   const directories = [];
   try {
-    if (!fs.existsSync(root)) return 0;
+    if (!fs.existsSync(root)) return { bytes: 0, files: 0 };
     for (const directory of fs.readdirSync(root, { withFileTypes: true })) {
       if (!directory.isDirectory()) continue;
       const base = path.join(root, directory.name);
@@ -114,13 +147,14 @@ function pruneOutputSpills(root) {
       }
     }
   } catch {
-    return MAX_TOTAL_SPILL_BYTES;
+    return { bytes: MAX_TOTAL_SPILL_BYTES, files: MAX_SPILL_FILES };
   }
 
   const cutoff = Date.now() - SPILL_TTL_MS;
+  const active = activeSpills(root) || new Set();
   const retained = [];
   for (const item of files) {
-    if (item.mtimeMs >= cutoff) {
+    if (active.has(item.file) || item.mtimeMs >= cutoff) {
       retained.push(item);
       continue;
     }
@@ -132,17 +166,21 @@ function pruneOutputSpills(root) {
   const targetBytes = Math.max(0, MAX_TOTAL_SPILL_BYTES - MAX_OUTPUT_SPILL_BYTES);
   const targetFiles = Math.max(0, MAX_SPILL_FILES - 1);
   while (files.length > targetFiles || total > targetBytes) {
-    const item = files.shift();
-    if (!item) break;
+    const removableIndex = files.findIndex(item => !active.has(item.file));
+    if (removableIndex < 0) break;
+    const [item] = files.splice(removableIndex, 1);
     try {
       fs.rmSync(item.file, { force: true });
       total -= item.size;
-    } catch {}
+    } catch {
+      files.splice(removableIndex, 0, item);
+      break;
+    }
   }
   for (const directory of directories) {
     try { fs.rmdirSync(directory); } catch {}
   }
-  return Math.max(0, total);
+  return { bytes: Math.max(0, total), files: files.length };
 }
 
 export { createOutputSpillWriter, outputSpillOwner, readOutputSpill };

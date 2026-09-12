@@ -48,7 +48,7 @@ try {
   const electronBinary = process.env.RELAI_ELECTRON_BINARY || path.resolve(root, 'electron', 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron');
   assert.equal(fs.existsSync(electronBinary), true, `Electron binary not found at ${electronBinary}`);
   const probe = path.join(root, 'test', 'fixtures', 'electron-dashboard-probe');
-  const target = `http://127.0.0.1:${port}/dashboard?token=${encodeURIComponent(token)}#tasks`;
+  const target = `http://127.0.0.1:${port}/dashboard?token=${encodeURIComponent(token)}#home`;
   child = spawn(electronBinary, [
     '--no-sandbox',
     '--disable-gpu',
@@ -62,7 +62,8 @@ try {
       RELAI_PROBE_TARGET_URL: target,
       RELAI_PROBE_OUTPUT_PATH: outputPath,
       RELAI_PROBE_SCREENSHOT_DIR: screenshotDir,
-      RELAI_PROBE_CREATE_WORKSPACE_PATH: projectCreateWorkspace
+      RELAI_PROBE_CREATE_WORKSPACE_PATH: projectCreateWorkspace,
+      RELAI_PROBE_DASHBOARD_DELAY_MS: '900'
     })
   });
   let stdout = '';
@@ -83,6 +84,13 @@ try {
     throw new Error(`Electron probe did not complete (launcher code ${code ?? 'unknown'}). stdout=${stdout} stderr=${stderr}\n${error.message}`);
   });
   assert.equal(result.error, undefined, result.error);
+  assert.equal(result.initialHydration.delayedDashboardRequest, true, JSON.stringify(result.initialHydration));
+  assert.equal(result.initialHydration.before.falseEmpty, false, JSON.stringify(result.initialHydration));
+  assert.equal(result.initialHydration.during.falseEmpty, false, JSON.stringify(result.initialHydration));
+  assert.equal(result.initialHydration.during.loading, true, JSON.stringify(result.initialHydration));
+  assert.match(result.initialHydration.during.loadingText, /Loading Rel\.AI/i, JSON.stringify(result.initialHydration));
+  assert.ok(result.initialHydration.after.workspaceCount >= 1, JSON.stringify(result.initialHydration));
+  assert.equal(result.initialHydration.after.falseEmpty, false, JSON.stringify(result.initialHydration));
   assert.ok(result.initial.rowCount >= 9);
   for (const label of ['queued', 'planning', 'running', 'blocked', 'validating', 'completed', 'failed', 'cancelled']) {
     assert.ok(result.initial.rowText.some(text => text.toLowerCase().includes(label)), `Missing rendered state: ${label}`);
@@ -122,7 +130,8 @@ try {
     created: true,
     edited: true,
     oldAliasRemoved: true,
-    finalAlias: 'acceptance-created-edited'
+    finalAlias: 'acceptance-created-edited',
+    recentProjectsAbsent: true
   });
   assert.deepEqual(result.passiveRouteStability.map(item => item.route), ['settings', 'diagnostics', 'workspaces', 'tools']);
   for (const route of result.passiveRouteStability) {

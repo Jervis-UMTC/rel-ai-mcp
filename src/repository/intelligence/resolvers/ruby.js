@@ -1,11 +1,11 @@
-import { dedupeRelations, fieldNode, importBindingMap, nodeText, nodesOfTypes, relation, simpleName, stripQuotes, symbolForNode } from './common.js';
+import { dedupeRelations, fieldNode, importBindingMap, nodeText, nodesOfTypes, projectImports, relation, simpleName, stripQuotes, symbolForNode } from './common.js';
 import { frameworkRelations } from './frameworks.js';
 
 const PROVIDER = 'resolver-ruby-v2';
 const CAPABILITIES = Object.freeze(['ast-require-bindings', 'ast-inheritance', 'ast-mixins', 'ast-constructor-types', 'ast-module-calls', 'framework-http']);
 const rubyResolver = Object.freeze({ id: PROVIDER, capabilities: CAPABILITIES, enrich({ root, facts, language }) {
   const imports = parseImports(root); const bindings = importBindingMap(imports); const symbols = facts.symbols || [];
-  return { provider: PROVIDER, capabilities: CAPABILITIES, imports: enrichImports(imports), relations: dedupeRelations([
+  return { provider: PROVIDER, capabilities: CAPABILITIES, imports: projectImports(imports, PROVIDER, 0.96), relations: dedupeRelations([
     ...inheritanceRelations(root, symbols, bindings), ...mixinRelations(root, symbols, bindings), ...callRelations(root, symbols, bindings),
     ...frameworkRelations(language, { root, symbols, provider: PROVIDER })
   ]) };
@@ -46,5 +46,4 @@ function callRelations(root, symbols, bindings) {
   return result;
 }
 function constantName(value) { const leaf = stripQuotes(value).replaceAll('\\', '/').split('/').at(-1)?.replace(/\.[^.]+$/, '') || ''; return leaf.split(/[_-]+/).filter(Boolean).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(''); }
-function enrichImports(imports) { return imports.map(({ bindings: _bindings, ...item }) => ({ ...item, provider: PROVIDER, confidence: 0.96 })); }
 export { rubyResolver };

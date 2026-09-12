@@ -143,6 +143,12 @@ try {
     closeLabels: ['Close First tab', 'Close Second tab'],
     listLabel: 'Open browser tabs'
   });
+  assert.equal(result.browserTabs.tabScrollBehavior, 'auto', 'Browser tab scrolling must avoid smooth motion when reduced motion is requested.');
+  assert.deepEqual(result.browserTabs.copyFeedback, {
+    copiedValue: 'https://first.example.test/',
+    label: 'Page URL copied',
+    liveText: 'Page URL copied.'
+  });
   assert.equal(result.browserTabs.selectedSecond, true, 'Selecting a browser tab must update the visible active-tab state.');
   assert.deepEqual(result.browserTabs.afterClose, { count: 1, activeCount: 1, title: 'First tab' });
   assert.equal(result.browserTabs.calls.length, 2);

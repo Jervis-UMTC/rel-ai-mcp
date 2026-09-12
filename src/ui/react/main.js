@@ -40,7 +40,7 @@ export { applyLiveEvent, getSnapshot, init, patchLocalConnection, subscribe } fr
 const h = React.createElement;
 const DashboardStoreContext = createContext(null);
 const reactRouteComponents = new Map();
-const reactRoutePreloads = [];
+const reactRoutePreloads = new Map();
 const uiListeners = new Set();
 let foundationRoot = null;
 let foundationOptions = {};
@@ -80,20 +80,21 @@ function registerReactSection(section, Component) {
   reactRouteComponents.set(id, Component);
 }
 
-registerReactSection('home', createLazyRoute(() => import('../features/home/react.js'), 'createHomeRoute', useDashboardSlices));
-registerReactSection('activity', createLazyRoute(() => import('../features/activity/react.js'), 'createActivityRoute', useDashboardSlices));
-registerReactSection('tasks', createLazyRoute(() => import('../features/sessions/react.js'), 'createSessionsRoute', useDashboardSlices));
-registerReactSection('workspaces', createLazyRoute(() => import('../features/workspaces/react.js'), 'createWorkspacesRoute', useDashboardSlices));
-registerReactSection('code', createLazyRoute(() => import('../features/code/react.js'), 'createCodeRoute', useDashboardSlices));
-registerReactSection('browser', createLazyRoute(() => import('../features/browser/react.js'), 'createBrowserRoute'));
-registerReactSection('processes', createLazyRoute(() => import('../features/processes/react.js'), 'createProcessesRoute', useDashboardSlices));
-registerReactSection('tools', createLazyRoute(() => import('../features/tools/react.js'), 'createToolsRoute'));
-registerReactSection('usage', createLazyRoute(() => import('../features/usage/react.js'), 'createUsageRoute', useDashboardSlices));
-registerReactSection('settings', createLazyRoute(() => import('../features/settings/react.js'), 'createSettingsRoute', useDashboardStore));
-registerReactSection('diagnostics', createLazyRoute(() => import('../features/settings/diagnostics-react.js'), 'createDiagnosticsRoute', useDashboardSlices));
+registerReactSection('home', createLazyRoute(() => import('../features/home/react.js'), 'createHomeRoute', useDashboardSlices, 'home'));
+registerReactSection('activity', createLazyRoute(() => import('../features/activity/react.js'), 'createActivityRoute', useDashboardSlices, 'activity'));
+registerReactSection('tasks', createLazyRoute(() => import('../features/sessions/react.js'), 'createSessionsRoute', useDashboardSlices, 'tasks'));
+registerReactSection('workspaces', createLazyRoute(() => import('../features/workspaces/react.js'), 'createWorkspacesRoute', useDashboardSlices, 'workspaces'));
+registerReactSection('code', createLazyRoute(() => import('../features/code/react.js'), 'createCodeRoute', useDashboardSlices, 'code'));
+registerReactSection('browser', createLazyRoute(() => import('../features/browser/react.js'), 'createBrowserRoute', undefined, 'browser'));
+registerReactSection('processes', createLazyRoute(() => import('../features/processes/react.js'), 'createProcessesRoute', useDashboardSlices, 'processes'));
+registerReactSection('tools', createLazyRoute(() => import('../features/tools/react.js'), 'createToolsRoute', undefined, 'tools'));
+registerReactSection('usage', createLazyRoute(() => import('../features/usage/react.js'), 'createUsageRoute', useDashboardSlices, 'usage'));
+registerReactSection('settings', createLazyRoute(() => import('../features/settings/react.js'), 'createSettingsRoute', useDashboardStore, 'settings'));
+registerReactSection('diagnostics', createLazyRoute(() => import('../features/settings/diagnostics-react.js'), 'createDiagnosticsRoute', useDashboardSlices, 'diagnostics'));
 
-function createLazyRoute(load, factoryName, storeHook) {
-  reactRoutePreloads.push(load);
+function createLazyRoute(load, factoryName, storeHook, section) {
+  if (section) reactRoutePreloads.set(section, load);
+  else reactRoutePreloads.set(factoryName, load);
   const LazyComponent = lazy(async () => {
     const module = await load();
     const factory = module?.[factoryName];
@@ -105,8 +106,14 @@ function createLazyRoute(load, factoryName, storeHook) {
   };
 }
 
-export function preloadReactRoutes() {
-  return Promise.allSettled(reactRoutePreloads.map(load => load()));
+export function preloadReactRoutes(section = 'home') {
+  const load = reactRoutePreloads.get(section);
+  if (load) return Promise.allSettled([load()]);
+  return Promise.allSettled([]);
+}
+
+export function preloadReactRoute(section) {
+  return preloadReactRoutes(section);
 }
 
 export function mountReactFoundation(element, store, options = {}) {
@@ -833,8 +840,9 @@ function CommandPalette({ data, onAddWorkspace, onClose, open, opener }) {
                       role: 'option',
                       'aria-selected': index === safeIndex ? 'true' : 'false',
                       'data-command-index': String(index),
-                      onMouseMove: () => { if (index !== safeIndex) setActiveIndex(index); },
-                      onClick: () => execute(command)
+                      onMouseEnter: () => { if (index !== safeIndex) setActiveIndex(index); },
+                      onClick: () => execute(command),
+                      onTouchStart: () => { if (index !== safeIndex) setActiveIndex(index); }
                     },
                     h('span', { className: 'command-option-copy' }, h('strong', null, command.label), h('small', null, command.description)),
                     h('span', { className: 'command-group' }, command.group)
@@ -1032,7 +1040,12 @@ const DrawerPortal = memo(function DrawerPortal({ descriptor }) {
       }, h('div', { className: ['drawer-panel', descriptor.panelClass].filter(Boolean).join(' ') },
         h('div', { className: 'drawer-head' },
           h(Dialog.Title, { asChild: true }, h('h2', { className: 'drawer-title' }, descriptor.title)),
-          h('button', { className: 'secondary compact-button', type: 'button', onClick: descriptor.onDismiss }, 'Close')
+          h('button', {
+            className: 'secondary compact-button',
+            type: 'button',
+            'aria-label': descriptor.title ? `Close ${descriptor.title}` : 'Close dialog',
+            onClick: descriptor.onDismiss
+          }, 'Close')
         ),
         h('div', { className: 'drawer-body' }, descriptor.content)
       )))
@@ -1097,7 +1110,7 @@ function ToastItem({ toast }) {
     onFocus: pause,
     onBlur: event => { if (!event.currentTarget.contains(event.relatedTarget)) resume(); }
   },
-    h('span', { className: 'toast-marker', 'aria-hidden': 'true' }, toast.symbol),
+    h('span', { className: 'toast-marker', 'aria-hidden': 'true' }, h(Icon, { name: toast.icon || 'info', size: 14 })),
     h('span', {
       className: 'toast-copy',
       role: toast.role,

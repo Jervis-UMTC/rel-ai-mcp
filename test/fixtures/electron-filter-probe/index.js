@@ -401,15 +401,36 @@ app.whenReady().then(async () => {
           stop: async () => (state = { ...state, active: false })
         }
       };
+      const originalMatchMedia = window.matchMedia;
+      const originalScrollIntoView = Element.prototype.scrollIntoView;
+      let tabScrollBehavior = '';
+      let copiedValue = '';
+      window.matchMedia = query => query === '(prefers-reduced-motion: reduce)'
+        ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }
+        : originalMatchMedia.call(window, query);
+      Element.prototype.scrollIntoView = function(options) {
+        if (this.classList?.contains('browser-tab-item')) tabScrollBehavior = String(options?.behavior || '');
+      };
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: async value => { copiedValue = String(value || ''); } }
+      });
       location.hash = '#browser';
       const started = Date.now();
       while (document.querySelectorAll('.browser-tab-item').length !== 2 && Date.now() - started < 4000) await delay(50);
       const before = {
         count: document.querySelectorAll('.browser-tab-item').length,
         activeCount: document.querySelectorAll('.browser-tab-item.active').length,
-        labels: [...document.querySelectorAll('.browser-tab-select')].map(button => button.textContent.trim()),
+        labels: [...document.querySelectorAll('.browser-tab-title')].map(label => label.textContent.trim()),
         closeLabels: [...document.querySelectorAll('.browser-tab-close')].map(button => button.getAttribute('aria-label')),
         listLabel: document.querySelector('.browser-tab-list')?.getAttribute('aria-label') || ''
+      };
+      document.querySelector('.browser-copy-url')?.click();
+      await delay(20);
+      const copyFeedback = {
+        copiedValue,
+        label: document.querySelector('.browser-copy-url')?.getAttribute('aria-label') || '',
+        liveText: document.querySelector('.browser-omnibox [role="status"]')?.textContent.trim() || ''
       };
       document.querySelectorAll('.browser-tab-select')[1]?.click();
       await delay(50);
@@ -421,8 +442,10 @@ app.whenReady().then(async () => {
         activeCount: document.querySelectorAll('.browser-tab-item.active').length,
         title: document.querySelector('.browser-page-title')?.textContent.trim() || ''
       };
+      window.matchMedia = originalMatchMedia;
+      Element.prototype.scrollIntoView = originalScrollIntoView;
       delete window.relaiDesktop;
-      return { before, selectedSecond, afterClose, calls };
+      return { before, selectedSecond, afterClose, calls, tabScrollBehavior, copyFeedback };
     })()`);
 
     const responsive = [];

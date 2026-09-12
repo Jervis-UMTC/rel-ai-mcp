@@ -10,12 +10,18 @@
 </head>
 <body class="wizard-body">
   <main class="wizard-shell">
-    <header class="wizard-brand"><img class="wizard-logo" src="relai-logo.png" alt="" aria-hidden="true" width="193" height="187"><div><span>Rel.AI</span><small>/ MCP</small></div></header>
+    <header class="wizard-brand"><img class="wizard-logo" src="relai-logo.png" alt="" aria-hidden="true" width="42" height="42" decoding="async"><div><span>Rel.AI</span><small>/ MCP</small></div></header>
     <section class="wizard-step">
+      <div class="wizard-cloud-card wizard-update-card" id="updateBanner" hidden>
+        <div class="wizard-cloud-status">
+          <strong id="updateBannerTitle">Welcome back — Rel.AI was updated</strong>
+          <span id="updateBannerDetail">This looks like an update installed from a full download instead of the in-app updater. Your previous connection was not found on this launch, so reconnect once and you will be back where you left off.</span>
+        </div>
+      </div>
       <div class="wizard-cloud-hero">
-        <span class="wizard-eyebrow">Connect this computer</span>
-        <h1>Connect this computer to OpenAI</h1>
-        <p>Create an OpenAI Secure MCP Tunnel. After it connects, Rel.AI will show the ChatGPT connector setup step.</p>
+        <span class="wizard-eyebrow" id="wizardEyebrow">Connect this computer</span>
+        <h1 id="wizardTitle">Connect this computer to OpenAI</h1>
+        <p id="wizardSubtitle">Create an OpenAI Secure MCP Tunnel. After it connects, Rel.AI will show the ChatGPT connector setup step.</p>
       </div>
 
       <div class="wizard-cloud-card wizard-prerequisite-card">

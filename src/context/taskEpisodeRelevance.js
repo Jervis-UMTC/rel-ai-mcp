@@ -25,13 +25,14 @@ const FILE_PATTERN = /\b[A-Za-z0-9_@.-]+\.(?:cjs|css|html|js|jsx|json|md|mjs|mts
 const CODE_IDENTIFIER_PATTERN = /\b(?:[A-Z][A-Z0-9_]{3,}|[A-Za-z_$][A-Za-z0-9_$]*Error|[A-Za-z_$][A-Za-z0-9_$]*\.[A-Za-z_$][A-Za-z0-9_$.]*)\b/g;
 
 function taskEpisodeMatch(session = {}, query, options = {}) {
+  const portable = options.portable === true;
   const querySignature = queryTaskSignature(query);
   if (!querySignature.terms.length && !querySignature.identifiers.length && !querySignature.paths.length) return null;
   const sessionSignature = sessionTaskSignature(session);
 
   const pathMatches = intersection(querySignature.paths, sessionSignature.paths);
   const pathScopeMatches = intersection(querySignature.pathScopes, sessionSignature.pathScopes);
-  const identifierMatches = intersection(querySignature.identifiers, sessionSignature.identifiers);
+  const identifierMatches = intersection(querySignature.identifiers, portable ? sessionSignature.primaryIdentifiers : sessionSignature.identifiers);
   const primaryMatches = matchingRelevanceTerms(querySignature.terms, sessionSignature.primaryText);
   const secondaryMatches = matchingRelevanceTerms(querySignature.terms, sessionSignature.secondaryText)
     .filter(term => !primaryMatches.includes(term));
@@ -41,7 +42,7 @@ function taskEpisodeMatch(session = {}, query, options = {}) {
   const diagnosticQueryConcepts = querySignature.concepts.filter(concept => DIAGNOSTIC_CONCEPTS.has(concept));
   const diagnosticMatches = intersection(diagnosticQueryConcepts, [...sessionSignature.primaryConcepts, ...sessionSignature.secondaryConcepts]);
   const exactIntent = containsIntent(querySignature.normalizedText, sessionSignature.normalizedPrimary)
-    || containsIntent(querySignature.normalizedText, sessionSignature.normalizedSecondary);
+    || (!portable && containsIntent(querySignature.normalizedText, sessionSignature.normalizedSecondary));
   const directEvidence = pathMatches.length > 0 || identifierMatches.length > 0 || exactIntent;
   const taskModeMismatch = querySignature.mode !== 'unknown'
     && sessionSignature.mode !== 'unknown'
@@ -51,9 +52,9 @@ function taskEpisodeMatch(session = {}, query, options = {}) {
 
   const meaningfulTerms = [...new Set([
     ...primaryMatches.filter(term => !GENERIC_TERMS.has(term)),
-    ...secondaryMatches.filter(term => !GENERIC_TERMS.has(term)),
+    ...(!portable ? secondaryMatches.filter(term => !GENERIC_TERMS.has(term)) : []),
     ...primaryConcepts,
-    ...secondaryConcepts
+    ...(!portable ? secondaryConcepts : [])
   ])];
   const scopedEvidence = pathScopeMatches.length > 0 && meaningfulTerms.length > 0;
   if (!pathMatches.length && !identifierMatches.length && !exactIntent && !scopedEvidence && meaningfulTerms.length < 2) return null;
@@ -70,7 +71,6 @@ function taskEpisodeMatch(session = {}, query, options = {}) {
   score += diagnosticMatches.length * 2;
   if (taskModeMismatch && !directEvidence) score -= 2;
 
-  const portable = options.portable === true;
   if (portable && !pathMatches.length && !identifierMatches.length && !exactIntent && (meaningfulTerms.length < 3 || score < 8)) return null;
   if (!portable && score < 4.5) return null;
 
@@ -135,6 +135,7 @@ function sessionTaskSignature(session = {}) {
     primaryConcepts,
     secondaryConcepts,
     mode: taskMode(primaryText, primaryConcepts),
+    primaryIdentifiers: extractIdentifiers(primaryText),
     identifiers: extractIdentifiers(identifierText),
     paths,
     pathScopes: extractPathScopes(paths),

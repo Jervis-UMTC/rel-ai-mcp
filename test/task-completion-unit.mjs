@@ -2,7 +2,7 @@ import { callTool as rawCallTool } from "../src/tools.js";
 import { getToolActivity, resetToolActivity } from "../src/toolActivity.js";
 import { readConfig } from "../src/config.js";
 import { flushAuditWrites, getAuditPath, readAudit } from "../src/audit.js";
-import { flushLocalAnalytics } from "../src/localAnalytics.js";
+import { flushLocalAnalytics, readLocalUsageSnapshot } from "../src/localAnalytics.js";
 import { repositoryIntelligence } from "../src/repository/intelligence/service.js";
 import { resetTaskHistoryCaches } from "../src/taskHistoryStorage.ts";
 import { flushTaskHistoryPersistence } from "../src/taskHistoryStore.ts";
@@ -315,6 +315,9 @@ try {
   assert.equal(validation.validationStatus, 'passed');
   assert.match(validation.nextAction, /recorded|repository state/i);
 
+  const analyticsMonth = new Date().toISOString().slice(0, 7);
+  const completedTasksBefore = readLocalUsageSnapshot(readConfig(), analyticsMonth).taskIntents.reduce((sum, row) => sum + Number(row.tasks || 0), 0);
+
   const completion = await callTool('relai_work', { action: 'finish',
     workspace: 'app',
     work_id: taskId,
@@ -325,6 +328,8 @@ try {
   assert.equal(completion.completionKnown, true);
   assert.equal(completion.endReason, 'explicit_completion');
   assert.equal(completion.validationStatus, 'passed');
+  const completedTasksAfter = readLocalUsageSnapshot(readConfig(), analyticsMonth).taskIntents.reduce((sum, row) => sum + Number(row.tasks || 0), 0);
+  assert.equal(completedTasksAfter, completedTasksBefore + 1, 'accepted task completion must increment local work-type analytics exactly once');
   assert.equal(resolvePolicy({ alias: 'app', path: workspace }, readConfig()).sessionActive, false, 'explicit completion must clear only this task ownership state');
 
   const status = getToolActivity();
@@ -351,6 +356,8 @@ try {
   assert.equal(duplicateCompletion.work_id, taskId);
   assert.equal(duplicateCompletion.duplicate, true);
   assert.equal(duplicateCompletion.summary, 'Implemented and validated the requested code changes.');
+  const completedTasksAfterDuplicate = readLocalUsageSnapshot(readConfig(), analyticsMonth).taskIntents.reduce((sum, row) => sum + Number(row.tasks || 0), 0);
+  assert.equal(completedTasksAfterDuplicate, completedTasksAfter, 'duplicate completion must not inflate work-type analytics');
 
   resetToolActivity();
   const rotatedValidationContext = { publicHttpOnly: true };

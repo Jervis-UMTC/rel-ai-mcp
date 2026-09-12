@@ -142,6 +142,21 @@ function createHarness({ failOpen = false } = {}) {
 }
 
 {
+  const { host } = createHarness();
+  const started = await host.run({ action: 'start' });
+  const opened = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
+  const layout = await host.run({
+    action: 'snapshot',
+    nativeSessionId: started.nativeSessionId,
+    nativePageId: opened.nativePageId,
+    detail: 'layout'
+  });
+  assert.equal(layout.detail, 'layout', 'embedded browser snapshots must expose the requested layout detail mode');
+  assert.equal(layout.snapshot, 'true', 'embedded layout snapshots must execute through the page DOM rather than requiring the accessibility debugger');
+  await host.run({ action: 'close_session', nativeSessionId: started.nativeSessionId });
+}
+
+{
   const { host, sessions, views, childViews, routes, events } = createHarness();
   const started = await host.run({ action: 'start' });
   assert.deepEqual(routes, ['#browser']);

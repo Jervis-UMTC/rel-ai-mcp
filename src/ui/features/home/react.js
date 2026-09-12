@@ -1,6 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { copyText } from '../../clipboard.js';
-import { SparkChart } from '../../components/charts.js';
 import { Icon } from '../../components/icons.js';
 import { pillClass } from '../../components/pill.js';
 import { taskProgressView } from '../../components/task-progress.js';
@@ -13,11 +12,12 @@ import { classifyTaskActivity } from '../../../taskActivityPresentation.js';
 import { formatDuration, timeAgo } from '../../utils.js';
 import { buildTaskSemanticProgress } from '../../../taskSemanticProgress.js';
 import { completeDesktopSetup, desktopSetupSteps, dismissDesktopSetup, isDesktopSetupDismissed } from '../onboarding/index.js';
-import { CHATGPT_CONNECTOR_CREATE_URL, RELAI_CONNECTOR_ICON_FILENAME, RELAI_CONNECTOR_ICON_URL, chatGptFirstPrompt, chatGptGuideSteps } from '../settings/connection-guidance.js';
+import { CHATGPT_CONNECTOR_CREATE_URL, RELAI_CONNECTOR_ICON_FILENAME, chatGptFirstPrompt, chatGptGuideSteps, downloadRelaiConnectorIcon } from '../settings/connection-guidance.js';
 import { loadAnalyticsData } from '../usage/data.js';
 import { desktopSetupState, homeAnalyticsView, overviewState, overviewWorkspaceStatus } from './index.js';
 
 const h = React.createElement;
+const SparkChart = lazy(() => import('../../components/charts.js').then(module => ({ default: module.SparkChart })));
 const HOME_STORE_KEYS = Object.freeze(['config', 'health', 'connection', 'connectionState', 'desktopStatus', 'mcpConnection', 'tasks', 'taskActivity', 'live']);
 
 export function createHomeRoute(useDashboardSlices) {
@@ -229,12 +229,14 @@ function homeAnalyticsMetricIcon(label) {
 function HomeAnalyticsPulse({ pulse }) {
   if (pulse.empty) return h('div', { className: 'home-analytics-pulse-empty' }, 'No activity yet.');
   return h('div', { className: 'home-analytics-chart' },
-    h(SparkChart, {
-      values: pulse.values,
-      className: 'home-analytics-chart-canvas',
-      ariaLabel: pulse.summary,
-      decorative: false
-    }),
+    h(Suspense, { fallback: h('div', { className: 'home-analytics-chart-canvas chart-loading', 'aria-hidden': 'true' }) },
+      h(SparkChart, {
+        values: pulse.values,
+        className: 'home-analytics-chart-canvas',
+        ariaLabel: pulse.summary,
+        decorative: false
+      })
+    ),
     h('div', { className: 'home-analytics-scale' }, h('span', null, 'Earlier'), h('span', null, 'Current hour'))
   );
 }
@@ -299,13 +301,7 @@ function ChatGptSetupGuide({ tunnelId }) {
   const steps = chatGptGuideSteps({ mode: 'create', tunnelId });
   const [iconSaved, setIconSaved] = useState(false);
   const saveIcon = () => {
-    const link = document.createElement('a');
-    link.href = RELAI_CONNECTOR_ICON_URL;
-    link.download = RELAI_CONNECTOR_ICON_FILENAME;
-    link.hidden = true;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    downloadRelaiConnectorIcon();
     setIconSaved(true);
   };
   return h('div', { className: 'chatgpt-setup-guide compact desktop-chatgpt-guide' },

@@ -92,8 +92,8 @@ function createDashboardWindowManager(deps) {
     dashboardWindow = new BrowserWindow({
       ...bounds,
       ...chrome.windowOptions,
-      minWidth: DASHBOARD_WINDOW_LIMITS.minWidth,
-      minHeight: DASHBOARD_WINDOW_LIMITS.minHeight,
+      minWidth: Math.min(DASHBOARD_WINDOW_LIMITS.minWidth, bounds.width),
+      minHeight: Math.min(DASHBOARD_WINDOW_LIMITS.minHeight, bounds.height),
       show: false,
       autoHideMenuBar: true,
       title: 'Rel.AI MCP Dashboard',

@@ -1,5 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnalyticsTimelineChart, SparkChart } from '../../components/charts.js';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ANALYTICS_USE_CASES,
+  analyticsTaskIntentLabel,
+  analyticsUseCaseLabel,
+  analyticsUseCaseShortLabel,
+  isPrimaryAnalyticsUseCase
+} from '../../../contracts/analyticsTaxonomy.js';
 import { Icon } from '../../components/icons.js';
 import { getRouteParams, getWorkspaceFilter, replaceRouteParams, routeHref } from '../../router.js';
 import { ANALYTICS_RANGES, analyticsBounds, workspaceOptions } from './range-model.js';
@@ -8,6 +14,9 @@ import { analyticsPrivacyCopy, customDateDefaults, rangeButtonLabel } from './in
 import { analyticsMetrics, failureCategoryLabel, formatChartValue, integer, pointMetric, timelineModel } from './render.js';
 
 const h = React.createElement;
+const SparkChart = lazy(() => import('../../components/charts.js').then(module => ({ default: module.SparkChart })));
+const AnalyticsTimelineChart = lazy(() => import('../../components/charts.js').then(module => ({ default: module.AnalyticsTimelineChart })));
+const AnalyticsBubbleMatrixChart = lazy(() => import('../../components/charts.js').then(module => ({ default: module.AnalyticsBubbleMatrixChart })));
 const USAGE_STORE_KEYS = Object.freeze(['live']);
 const CHART_METRICS = Object.freeze([
   ['toolCalls', 'Actions', 'activity'],
@@ -156,7 +165,7 @@ function AnalyticsToolbar({ end, loading, onDateChange, onRangeChange, onRefresh
   return h('div', { className: 'feature-toolbar usage-toolbar' },
     h('div', { className: 'usage-toolbar-heading' },
       h('div', { className: 'usage-title-row' }, h(Icon, { name: 'usage', size: 20 }), h('h2', null, 'Analytics')),
-      h('p', null, 'Analytics are stored on this computer. Prompts, file paths, command output, and action results are not stored.')
+      h('p', null, 'Analytics are stored on this computer. Rel.AI records aggregate action categories and work-type labels, not prompts, file paths, command output, or action results.')
     ),
     h('div', { className: 'usage-toolbar-controls' },
       h('label', { className: 'usage-workspace-control' },
@@ -184,8 +193,8 @@ function AnalyticsToolbar({ end, loading, onDateChange, onRangeChange, onRefresh
         )
       ),
       h('div', { className: 'usage-custom-range', 'data-usage-custom-range': true, hidden: range !== 'custom' },
-        h('label', null, h('span', null, 'From'), h('input', { type: 'date', 'data-usage-start': true, value: start, onChange: event => onDateChange('start', event.target.value) })),
-        h('label', null, h('span', null, 'To'), h('input', { type: 'date', 'data-usage-end': true, value: end, onChange: event => onDateChange('end', event.target.value) }))
+        h('label', { htmlFor: 'usage-start' }, h('span', null, 'From'), h('input', { id: 'usage-start', type: 'date', 'data-usage-start': true, value: start, onChange: event => onDateChange('start', event.target.value) })),
+        h('label', { htmlFor: 'usage-end' }, h('span', null, 'To'), h('input', { id: 'usage-end', type: 'date', 'data-usage-end': true, value: end, onChange: event => onDateChange('end', event.target.value) }))
       ),
       h('button', {
         type: 'button',
@@ -248,6 +257,33 @@ function UsageContent({ bounds, current, previous }) {
         h(Timeline, { bounds, points: current.points, metricKey: chart[0], label: chart[1] })
       )
     ),
+    h('div', { className: 'usage-side-by-side usage-distribution-grid' },
+      h(DistributionCard, {
+        title: 'Use cases',
+        description: `${integer(current.categorizedActions)} categorized ${Number(current.categorizedActions) === 1 ? 'action' : 'actions'}`,
+        rows: current.useCases,
+        valueKey: 'toolCalls',
+        total: current.categorizedActions,
+        labelFor: row => analyticsUseCaseLabel(row.useCase),
+        empty: Number(current.toolCalls || 0) > 0 ? 'Use-case analytics are available for activity recorded after this update.' : 'No activity in this range.',
+        note: current.legacyUncategorizedActions > 0
+          ? `${integer(current.legacyUncategorizedActions)} earlier ${Number(current.legacyUncategorizedActions) === 1 ? 'action does' : 'actions do'} not include use-case data.`
+          : ''
+      }),
+      h(DistributionCard, {
+        title: 'Work types',
+        description: `${integer(current.completedTasks)} completed work ${Number(current.completedTasks) === 1 ? 'session' : 'sessions'}`,
+        rows: current.taskTypes,
+        valueKey: 'tasks',
+        total: current.completedTasks,
+        labelFor: row => analyticsTaskIntentLabel(row.intent),
+        unit: 'task',
+        empty: Number(current.toolCalls || 0) > 0
+          ? 'No classified completed work sessions in this range. Work-type counts begin with tasks completed after this update.'
+          : 'No completed work sessions in this range.'
+      })
+    ),
+    h(ActivityMatrix, { current }),
     h(ActivityBars, { title: 'Actions by tool', rows: current.tools, kind: 'tool' }),
     current.kind === 'workspace'
       ? h(FailureCategories, { rows: current.failureCategories, totalFailures: current.failures })
@@ -256,6 +292,89 @@ function UsageContent({ bounds, current, previous }) {
           h(ActivityBars, { title: 'Project activity', rows: current.workspaces, kind: 'workspace' })
         )
   );
+}
+
+function DistributionCard({ title, description = '', rows = [], valueKey, total = 0, labelFor, unit = 'action', empty = 'No activity in this range.', note = '' }) {
+  const visible = [...rows].filter(row => Number(row?.[valueKey] || 0) > 0).sort((a, b) => Number(b?.[valueKey] || 0) - Number(a?.[valueKey] || 0));
+  const max = Math.max(1, ...visible.map(row => Number(row?.[valueKey] || 0)));
+  return h('section', { className: 'card usage-breakdown usage-bar-card usage-distribution-card' },
+    h('div', { className: 'card-head' },
+      h('div', null, h('h3', null, title), description ? h('p', null, description) : null)
+    ),
+    h('div', { className: 'card-body' },
+      visible.length
+        ? h('div', { className: 'usage-bar-list' }, visible.map((row, index) => {
+            const value = Number(row?.[valueKey] || 0);
+            const label = labelFor(row);
+            const percentage = total > 0 ? value / total * 100 : 0;
+            const valueText = `${integer(value)} ${value === 1 ? unit : `${unit}s`}, ${formatShare(percentage)}`;
+            return h('div', { key: `${label}-${index}`, className: 'usage-bar-row usage-distribution-row' },
+              h('span', { className: 'usage-bar-label', title: label }, label),
+              h('progress', { max, value, 'aria-label': `${label}: ${valueText}`, 'aria-valuetext': valueText }, integer(value)),
+              h('strong', { className: 'usage-distribution-value' }, h('span', null, formatShare(percentage)), h('small', null, integer(value)))
+            );
+          }))
+        : h('div', { className: 'usage-breakdown-empty' }, empty),
+      note ? h('p', { className: 'usage-card-note' }, note) : null
+    )
+  );
+}
+
+function ActivityMatrix({ current }) {
+  const matrix = Array.isArray(current.activityMatrix) ? current.activityMatrix : [];
+  const useCases = ANALYTICS_USE_CASES.filter(item => item.primary && isPrimaryAnalyticsUseCase(item.id));
+  const intents = [...new Set(matrix.map(row => row.intent))]
+    .sort((left, right) => analyticsTaskIntentLabel(left).localeCompare(analyticsTaskIntentLabel(right)));
+  const trackedActions = matrix.reduce((sum, row) => sum + Number(row.toolCalls || 0), 0);
+  const rowTotals = new Map(intents.map(intent => [intent, matrix.filter(row => row.intent === intent).reduce((sum, row) => sum + Number(row.toolCalls || 0), 0)]));
+  const cells = matrix.map(row => ({
+    x: useCases.findIndex(item => item.id === row.useCase),
+    y: intents.indexOf(row.intent),
+    value: Number(row.toolCalls || 0),
+    useCase: row.useCase,
+    intent: row.intent,
+    useCaseLabel: analyticsUseCaseLabel(row.useCase),
+    intentLabel: analyticsTaskIntentLabel(row.intent),
+    share: Number(rowTotals.get(row.intent) || 0) > 0 ? Number(row.toolCalls || 0) / Number(rowTotals.get(row.intent)) * 100 : 0
+  })).filter(cell => cell.x >= 0 && cell.y >= 0 && cell.value > 0);
+  const untrackedNote = Number(current.untrackedActions || 0) > 0
+    ? `${integer(current.untrackedActions)} ${Number(current.untrackedActions) === 1 ? 'action was' : 'actions were'} not linked to a work session and ${Number(current.untrackedActions) === 1 ? 'is' : 'are'} excluded from this matrix.`
+    : '';
+  return h('section', { className: 'card usage-breakdown usage-matrix-card', 'data-usage-matrix': true },
+    h('div', { className: 'card-head' },
+      h('div', null,
+        h('h3', null, 'Work type × use case'),
+        h('p', null, `${integer(trackedActions)} task-linked ${trackedActions === 1 ? 'action' : 'actions'}. Bubble size shows action count.`)
+      )
+    ),
+    h('div', { className: 'card-body usage-matrix-body' },
+      cells.length && intents.length
+        ? h('div', { className: 'usage-matrix-scroll' },
+            h('div', { className: 'usage-matrix-stage' },
+              h(Suspense, { fallback: h('div', { className: 'usage-chart-empty', role: 'status' }, 'Loading matrix…') },
+                h(AnalyticsBubbleMatrixChart, {
+                  cells,
+                  xLabels: useCases.map(item => analyticsUseCaseShortLabel(item.id)),
+                  yLabels: intents.map(intent => analyticsTaskIntentLabel(intent)),
+                  className: 'usage-matrix-chart',
+                  ariaLabel: 'Work type by use case activity matrix'
+                })
+              )
+            )
+          )
+        : h('div', { className: 'usage-breakdown-empty' }, Number(current.untrackedActions || 0) > 0
+            ? 'No task-linked use-case activity in this range.'
+            : Number(current.toolCalls || 0) > 0
+              ? 'The work-type matrix is available for task-linked activity recorded after this update.'
+              : 'No activity in this range.'),
+      untrackedNote ? h('p', { className: 'usage-card-note' }, untrackedNote) : null
+    )
+  );
+}
+
+function formatShare(value) {
+  const number = Number(value) || 0;
+  return `${number.toFixed(number >= 10 ? 0 : 1)}%`;
 }
 
 function Metric({ metric }) {
@@ -298,7 +417,8 @@ function Metric({ metric }) {
     ),
     metric.detail ? h('small', { className: 'usage-metric-detail' }, metric.detail) : null,
     sparkValues.length
-      ? h(SparkChart, { values: sparkValues, className: `usage-sparkline ${metric.tone}`.trim(), tone: metric.tone })
+      ? h(Suspense, { fallback: h('span', { className: 'usage-sparkline-empty', 'aria-hidden': 'true' }) },
+        h(SparkChart, { values: sparkValues, className: `usage-sparkline ${metric.tone}`.trim(), tone: metric.tone }))
       : h('span', { className: 'usage-sparkline-empty', 'aria-hidden': 'true' })
   );
 }
@@ -306,6 +426,7 @@ function Metric({ metric }) {
 function Timeline({ bounds, points = [], metricKey, label }) {
   const values = points.map(point => pointMetric(point, metricKey));
   const model = timelineModel(values, label);
+  const sparseMetric = metricKey === 'operationSuccessRate' || metricKey === 'averageDuration';
   const signature = `${metricKey}:${values.join('|')}`;
   const [activeIndex, setActiveIndex] = useState(() => Math.max(0, model.latestIndex || 0));
 
@@ -313,7 +434,7 @@ function Timeline({ bounds, points = [], metricKey, label }) {
     setActiveIndex(Math.max(0, model.latestIndex || 0));
   }, [signature, model.latestIndex]);
 
-  if (model.empty) return h('div', { className: 'usage-chart-empty' }, 'No activity in this range.');
+  if (model.empty) return h('div', { className: 'usage-chart-empty' }, sparseMetric ? 'No measured samples in this range.' : 'No activity in this range.');
 
   const safeIndex = Math.max(0, Math.min(model.latestIndex, activeIndex));
   const point = points[safeIndex];
@@ -323,6 +444,10 @@ function Timeline({ bounds, points = [], metricKey, label }) {
   const peakValue = formatChartValue(model.peak, label);
   const labels = points.map(item => formatPointTime(item, bounds, false));
   const detailedLabels = points.map(item => formatPointTime(item, bounds, true));
+  const firstMeasuredIndex = values.findIndex(value => value !== null);
+  const leadingGapNote = sparseMetric && firstMeasuredIndex > 0
+    ? ` No completed-action samples exist before ${detailedLabels[firstMeasuredIndex]}; the solid line begins at the first measured sample.`
+    : '';
   const formatValue = value => formatChartValue(value, label);
 
   return h('div', { className: 'usage-timeline-plot' },
@@ -332,7 +457,8 @@ function Timeline({ bounds, points = [], metricKey, label }) {
       h('small', null, safeIndex === model.peakIndex ? 'Peak in this range' : `Peak ${peakValue}`)
     ),
     h('div', { className: 'usage-timeline-stage' },
-      h(AnalyticsTimelineChart, {
+      h(Suspense, { fallback: h('div', { className: 'usage-chart-empty', role: 'status' }, 'Loading chart…') },
+        h(AnalyticsTimelineChart, {
         values,
         labels,
         detailedLabels,
@@ -344,9 +470,9 @@ function Timeline({ bounds, points = [], metricKey, label }) {
         peakIndex: model.peakIndex,
         activeIndex: safeIndex,
         onActiveIndexChange: setActiveIndex
-      })
+        }))
     ),
-    h('div', { className: 'usage-chart-hint' }, 'Hover the chart or focus it and use ← / → to inspect exact values. Hourly data uses UTC buckets; missing rate or duration samples are shown as gaps.')
+    h('div', { className: 'usage-chart-hint' }, `Hover the chart or focus it and use ← / → to inspect exact values. Hourly data uses UTC buckets; missing rate or duration samples are shown as gaps.${leadingGapNote}`)
   );
 }
 

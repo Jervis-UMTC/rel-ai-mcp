@@ -12,8 +12,49 @@ const toggle = document.getElementById('pulseToggle');
 const island = document.getElementById('pulseIsland');
 const openButton = document.getElementById('pulseOpen');
 const workspaceRow = document.getElementById('pulseWorkspaceRow');
-const tasksRow = document.getElementById('pulseTasksRow');
+const tasksBlock = document.getElementById('pulseTasksBlock');
+const taskList = document.getElementById('pulseTaskList');
+const tasksCount = document.getElementById('pulseTasksCount');
 const progress = document.getElementById('pulseProgress');
+const compactCopy = document.getElementById('pulseCompactCopy');
+const stateEl = document.getElementById('pulseState');
+const expandedStateEl = document.getElementById('pulseExpandedState');
+const taskCountElement = document.getElementById('pulseTaskCount');
+const compactTitleEl = document.getElementById('pulseCompactTitle');
+const compactElapsed = document.getElementById('pulseCompactElapsed');
+const expandedElapsed = document.getElementById('pulseExpandedElapsed');
+const compactProgressFill = document.getElementById('pulseCompactProgressFill');
+const titleEl = document.getElementById('pulseTitle');
+const activityRow = document.getElementById('pulseActivity');
+const activityText = document.getElementById('pulseActivityText');
+const activityElapsed = document.getElementById('pulseActivityElapsed');
+const summaryEl = document.getElementById('pulseSummary');
+const workspaceEl = document.getElementById('pulseWorkspace');
+const progressFill = document.getElementById('pulseProgressFill');
+const progressLabelEl = document.getElementById('pulseProgressLabel');
+const progressValueEl = document.getElementById('pulseProgressValue');
+const openLabelEl = document.getElementById('pulseOpenLabel');
+const liveRegion = document.getElementById('pulseLive');
+
+let renderScheduled = false;
+let lastProgressBucket = -1;
+let lastLiveAnnouncement = '';
+
+function setText(element, value) {
+  if (element && element.textContent !== value) element.textContent = value;
+}
+
+function setTextWithTitle(element, value) {
+  if (!element) return;
+  if (element.textContent !== value) element.textContent = value;
+  if (element.title !== value) element.title = value;
+}
+
+function announceStatus(message) {
+  if (!liveRegion || message === lastLiveAnnouncement) return;
+  lastLiveAnnouncement = message;
+  liveRegion.textContent = message;
+}
 
 function stateLabel(model) {
   if (model.actionRequired) return 'Action required';
@@ -23,18 +64,72 @@ function stateLabel(model) {
   return 'Rel.AI';
 }
 
+function formatElapsed(startedAt, now = Date.now()) {
+  const start = Number(startedAt);
+  if (!Number.isFinite(start) || start <= 0) return '';
+  const seconds = Math.max(0, Math.floor((now - start) / 1000));
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const rest = minutes % 60;
+    return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
+function tickElapsed() {
+  const label = formatElapsed(currentModel.startedAt);
+  for (const element of [compactElapsed, expandedElapsed, activityElapsed]) {
+    if (!element) continue;
+    if (!label) {
+      element.hidden = true;
+      if (element.textContent !== '') element.textContent = '';
+      continue;
+    }
+    element.hidden = false;
+    if (element.textContent !== label) element.textContent = label;
+  }
+}
+
+function taskItems(model) {
+  if (Array.isArray(model.taskItems) && model.taskItems.length) return model.taskItems.slice(0, 3);
+  const names = (Array.isArray(model.taskNames) ? model.taskNames : []).filter(Boolean).slice(0, 3);
+  return names.map(title => ({ title: String(title), workspace: '', status: '', statusLabel: '', active: false, id: '' }));
+}
+
 function updatePulse(model = {}) {
   if (model?.expanded === false && expanded) resetExpandedFromHost();
   currentModel = {
     ...currentModel,
     contextTitle: '',
     workspace: '',
+    workspacesLabel: '',
+    activityLine: '',
+    startedAt: null,
     otherTaskCount: 0,
     taskNames: [],
+    taskItems: [],
     progressPercent: undefined,
     progressLabel: '',
     ...(model || {})
   };
+  if (typeof window.requestAnimationFrame === 'function') {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    window.requestAnimationFrame(() => {
+      renderScheduled = false;
+      renderPulse();
+    });
+    return;
+  }
+  renderPulse();
+}
+
+function renderPulse() {
   const themePreference = ['dark', 'light'].includes(currentModel.themePreference) ? currentModel.themePreference : '';
   if (themePreference) document.documentElement.dataset.theme = themePreference;
   else delete document.documentElement.dataset.theme;
@@ -43,42 +138,134 @@ function updatePulse(model = {}) {
   const title = currentModel.title || 'Rel.AI';
   const contextTitle = String(currentModel.contextTitle || '').trim();
   const detail = String(currentModel.detail || '').trim();
+  const activityLine = String(currentModel.activityLine || '').trim();
   const workspace = String(currentModel.workspace || '').trim();
+  const workspacesLabel = String(currentModel.workspacesLabel || workspace).trim();
   const taskCount = Math.max(0, Number(currentModel.taskCount || 0));
   const taskNames = (Array.isArray(currentModel.taskNames) ? currentModel.taskNames : [])
     .map(value => String(value || '').trim())
     .filter(Boolean)
     .slice(0, 3);
+  const items = taskItems(currentModel);
+  const multiTask = items.length > 1 || taskCount > 1;
   const progressPercent = Number(currentModel.progressPercent);
   const hasProgress = Number.isFinite(progressPercent) && progressPercent >= 0;
 
-  shell.dataset.tone = String(currentModel.tone || 'idle');
-  document.getElementById('pulseState').textContent = label;
-  document.getElementById('pulseExpandedState').textContent = label;
-  const taskCountElement = document.getElementById('pulseTaskCount');
+  if (shell.dataset.tone !== String(currentModel.tone || 'idle')) shell.dataset.tone = String(currentModel.tone || 'idle');
+  setText(stateEl, label);
+  setText(expandedStateEl, label);
   taskCountElement.hidden = taskCount < 1;
   taskCountElement.textContent = taskCount === 1 ? '1 task' : `${taskCount} tasks`;
-  document.getElementById('pulseCompactTitle').textContent = title;
-  document.getElementById('pulseTitle').textContent = title;
-  document.getElementById('pulseSummary').textContent = contextTitle && contextTitle !== title ? contextTitle : (detail || 'Local activity is in progress.');
+  setTextWithTitle(compactTitleEl, title);
+  setTextWithTitle(titleEl, title);
 
-  workspaceRow.hidden = !workspace;
-  document.getElementById('pulseWorkspace').textContent = workspace;
+  if (activityRow) {
+    activityRow.hidden = !activityLine;
+    setTextWithTitle(activityText, activityLine);
+  }
 
-  tasksRow.hidden = taskNames.length < 1;
-  const hiddenTaskCount = Math.max(0, taskCount - taskNames.length);
-  document.getElementById('pulseTasks').textContent = `${taskNames.join(' · ')}${hiddenTaskCount ? ` · +${hiddenTaskCount} more` : ''}`;
+  const summary = contextTitle && contextTitle !== title ? contextTitle : (detail || 'Local activity is in progress.');
+  const hideSummaryForDensity = multiTask && items.length > 0;
+  if (summaryEl) {
+    summaryEl.hidden = hideSummaryForDensity && !hasProgress ? true : false;
+    if (!summaryEl.hidden) setTextWithTitle(summaryEl, summary);
+  }
+
+  const showWorkspaceRow = Boolean(workspace) && !multiTask;
+  if (workspaceRow) workspaceRow.hidden = !showWorkspaceRow;
+  setTextWithTitle(workspaceEl, workspace);
+
+  renderTaskList(items, taskCount, workspacesLabel, taskNames);
 
   progress.hidden = !hasProgress;
   if (hasProgress) {
     const percent = Math.min(100, Math.max(0, progressPercent));
-    document.getElementById('pulseProgressFill').style.width = `${percent}%`;
-    document.getElementById('pulseProgressLabel').textContent = currentModel.progressLabel || 'Progress';
-    document.getElementById('pulseProgressValue').textContent = `${Math.round(percent)}%`;
+    const bucket = Math.round(percent);
+    if (bucket !== lastProgressBucket) {
+      lastProgressBucket = bucket;
+      if (progressFill.style.width !== `${percent}%`) progressFill.style.width = `${percent}%`;
+      if (compactProgressFill && compactProgressFill.style.width !== `${percent}%`) compactProgressFill.style.width = `${percent}%`;
+      setText(progressLabelEl, currentModel.progressLabel || 'Progress');
+      setText(progressValueEl, `${Math.round(percent)}%`);
+      progress.setAttribute('aria-valuenow', String(Math.round(percent)));
+      progress.setAttribute('aria-label', currentModel.progressLabel || 'Task progress');
+    }
+  } else if (lastProgressBucket !== -1) {
+    lastProgressBucket = -1;
+    if (progressFill.style.width !== '0%') progressFill.style.width = '0%';
+    if (compactProgressFill && compactProgressFill.style.width !== '0%') compactProgressFill.style.width = '0%';
   }
 
-  document.getElementById('pulseOpenLabel').textContent = currentModel.actionRequired ? 'Review in Rel.AI' : 'Open in Rel.AI';
-  openButton.setAttribute('aria-label', `${currentModel.actionRequired ? 'Review' : 'Open'} ${title}`);
+  const openText = currentModel.actionRequired ? 'Review in Rel.AI' : 'Open in Rel.AI';
+  setText(openLabelEl, openText);
+  const openLabel = `${currentModel.actionRequired ? 'Review' : 'Open'} ${title}`;
+  if (openButton.getAttribute('aria-label') !== openLabel) openButton.setAttribute('aria-label', openLabel);
+  tickElapsed();
+  announceStatus(`${label}. ${title}. ${summary}`);
+}
+
+function renderTaskList(items, taskCount, workspacesLabel, taskNames) {
+  if (!tasksBlock || !taskList) return;
+  const visible = items.length > 0;
+  tasksBlock.hidden = !visible;
+  if (!visible) {
+    taskList.textContent = '';
+    return;
+  }
+  const hiddenTaskCount = Math.max(0, taskCount - items.length);
+  const countLabel = hiddenTaskCount > 0
+    ? `${taskCount} tasks · +${hiddenTaskCount} more`
+    : taskCount > 1
+      ? `${taskCount} tasks${workspacesLabel ? ` · ${workspacesLabel}` : ''}`
+      : (workspacesLabel || '');
+  setText(tasksCount, countLabel);
+
+  if (taskList.childElementCount !== items.length) taskList.textContent = '';
+  items.forEach((item, index) => {
+    const title = String(item.title || '').trim() || 'Untitled task';
+    const meta = [item.workspace ? String(item.workspace) : '', item.statusLabel && !item.active ? String(item.statusLabel) : ''].filter(Boolean).join(' · ');
+    const pill = item.active ? 'Running' : (item.statusLabel || 'Queued');
+    let row = taskList.children[index];
+    if (!row) {
+      row = document.createElement('li');
+      row.className = 'pulse-task-row';
+      const dot = document.createElement('span');
+      dot.className = 'pulse-task-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      const main = document.createElement('div');
+      main.className = 'pulse-task-main';
+      const titleEl = document.createElement('div');
+      titleEl.className = 'pulse-task-title';
+      const metaEl = document.createElement('div');
+      metaEl.className = 'pulse-task-meta';
+      const pillEl = document.createElement('span');
+      pillEl.className = 'pulse-task-pill';
+      main.append(titleEl, metaEl);
+      row.append(dot, main, pillEl);
+      taskList.append(row);
+    }
+    row.dataset.active = item.active ? 'true' : 'false';
+    if (item.status) row.dataset.status = String(item.status);
+    else delete row.dataset.status;
+    const titleNode = row.querySelector('.pulse-task-title');
+    const metaNode = row.querySelector('.pulse-task-meta');
+    const pillNode = row.querySelector('.pulse-task-pill');
+    setTextWithTitle(titleNode, title);
+    if (meta) {
+      metaNode.hidden = false;
+      setTextWithTitle(metaNode, meta);
+    } else {
+      metaNode.hidden = true;
+      setText(metaNode, '');
+    }
+    setText(pillNode, pill);
+    const accessibleName = `${title}${meta ? `, ${meta}` : ''}, ${pill}`;
+    if (row.getAttribute('aria-label') !== accessibleName) row.setAttribute('aria-label', accessibleName);
+  });
+  while (taskList.childElementCount > items.length) taskList.lastChild?.remove();
+  // Keep the legacy joined-names format for the screen-reader label.
+  const joinedNames = taskNames.join(' · ');
+  tasksBlock.setAttribute('aria-label', joinedNames ? `Tasks: ${joinedNames}` : `Tasks: ${items.map(item => item.title).join(' · ')}`);
 }
 
 function setExpanded(next) {
@@ -213,11 +400,17 @@ function applyExpandedAccessibility(value) {
   toggle.setAttribute('aria-expanded', String(value));
   toggle.setAttribute('aria-label', value ? 'Hide activity details' : 'Show activity details');
   island.setAttribute('aria-hidden', String(!value));
+  if (value) island.removeAttribute('inert');
+  else island.setAttribute('inert', '');
   openButton.tabIndex = value ? 0 : -1;
+  compactCopy?.setAttribute('aria-expanded', String(value));
+  compactCopy?.setAttribute('aria-label', value ? 'Hide activity details' : 'Show activity details');
 }
 
 function applyExpandedLayout(value) {
   shell.dataset.expanded = String(value);
+  if (value === true && document.activeElement === compactCopy) toggle.focus();
+  else if (value === false && island.contains(document.activeElement)) toggle.focus();
 }
 
 function canAnimateMorph() {
@@ -231,14 +424,22 @@ function prefersReducedMotion() {
 document.querySelector('.pulse-bar')?.addEventListener('click', event => {
   if (!expanded && !event.target.closest('button')) setExpanded(true);
 });
+document.getElementById('pulseCompactCopy')?.addEventListener('click', event => {
+  event.stopPropagation();
+  setExpanded(!expanded);
+});
 toggle.addEventListener('click', event => {
   event.stopPropagation();
   setExpanded(!expanded);
 });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && expanded) setExpanded(false);
+  if (event.key === 'Escape' && expanded) {
+    setExpanded(false);
+    toggle.focus();
+  }
 });
 openButton.addEventListener('click', () => {
   Promise.resolve(window.relaiPulse?.openDashboard?.()).catch(() => {});
 });
+window.setInterval(tickElapsed, 1000);
 window.relaiPulse?.onState?.(updatePulse);

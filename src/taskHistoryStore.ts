@@ -337,21 +337,47 @@ function readCrossWorkspaceTaskEpisodes(config: TaskHistoryConfig, workspace: un
     .map(item => compactPortableTaskEpisode(item.session, item.match));
 }
 
+function findTaskReuseCandidates(config: TaskHistoryConfig, workspaceAlias: unknown, conversationId: unknown, limit = 24): TaskRecord[] {
+  const workspace = String(workspaceAlias || '').trim();
+  const conversation = String(conversationId || '').trim();
+  if (!workspace || !conversation) return [];
+  try {
+    const sessions = findSessionsContaining(getTaskHistoryDir(config), [conversation], {
+      workspace,
+      limit: clamp(limit || 24, 1, 50)
+    });
+    return (Array.isArray(sessions) ? sessions : []).filter(session => Boolean(session?.id)) as TaskRecord[];
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] task reuse candidate search:', error);
+    return [];
+  }
+}
+
 function retrievalCandidateSessions(config: TaskHistoryConfig, workspaceAlias: string, query: unknown, options: { portable?: boolean } = {}): TaskRecord[] {
-  const summaries = readTaskHistory(config, {}, { limit: MAX_SESSIONS, summary: true });
   const signature = queryTaskSignature(query);
-  const exactNeedles = uniqueStrings([...signature.identifiers, ...signature.paths])
+  const exactNeedles = uniqueStrings([...signature.identifiers, ...signature.paths, ...signature.pathScopes])
     .filter(value => value.length >= 4)
     .slice(0, 12);
-  if (!exactNeedles.length) return summaries;
-  const exact = findSessionsContaining(getTaskHistoryDir(config), exactNeedles, {
-    limit: Math.min(MAX_SESSIONS, Math.max(24, exactNeedles.length * 8)),
-    ...(options.portable === true
-      ? (workspaceAlias ? { excludeWorkspace: workspaceAlias } : {})
-      : { workspace: workspaceAlias })
-  });
-  const byId = new Map(summaries.map(session => [session.id, session]));
-  for (const session of exact) byId.set(session.id, publicSession(session as TaskRecord));
+  if (!exactNeedles.length) return readTaskHistory(config, {}, { limit: MAX_SESSIONS, summary: true });
+  const exactLimit = Math.min(MAX_SESSIONS, Math.max(24, exactNeedles.length * 8));
+  let exact: StoredTaskSession[] = [];
+  try {
+    exact = findSessionsContaining(getTaskHistoryDir(config), exactNeedles, {
+      limit: exactLimit,
+      ...(options.portable === true
+        ? (workspaceAlias ? { excludeWorkspace: workspaceAlias } : {})
+        : { workspace: workspaceAlias })
+    });
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] task episode candidate search:', error);
+    exact = [];
+  }
+  const recent = readTaskHistory(config, {}, { limit: 100, summary: true });
+  const byId = new Map(recent.map(session => [session.id, session]));
+  for (const session of exact) {
+    const record = session as TaskRecord;
+    if (record?.id) byId.set(record.id, publicSession(record));
+  }
   return [...byId.values()];
 }
 
@@ -360,7 +386,26 @@ function readConversationContinuity(config: TaskHistoryConfig, conversationId: u
   if (!id) return [];
   const excludeTaskId = cleanTaskId(options.excludeTaskId);
   const limit = clamp(options.limit || 3, 1, 5);
-  return readTaskHistory(config, {}, { limit: MAX_SESSIONS })
+  let candidates: TaskRecord[] | null = null;
+  if (id.length >= 4) {
+    try {
+      const exact = findSessionsContaining(getTaskHistoryDir(config), [id], { limit: 20 });
+      candidates = (Array.isArray(exact) ? exact : [])
+        .map(session => publicSession(session as TaskRecord))
+        .filter(session => Boolean(session?.id));
+    } catch (error) {
+      if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] conversation continuity search:', error);
+      candidates = null;
+    }
+  }
+  if (!candidates) {
+    try {
+      candidates = readTaskHistory(config, {}, { limit: 100, summary: true });
+    } catch {
+      return [];
+    }
+  }
+  return candidates
     .filter((session: TaskRecord) => String(session?.correlation?.conversationId || '') === id)
     .filter((session: TaskRecord) => !excludeTaskId || cleanTaskId(session.id) !== excludeTaskId)
     .filter((session: TaskRecord) => session.status === 'completed' && session.completionKnown === true)
@@ -799,6 +844,7 @@ export {
   bindTaskHistoryActivityPersistence,
   clearTaskHistory,
   clearWorkspaceTaskHistory,
+  findTaskReuseCandidates,
   flushTaskHistoryPersistence,
   getTaskHistoryDir,
   readConversationContinuity,

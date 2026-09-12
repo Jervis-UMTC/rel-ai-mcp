@@ -1,5 +1,5 @@
 import { URL } from 'node:url';
-import { normalizeRouteKey } from '../src/ui/route-policy.js';
+import { normalizeRouteKey } from '../src/contracts/dashboard-route.js';
 
 function validateConnection(connection) {
   const target = new URL(String(connection?.url || ''));

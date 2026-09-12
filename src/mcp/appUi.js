@@ -10,7 +10,7 @@ const TOOL_INVOCATION_STATUS = Object.freeze({
   relai_ui: ['Testing local UI…', 'Local UI tested'],
   relai_browser: ['Using local browser…', 'Local browser updated'],
   relai_desktop: ['Using local desktop…', 'Desktop action finished'],
-  relai_computer: ['Controlling computer…', 'Computer action finished'],
+  relai_computer: ['Controlling computer… Press Esc to stop.', 'Computer action finished'],
   relai_validate: ['Validating changes…', 'Validation finished'],
   relai_changes: ['Reviewing changes…', 'Changes reviewed'],
   relai_publish: ['Publishing changes…', 'Changes published']

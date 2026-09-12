@@ -1,10 +1,10 @@
-import { dedupeRelations, descendantsOfTypes, fieldNode, namedChildren, nodeText, nodesOfTypes, relation, simpleName, stripQuotes, symbolForNode } from './common.js';
+import { dedupeRelations, descendantsOfTypes, fieldNode, namedChildren, nodeText, nodesOfTypes, projectImports, relation, simpleName, stripQuotes, symbolForNode } from './common.js';
 
 const PROVIDER = 'resolver-c-family-v2';
 const CAPABILITIES = Object.freeze(['ast-includes', 'ast-inheritance', 'ast-constructor-types', 'ast-scoped-calls']);
 const cFamilyResolver = Object.freeze({ id: PROVIDER, capabilities: CAPABILITIES, enrich({ root, facts, language }) {
   const symbols = facts.symbols || []; const relations = language === 'cpp' ? [...inheritanceRelations(root, symbols), ...constructorRelations(root, symbols), ...callRelations(root, symbols)] : [];
-  return { provider: PROVIDER, capabilities: CAPABILITIES, imports: enrichImports(parseIncludes(root)), relations: dedupeRelations(relations) };
+  return { provider: PROVIDER, capabilities: CAPABILITIES, imports: projectImports(parseIncludes(root), PROVIDER, 0.98), relations: dedupeRelations(relations) };
 }});
 function parseIncludes(root) {
   const result = [];
@@ -33,5 +33,4 @@ function callRelations(root, symbols) {
   }
   return result;
 }
-function enrichImports(imports) { return imports.map(({ bindings: _bindings, ...item }) => ({ ...item, provider: PROVIDER, confidence: 0.98 })); }
 export { cFamilyResolver };

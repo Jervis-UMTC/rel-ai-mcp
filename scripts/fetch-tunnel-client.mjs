@@ -3,16 +3,17 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import yauzl from 'yauzl';
+import { assertTunnelClientManifest, normalizeTunnelClientArch, resolveTunnelClientPlatformSpec } from './tunnel-client-utils.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'vendor', 'tunnel-client', 'manifest.json'), 'utf8'));
-assertManifestContract(manifest);
+assertTunnelClientManifest(manifest);
 const requested = (process.env.TUNNEL_CLIENT_PLATFORMS || process.platform).split(',').map(value => value.trim()).filter(Boolean);
-const targetArch = normalizeArch(process.env.REL_AI_TARGET_ARCH || process.arch);
+const targetArch = normalizeTunnelClientArch(process.env.REL_AI_TARGET_ARCH || process.arch);
 for (const platform of requested) await fetchPlatform(platform);
 
 async function fetchPlatform(platform) {
-  const spec = resolvePlatformSpec(platform, targetArch);
+  const spec = resolveTunnelClientPlatformSpec(manifest, platform, targetArch);
   if (!spec) throw new Error(`Unsupported tunnel-client platform/architecture: ${platform}/${targetArch}`);
   const response = await fetch(`${manifest.baseUrl}/${spec.archive}`, { redirect: 'follow' });
   if (!response.ok) throw new Error(`OpenAI tunnel-client download failed with HTTP ${response.status}.`);
@@ -76,29 +77,10 @@ function readZipEntry(buffer, expectedEntry) {
   });
 }
 
-function resolvePlatformSpec(platform, arch) {
-  const platformSpec = manifest.platforms[platform];
-  return platformSpec?.architectures?.[arch] || platformSpec;
-}
-
 function normalizeArchiveEntry(value) {
   const normalized = String(value || '').replaceAll('\\', '/').replace(/^\.\//, '');
   if (!normalized || normalized.startsWith('/') || normalized.includes('../')) throw new Error(`Invalid tunnel-client archive entry: ${value || '(empty)'}`);
   return normalized;
-}
-
-function normalizeArch(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (['x64', 'amd64', 'x86_64'].includes(normalized)) return 'x64';
-  if (['arm64', 'aarch64'].includes(normalized)) return 'arm64';
-  throw new Error(`Unsupported tunnel-client architecture: ${normalized || '(empty)'}`);
-}
-
-function assertManifestContract(value) {
-  if (!/^\d+\.\d+\.\d+$/.test(String(value.version || ''))) throw new Error('Tunnel-client manifest version is invalid.');
-  if (value.releaseTag !== `v${value.version}`) throw new Error('Tunnel-client manifest releaseTag must match version.');
-  if (value.distribution !== 'full') throw new Error('Rel.AI requires the full OpenAI tunnel-client distribution.');
-  if (!String(value.baseUrl || '').endsWith(`/v${value.version}`)) throw new Error('Tunnel-client manifest baseUrl must be pinned to its release version.');
 }
 
 function verifyBuffer(data, expectedHash, expectedSize, label) {

@@ -34,19 +34,21 @@ const DEFAULT_EXCLUDED_NAMES = new Set([
   ".coverage", ".angular", ".expo", ".serverless",
   ".terraform", ".bloop", ".metals", ".scala-build", ".stack-work", ".cabal",
   "Pods", "Carthage", "xcuserdata", ".vs", "cmake-build-debug", "cmake-build-release",
-  ".rel-ai-mcp", ".rel-ai-mcp-state", ".relai"
+  ".rel-ai-mcp", ".rel-ai-mcp-state", ".relai",
+  ".output", "playwright-report", "test-results", ".playwright"
 ]);
 
 // Files with these extensions skip the per-file 8 KB binary sniff during the
 // snapshot walk — the open/read per file dominates snapshot cost on Windows.
 const KNOWN_TEXT_EXTENSIONS = new Set([
-  '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.dart', '.py', '.go', '.rs',
-  '.java', '.kt', '.swift', '.cs', '.cpp', '.c', '.h', '.hpp', '.rb', '.php',
-  '.css', '.scss', '.html', '.xml', '.yaml', '.yml', '.json', '.md', '.txt',
+  '.js', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.mjs', '.cjs', '.dart', '.py', '.pyi', '.go', '.rs',
+  '.java', '.kt', '.kts', '.swift', '.cs', '.cpp', '.c', '.h', '.hpp', '.rb', '.php',
+  '.css', '.scss', '.html', '.xml', '.yaml', '.yml', '.json', '.jsonc', '.md', '.txt',
   '.sql', '.sh', '.bat', '.ps1', '.psm1', '.psd1', '.toml', '.ini', '.cfg', '.conf', '.lock',
   '.hcl', '.tf', '.tfvars', '.markdown', '.mdx', '.dockerfile', '.graphql', '.gql', '.proto',
   '.r', '.asm', '.s', '.gd', '.nix', '.hs', '.lhs', '.jl', '.clj', '.cljs', '.cljc', '.edn',
-  '.groovy', '.pl', '.pm', '.t', '.svg', '.csv', '.tsv', '.properties', '.gradle', '.vue', '.svelte'
+  '.groovy', '.pl', '.pm', '.t', '.svg', '.csv', '.tsv', '.properties', '.gradle', '.vue', '.svelte',
+  '.env', '.example', '.template'
 ]);
 
 const DEFAULT_EXCLUDED_PATHS = [
@@ -472,10 +474,11 @@ function isInsideIncludedRoot(normalized, root) {
 
 function shouldExcludeRelativePath(rel, name, policy) {
   const normalized = String(rel || "").replaceAll(WINDOWS_SEPARATOR, "/");
+  const explicitlyIncluded = policy.includeRoots.some((root) => isInsideIncludedRoot(normalized, root));
   if (policy.includeRoots.length && !policy.includeRoots.some((root) => isInsideIncludedRoot(normalized, root))) {
     return "outside context include roots";
   }
-  if (policy.excludeNames.has(name) || policy.excludeNames.has(normalized)) return "excluded generated/cache folder";
+  if (!explicitlyIncluded && (policy.excludeNames.has(name) || policy.excludeNames.has(normalized))) return "excluded generated/cache folder";
   for (const pattern of policy.excludePaths) {
     if (matchesIgnorePattern(normalized, pattern)) return "excluded by context policy";
   }
@@ -567,7 +570,7 @@ function safeReadJson(file, fallback = null) {
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (err) {
-    console.warn(`[rel-ai-mcp] Failed to read JSON at ${file}: ${err.message}`);
+    if (process.env.REL_AI_MCP_DEBUG) console.warn(`[rel-ai-mcp] Failed to read JSON at ${file}: ${err.message}`);
     return fallback;
   }
 }

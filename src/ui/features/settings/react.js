@@ -7,7 +7,7 @@ import { toast } from '../../components/toast.js';
 import { connectionLayerViews, connectionStateFor, connectionSummary, hasObservedMcpConnection } from '../../connection-state.js';
 import { getUiPreferences, setThemePreference } from '../../preferences.js';
 import { currentRoutePath } from '../../router.js';
-import { chatGptFirstPrompt, chatGptGuideSteps, CHATGPT_CONNECTOR_CREATE_URL, RELAI_CONNECTOR_ICON_FILENAME, RELAI_CONNECTOR_ICON_URL } from './connection-guidance.js';
+import { chatGptFirstPrompt, chatGptGuideSteps, CHATGPT_CONNECTOR_CREATE_URL, RELAI_CONNECTOR_ICON_FILENAME, downloadRelaiConnectorIcon } from './connection-guidance.js';
 import { restartConnection } from './connection-recovery.js';
 import { supportPolicyView } from './desktop-update-policy.js';
 
@@ -223,13 +223,7 @@ function ConnectionGuide({ mode, tunnelId, workspaceAlias }) {
   const steps = chatGptGuideSteps({ mode, tunnelId });
   const title = mode === 'reconnect' ? 'Reconnect ChatGPT' : 'Connect ChatGPT';
   const saveIcon = () => {
-    const link = document.createElement('a');
-    link.href = RELAI_CONNECTOR_ICON_URL;
-    link.download = RELAI_CONNECTOR_ICON_FILENAME;
-    link.hidden = true;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    downloadRelaiConnectorIcon();
     setIconSaved(true);
   };
   return h('div', { className: 'connection-guide-region' },

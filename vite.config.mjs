@@ -45,8 +45,13 @@ export default defineConfig({
     minify: true,
     sourcemap: false,
     cssCodeSplit: false,
+    chunkSizeWarningLimit: 300,
     rollupOptions: {
       input: {
+        // NOTE: dashboardReact entry is required for dev alias resolution
+        // (public/dashboard.js -> src/ui/react/main.js) and check-generated
+        // verification. Production HTML loads only dashboard-app.js; the
+        // react entry shares chunks via the manifest, not a second script tag.
         dashboardApp: dashboardSource,
         dashboardReact: dashboardEntry
       },
@@ -54,7 +59,16 @@ export default defineConfig({
       output: {
         entryFileNames: chunk => chunk.name === 'dashboardApp' ? 'dashboard-app.js' : 'dashboard-react.js',
         chunkFileNames: 'dashboard-chunks/[name]-[hash].js',
-        assetFileNames: assetInfo => assetInfo.name?.endsWith('.css') ? 'dashboard.css' : 'dashboard-assets/[name]-[hash][extname]'
+        assetFileNames: assetInfo => assetInfo.name?.endsWith('.css') ? 'dashboard.css' : 'dashboard-assets/[name]-[hash][extname]',
+        manualChunks: id => {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('chart.js') || id.includes('react-chartjs-2')) return 'vendor-charts';
+          if (id.includes('@radix-ui')) return 'vendor-radix';
+          if (id.includes('@tanstack/react-query')) return 'vendor-query';
+          if (id.includes('react-router') || id.includes('react-dom') || id.includes('/react/') || id.includes('node_modules/react')) return 'vendor-react';
+          if (id.includes('zustand')) return 'vendor-store';
+          return 'vendor';
+        }
       }
     }
   }

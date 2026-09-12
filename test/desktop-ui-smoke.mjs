@@ -55,7 +55,7 @@ for (const file of ['electron/renderer/status.html', 'electron/renderer/wizard.h
   assert.match(html, /<link\s+rel="stylesheet"\s+href="\.\/app\.css"\s*\/?\s*>|<link\s+rel="stylesheet"\s+href="app\.css"\s*\/?\s*>/);
   assert.match(html, /Content-Security-Policy/);
   assert.match(html, /connect-src 'none'/);
-  assert.match(html, /relai-logo\.png[^>]*width="193"[^>]*height="187"/);
+  assert.match(html, /relai-logo\.png[^>]*width="42"[^>]*height="42"/, 'Electron branding must keep the compact 42x42 logo contract');
   assert.doesNotMatch(html, /<style\b/i);
   assert.doesNotMatch(html, /Open in browser/i);
 }

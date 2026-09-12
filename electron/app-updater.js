@@ -185,7 +185,7 @@ function createAppUpdater(options = {}) {
     const taskBlock = taskActivityBlockReason(getTaskActivity(), 'installing the update');
     if (taskBlock) return failure(codes.blocked, taskBlock, true);
     emit({ state: 'installing', error: '', errorCode: '' });
-    log(`Preparing Rel.AI MCP ${status.availableVersion || 'update'} for installation.`);
+    log(`Closing Rel.AI MCP to install ${status.availableVersion || 'update'}. The app will reopen automatically when the update is done.`);
     try {
       await onBeforeInstall();
       await onInstallCommit();

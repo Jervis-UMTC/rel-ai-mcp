@@ -176,7 +176,7 @@ const PUBLIC_TOOL_VALUES = [
   {
     name: 'relai_work',
     title: 'Manage Workspace Work',
-    description: 'Starts, inspects, finishes, or cancels one logical task in an authorized local workspace. A workspace may be an ordinary folder or a Git repository; Git-specific behavior is provided by repository and publish operations. Status also reports long operations that continued after a connector request ended.',
+    description: 'Manages one optional durable workspace task: begin, status, finish, or cancel. Status also reports fallback operations that outlive a connector request.',
     annotations: annotations(false, false, false, false),
     behavior: { taskScope: 'optional', executionClass: 'always_immediate' },
     dashboard: { category: 'Workflow', capabilities: ['workflow'] }
@@ -187,7 +187,7 @@ const PUBLIC_TOOL_VALUES = [
   },
   {
     name: 'relai_read', title: 'Read Local Workspace',
-    description: 'Reads exact content from an authorized local workspace, whether it is an ordinary folder or a Git repository: files, ranges, directories, discovered skills, or execution-scoped command output. Files already uploaded to the AI host remain host-side inputs; use Rel.AI when a file still lives on the user\'s machine or must be transferred from it. Ordinary reads may use an authorized workspace directly without a work_id; outputRef access remains bound to the originating authorized task or workspace/principal execution scope. asResource:true returns one exact file as a private resource_link for transfer or download.'
+    description: 'Reads exact local workspace files, ranges, directories, discovered skills, or execution output. Host-uploaded files stay host-owned; asResource:true returns one exact local file as a private resource_link for transfer or download.'
   },
   {
     name: 'relai_search', title: 'Search Repository',
@@ -201,38 +201,38 @@ const PUBLIC_TOOL_VALUES = [
   },
   {
     name: 'relai_edit', title: 'Edit Local Workspace',
-    description: 'Applies file or environment mutations in an authorized local workspace, including ordinary folders and repositories. Host-side document authoring remains host-owned; use native ChatGPT file import when a host-generated artifact must be stored locally. Supported forms include semantic rename, symbolEdit structural edits, oldText/newText exact replacement, content complete-file replacement, native ChatGPT file import, edits batches, updateText patch updates, and secret-safe environment changes. Large complete-file writes are staged internally when needed.',
+    description: 'Mutates authorized workspace files or environment through semantic rename, structural symbol edits, exact replacement, full-file content, host file import, patch text, batch edits, or secret-safe environment operations.',
     dashboard: { capabilities: ['edit'] }
   },
   {
     name: 'relai_exec', title: 'Run Command',
-    description: 'Runs bounded one-shot workspace commands. work_id optionally adds durable task attribution; direct executable + argv and command-string forms are supported.',
+    description: 'Runs bounded one-shot workspace commands through direct executable + argv or a command string; work_id is optional attribution.',
     dashboard: { capabilities: ['execute'] }
   },
   {
     name: 'relai_process', title: 'Manage Process',
-    description: 'Starts and manages persistent services, watchers, and interactive programs with stable process identity. Process access is authorized by principal + workspace + processId; work_id is optional attribution. Direct executable + argv and command-string forms are supported.',
+    description: 'Manages persistent services, watchers, and interactive programs with stable process identity. Startup accepts direct executable + argv or a command string; one-shot work belongs in relai_exec or relai_validate.',
     annotations: annotations(false, true, false, true),
     dashboard: { capabilities: ['execute'] }, behavior: { executionClass: 'persistent_process', taskScope: 'optional' }
   },
   {
     name: 'relai_ui', title: 'Test Local UI',
-    description: 'Provides bounded QA evidence for an explicitly allowed localhost application, including console/network capture, viewport changes, reloads, snapshots, screenshots, and interactions. Use this for testing a local app; use relai_browser for general machine-local browsing such as LAN/intranet/VPN sites, machine-local authenticated sessions, or browser file workflows. Do not use either tool for ordinary public-web research when the AI host already provides web search/browsing.',
+    description: 'Bounded QA for an allowed localhost app: snapshots, interactions, screenshots, console/network capture, viewport changes, and reloads. General machine-local browsing belongs in relai_browser; public web stays host-owned.',
     annotations: annotations(false, true, false, true), dashboard: { capabilities: ['execute'] }
   },
   {
     name: 'relai_browser', title: 'Use Local Browser',
-    description: 'Operates a browser running on the user\'s local machine for capabilities the AI host cannot directly reach: localhost or LAN/intranet resources, local VPN access, machine-local authenticated browser state, and browser workflows that upload from or download into an authorized local workspace. Do not use it merely to research the public internet when the AI host already provides web search/browsing. Prefer structured Rel.AI file or desktop operations when they can complete the task without browser interaction; prefer relai_browser over raw relai_computer input when browser automation is sufficient. Sessions are bound to authenticated principal + workspace + sessionId; work_id is optional durable attribution.',
+    description: 'Local browser for localhost/LAN/intranet/VPN, machine-authenticated sessions, and workspace file transfer. Semantic snapshots explain page content, layout snapshots cover geometry/overflow, and screenshots provide pixel evidence. Public web stays host-owned.',
     annotations: annotations(false, true, false, true), dashboard: { capabilities: ['execute'] }
   },
   {
     name: 'relai_desktop', title: 'Desktop & OS Operations',
-    description: 'Performs deterministic structured local desktop actions without keyboard/mouse simulation: open or reveal an authorized workspace path, open a supported URI in the system default handler, launch a supported application, or explicitly read/write bounded clipboard text. Prefer this over relai_computer whenever the requested OS operation is available; use relai_computer as the fallback for application UI interaction.',
+    description: 'Structured local OS actions without pointer/keyboard simulation: open or reveal workspace paths, open URIs, launch apps, and read/write bounded clipboard text. relai_computer is the UI fallback.',
     annotations: annotations(false, true, false, true), dashboard: { capabilities: ['execute'] }
   },
   {
     name: 'relai_computer', title: 'Control Computer',
-    description: 'Provides user-authorized control of the local computer running Rel.AI, including display inspection, screenshots, pointer input, scrolling, typing, and key input. This is the final fallback for local desktop interaction after structured local capabilities and the local browser surface are insufficient; it is not a substitute for host-native reasoning, public web search, image generation, uploaded-file analysis, or cloud connectors. Availability is controlled by the Computer control setting in Settings > App.',
+    description: 'User-authorized final fallback for local desktop input after structured local and browser capabilities. Prefer observe for semantic Windows UI controls; activate revalidates a semantic target and clicks it through the existing input driver. Otherwise use adaptive screenshots, observation-scoped coordinates, wait_for_change, and batch to minimize visual/model round trips. Requires Computer control and per-app approval; browsers are view-only (relai_browser), terminals/IDEs click-only (relai_desktop for typing). One session drives input at a time.',
     annotations: annotations(false, true, false, true), dashboard: { capabilities: ['execute'] }
   },
   {

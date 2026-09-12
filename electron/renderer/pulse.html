@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
 <title>Rel.AI Pulse</title>
 <link rel="stylesheet" href="color-tokens.css">
@@ -10,34 +11,39 @@
 </head>
 <body class="pulse-page">
 <main class="pulse-shell" id="pulseShell" data-tone="idle" data-expanded="false">
+  <p class="pulse-live" id="pulseLive" role="status" aria-live="polite"></p>
   <header class="pulse-bar">
-    <div class="pulse-mark" aria-hidden="true"><img src="relai-logo.png" alt="" role="presentation"></div>
+    <div class="pulse-mark" aria-hidden="true"><img src="relai-logo.png" srcset="relai-logo.png 1x" alt="" width="20" height="20" decoding="async"></div>
 
-    <div class="pulse-compact-copy" aria-live="polite">
+    <button class="pulse-compact-copy" id="pulseCompactCopy" type="button" aria-expanded="false" aria-controls="pulseIsland" aria-label="Show activity details">
       <span class="pulse-state-dot" aria-hidden="true"></span>
       <span class="pulse-state-label" id="pulseState">Working</span>
       <span class="pulse-task-count" id="pulseTaskCount" hidden></span>
+      <span class="pulse-elapsed" id="pulseCompactElapsed" hidden></span>
       <span class="pulse-separator" aria-hidden="true">·</span>
       <span class="pulse-compact-title" id="pulseCompactTitle">Starting…</span>
-    </div>
+    </button>
 
     <div class="pulse-expanded-brand" aria-hidden="true">Rel.AI</div>
     <div class="pulse-expanded-state" aria-hidden="true">
       <span class="pulse-state-dot" aria-hidden="true"></span>
       <span id="pulseExpandedState">Working</span>
+      <span class="pulse-elapsed" id="pulseExpandedElapsed" hidden></span>
     </div>
 
     <button class="pulse-toggle" id="pulseToggle" type="button" aria-expanded="false" aria-controls="pulseIsland" aria-label="Show activity details">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 5 5 5-5 5"></path></svg>
     </button>
+    <div class="pulse-compact-progress" aria-hidden="true"><span id="pulseCompactProgressFill"></span></div>
   </header>
 
-  <section class="pulse-island" id="pulseIsland" aria-hidden="true">
+  <section class="pulse-island" id="pulseIsland" aria-hidden="true" inert>
     <div class="pulse-primary">
-      <h1 class="pulse-title" id="pulseTitle">Starting…</h1>
+      <h2 class="pulse-title" id="pulseTitle">Starting…</h2>
+      <p class="pulse-activity" id="pulseActivity" hidden><span id="pulseActivityText"></span><span class="pulse-activity-dot" aria-hidden="true">·</span><span class="pulse-elapsed" id="pulseActivityElapsed"></span></p>
       <p class="pulse-summary" id="pulseSummary"></p>
 
-      <div class="pulse-progress" id="pulseProgress" hidden>
+      <div class="pulse-progress" id="pulseProgress" hidden role="progressbar" aria-label="Task progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div class="pulse-progress-track" aria-hidden="true"><span id="pulseProgressFill"></span></div>
         <div class="pulse-progress-caption">
           <span id="pulseProgressLabel"></span>
@@ -51,9 +57,9 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5.5h5l1.4 1.7h6.6v7.3H3.5z"></path></svg>
         <div><span class="pulse-context-label">Workspace</span><strong id="pulseWorkspace"></strong></div>
       </div>
-      <div class="pulse-context-row" id="pulseTasksRow" hidden>
-        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="10" r="3.2"></circle><circle cx="13.5" cy="10" r="2.3"></circle></svg>
-        <div><span class="pulse-context-label">Tasks</span><strong id="pulseTasks"></strong></div>
+      <div class="pulse-tasks" id="pulseTasksBlock" hidden>
+        <div class="pulse-tasks-header"><span class="pulse-context-label">Tasks</span><span class="pulse-tasks-count" id="pulseTasksCount"></span></div>
+        <ul class="pulse-task-list" id="pulseTaskList"></ul>
       </div>
     </div>
 

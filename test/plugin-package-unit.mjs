@@ -122,4 +122,3 @@ try {
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }
-

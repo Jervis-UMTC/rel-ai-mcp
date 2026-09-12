@@ -41,7 +41,7 @@ assert.doesNotMatch(ipc, /gateway/i);
 assert.match(usageData, /desktop\.getLocalUsage/);
 assert.doesNotMatch(`${usageSource}\n${usageData}`, /getGatewayUsage|connectionMode|pairing_required|cloudUsageAvailability/i);
 assert.doesNotMatch(`${usageSource}\n${usageData}`, /fetch\(|DASHBOARD_DATA_URL|auditTail|taskActivity/);
-assert.match(usageReact, /Analytics are stored on this computer\. Prompts, file paths, command output, and action results are not stored/i);
+assert.match(usageReact, /Analytics are stored on this computer\. Rel\.AI records aggregate action categories and work-type labels, not prompts, file paths, command output, or action results/i);
 assert.match(usageReact, /data-usage-privacy/, 'Analytics must disclose local retention and external telemetry state');
 assert.match(usageSource, /External developer telemetry is off/, 'Analytics must make the default external-telemetry state explicit');
 assert.match(usageSource, /OTLP endpoint is configured, but the telemetry switch is disabled/, 'Analytics must distinguish a configured endpoint from an enabled exporter');
@@ -72,19 +72,30 @@ assert.match(charts, /event\.key === 'ArrowLeft'/, 'Analytics timeline must supp
 assert.match(charts, /event\.key === 'ArrowRight'/, 'Analytics timeline must support keyboard period navigation');
 assert.match(charts, /react-chartjs-2/, 'Analytics charts must use the canonical React Chart.js wrapper');
 assert.match(charts, /chart\.js/, 'Analytics charts must use Chart.js instead of first-party SVG geometry');
+assert.match(charts, /export function AnalyticsBubbleMatrixChart/, 'Analytics must expose one shared categorical matrix renderer');
+assert.match(charts, /analytics-matrix-grid/, 'The work-type matrix must render explicit categorical row and column labels instead of numeric chart axes');
+assert.doesNotMatch(charts, /BubbleController|import\s*\{\s*Bubble(?:\s*,|\s*\})/, 'The categorical matrix must not retain the generic Chart.js bubble plot implementation');
+assert.match(charts, /AccessibleMatrixTable/, 'The work-type matrix must provide an accessible data-table alternative');
 assert.doesNotMatch(charts, /\bBar(?:Element)?\b/, 'Temporal analytics must use line charts consistently');
 assert.match(charts, /export function SparkChart[\s\S]{0,1500}spanGaps: true/, 'Compact analytics sparklines must stay visually continuous across missing samples');
 assert.match(charts, /spanGaps: false/, 'Missing rate and duration samples must remain visible as gaps in the detailed timeline');
 assert.match(charts, /trailingGapContinuation/, 'Trailing idle buckets must keep the timeline visually connected to the range end');
 assert.match(charts, /borderDash: \[4, 4\]/, 'Trailing idle continuation must be visually distinct from measured samples');
 assert.match(usageCss, /\.usage-metric-value \{[^}]*flex-wrap/, 'Analytics metric values and deltas must wrap instead of overlapping neighboring tiles');
-assert.match(usageCss, /\.usage-metrics \{[^}]*repeat\(4,minmax\(0,1fr\)\)/, 'The four primary Analytics metrics must use the full-width four-column desktop grid');
+assert.match(usageCss, /\.usage-metrics \{[^}]*display:\s*grid/, 'Primary Analytics metrics must stay in the responsive metrics grid');
 assert.ok(uiPackage.dependencies['chart.js'], 'Chart.js must be owned by the UI workspace');
 assert.ok(uiPackage.dependencies['react-chartjs-2'], 'The React Chart.js wrapper must be owned by the UI workspace');
 assert.doesNotMatch(`${usageReact}\n${homeReact}\n${workspacesReact}`, /h\(['"]svg['"]/, 'Analytics feature renderers must not retain first-party SVG chart markup');
 assert.doesNotMatch(usageRender, /coordinates|polyline|area:\s*`/, 'Analytics view models must not retain first-party chart geometry');
 assert.match(usageReact, /'aria-valuetext': valueText/, 'Analytics breakdown progress must expose readable values');
 assert.match(usageCss, /\.usage-privacy-body/, 'Analytics privacy disclosure must use a stable responsive layout');
+assert.match(usageCss, /\.usage-matrix-scroll \{[^}]*overflow-x:\s*auto/, 'The matrix must contain narrow-screen overflow inside its card instead of overflowing the page');
+assert.match(usageCss, /\.analytics-matrix-grid \{[^}]*grid-template-columns:[^}]*repeat\(var\(--matrix-columns\)/, 'The matrix must use a categorical grid with one visible column per use case');
+assert.match(usageCss, /\.analytics-matrix-bubble \{[^}]*width:\s*44px[^}]*height:\s*44px/, 'Matrix bubbles must keep a 44px interactive target while encoding magnitude in the inner visual'); // rigidity-ok: 44px is the minimum interactive target required by the matrix accessibility contract.
+assert.doesNotMatch(usageCss, /\.usage-matrix-stage \{[^}]*height:\s*(?:400|420)px/, 'The matrix must size to its rows instead of reserving a fixed tall plotting area');
+assert.match(usageReact, /Work type × use case/, 'Analytics must render the work-type by use-case matrix');
+assert.match(usageReact, /title: 'Use cases'/, 'Analytics must render a use-case distribution');
+assert.match(usageReact, /title: 'Work types'/, 'Analytics must render completed work-type counts');
 
 const currentMetricScope = {
   label: 'All projects', kind: 'all', usedMonthlyFallback: false,
@@ -170,11 +181,22 @@ const ranged = analyticsRangeScope([buildUsageModel({
   tools: [], workspaces: [],
   series: [{ hour: '2026-08-08T10', requests: 2, toolCalls: 2, successes: 1, failures: 1, executionMs: 100 }],
   toolSeries: [], workspaceSeries: [], workspaceToolSeries: [],
+  activityMatrixSeries: [
+    { hour: '2026-08-08T10', intent: 'bugfix', useCase: 'edit', toolCalls: 1, successes: 1, failures: 0, executionMs: 40 },
+    { hour: '2026-08-08T10', intent: 'untracked', useCase: 'execute', toolCalls: 1, successes: 0, failures: 1, executionMs: 60 }
+  ],
+  taskIntentSeries: [{ hour: '2026-08-08T10', intent: 'bugfix', tasks: 1 }],
   failureCategorySeries: [{ hour: '2026-08-08T10', category: 'policy', failures: 1 }]
 }, '2026-08')], bounds);
 assert.equal(ranged.toolCalls, 2);
 assert.equal(ranged.averageDuration, 50);
 assert.deepEqual(ranged.failureCategories, [{ category: 'policy', failures: 1 }]);
+assert.deepEqual(ranged.useCases.map(row => [row.useCase, row.toolCalls]), [['edit', 1], ['execute', 1]]);
+assert.deepEqual(ranged.taskTypes, [{ intent: 'bugfix', tasks: 1 }]);
+assert.deepEqual(ranged.activityMatrix.map(row => [row.intent, row.useCase, row.toolCalls]), [['bugfix', 'edit', 1]]);
+assert.equal(ranged.categorizedActions, 2);
+assert.equal(ranged.untrackedActions, 1);
+assert.equal(ranged.completedTasks, 1);
 
 const rollingHourBounds = analyticsBounds('1h', { now: new Date('2026-08-08T10:45:00.000Z') });
 assert.equal(rollingHourBounds.start.toISOString(), '2026-08-08T10:00:00.000Z');

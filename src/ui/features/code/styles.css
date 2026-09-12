@@ -13,7 +13,7 @@
 .code-explorer-head strong { font-size: 12px; }
 .code-explorer-head input { width: 100%; padding-inline: 9px; }
 .code-file-list { min-height: 0; flex: 1; overflow: auto; padding: 6px; }
-.code-file-row { display: grid; width: 100%; min-height: 34px; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 6px; padding: 4px 6px; border: 0; border-radius: 5px; background: transparent; color: var(--ui-text-secondary); text-align: left; }
+.code-file-row { display: grid; width: 100%; min-height: 40px; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 6px; padding: 4px 6px; border: 0; border-radius: 5px; background: transparent; color: var(--ui-text-secondary); text-align: left; cursor: pointer; }
 .code-file-row:hover { background: var(--ui-surface-raised); color: var(--ui-text-primary); }
 .code-file-row.active { background: var(--ui-selection-background); color: var(--ui-text-primary); }
 .code-file-marker { display: inline-grid; width: 24px; height: 20px; place-items: center; border: 1px solid var(--ui-status-neutral-border); border-radius: 4px; background: var(--ui-status-neutral-background); color: var(--ui-status-neutral-foreground); font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; font-weight: 800; line-height: 1; text-align: center; }

@@ -14,6 +14,11 @@ export interface ComputerControlStatusDto {
   displays?: number;
   message?: string;
   workspace?: string;
+  approvedApps?: string[];
+  controlling?: boolean;
+  lockedBy?: string;
+  lockSince?: string;
+  banner?: string;
 }
 
 export interface ComputerControlResultDto {

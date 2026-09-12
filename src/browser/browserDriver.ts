@@ -141,7 +141,7 @@ function createNativePageProxy(bridge: NativeBrowserBridge, nativeSessionId: str
   return Object.freeze({
     describe: (signal?: AbortSignal) => requestPage('describe', {}, signal),
     navigate: (url: string, timeoutMs: number, signal?: AbortSignal) => requestPage('navigate', { url, timeoutMs }, signal),
-    snapshot: (timeoutMs: number, signal?: AbortSignal) => requestPage('snapshot', { timeoutMs }, signal),
+    snapshot: (timeoutMs: number, detail = 'semantic', signal?: AbortSignal) => requestPage('snapshot', { timeoutMs, detail }, signal),
     interact: (args: StructuredInteractionArgs, timeoutMs: number, signal?: AbortSignal) => requestPage('interact', { ...args, timeoutMs }, signal),
     screenshot: (fullPage: boolean, signal?: AbortSignal) => requestPage('screenshot', { fullPage }, signal),
     upload: (args: StructuredInteractionArgs, filePath: string, timeoutMs: number, signal?: AbortSignal) =>

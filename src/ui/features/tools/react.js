@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Icon } from '../../components/icons.js';
 import { fetchJson } from '../../api.js';
 import { filterRadioField, openFilterDrawer } from '../../components/filter-drawer.js';
 import {
@@ -65,6 +66,7 @@ export function createToolsRoute() {
           label: `${item.label} (${capabilityCount(tools, item.id)})`
         }));
         fields.appendChild(filterRadioField({
+          key: 'capability',
           label: 'Capability',
           value: draft.capability,
           options,
@@ -96,10 +98,10 @@ export function createToolsRoute() {
         }),
         h('div', { id: 'toolsBody', className: 'tools-grid' },
           loadState.status === 'loading'
-            ? h('div', { className: 'empty', role: 'status' }, 'Loading tools…')
+            ? h('div', { className: 'skeleton-grid', role: 'status', 'aria-label': 'Loading tools' }, [0, 1, 2].map(i => h('div', { key: i, className: 'skeleton-block', 'aria-hidden': 'true' })))
             : loadState.status === 'error'
               ? h(EmptyState, {
-                  icon: '!',
+                  iconName: 'warning',
                   title: 'Tool catalog unavailable',
                   description: loadState.error,
                   action: 'Retry',
@@ -142,7 +144,7 @@ function ToolsFilterBar({ search, capability, summary, onSearch, onCapabilityCle
           type: 'button', className: 'secondary filter-chip',
           'aria-label': `Remove ${filter.label} filter: ${filter.value}`,
           onClick: filter.onRemove
-        }, `${filter.label}: ${filter.value} ×`))
+        }, h('span', null, `${filter.label}: ${filter.value} `), h(Icon, { name: 'close', size: 14 })))
       ) : null,
       h('div', { className: 'filter-bar-footer' },
         h('span', { className: 'filter-summary', role: 'status', 'aria-live': 'polite' }, summary),
@@ -176,11 +178,11 @@ function ToolCard({ tool }) {
   );
 }
 
-function EmptyState({ icon = '', title, description, action = '', onAction }) {
+function EmptyState({ iconName = 'info', title, description, action = '', onAction }) {
   return h('div', { className: 'empty-state' },
-    icon ? h('span', { className: 'empty-state-icon', 'aria-hidden': 'true' }, icon) : null,
-    h('strong', null, title),
-    h('p', null, description),
+    h('span', { className: 'empty-state-icon', 'aria-hidden': 'true' }, h(Icon, { name: iconName, size: 28 })),
+    h('strong', { className: 'empty-state-title' }, title),
+    h('p', { className: 'empty-state-copy' }, description),
     action ? h('button', { type: 'button', className: 'secondary', onClick: onAction }, action) : null
   );
 }

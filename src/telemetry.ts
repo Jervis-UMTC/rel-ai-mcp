@@ -199,4 +199,3 @@ export {
   telemetrySampleRatio,
   traceContextEnvironment
 };
-

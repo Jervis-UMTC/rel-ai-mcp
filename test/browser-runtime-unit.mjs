@@ -41,7 +41,10 @@ const navigated = await runtime.navigate(workspace, {
 assert.equal(navigated.url, 'http://192.168.1.20/internal');
 
 const snapshot = await runtime.snapshot(workspace, { sessionId, tabId: firstTabId, work_id: context.taskId }, context);
+assert.equal(snapshot.detail, 'semantic');
 assert.equal(snapshot.snapshot, 'snapshot:http://192.168.1.20/internal');
+const layoutSnapshot = await runtime.snapshot(workspace, { sessionId, tabId: firstTabId, detail: 'layout', work_id: context.taskId }, context);
+assert.equal(layoutSnapshot.detail, 'layout');
 
 const interaction = await runtime.interact(workspace, {
   sessionId,
@@ -203,9 +206,9 @@ function createFakeBrowserHarness() {
         const page = {
           async describe() { return { url, title: `Tab ${pageCounter}` }; },
           async navigate(next) { state.navigateCount += 1; url = next; return { url, title: `Tab ${pageCounter}`, statusCode: 200 }; },
-          async snapshot() {
+          async snapshot(_timeoutMs, detail = 'semantic') {
             if (state.pendingSnapshot) return new Promise(() => {});
-            return { url, title: `Tab ${pageCounter}`, snapshot: `snapshot:${url}`, truncated: false };
+            return { url, title: `Tab ${pageCounter}`, detail, snapshot: `snapshot:${url}`, truncated: false };
           },
           async interact(args) {
             if (state.timeoutInteraction) throw new Error('Timeout 100ms exceeded.');

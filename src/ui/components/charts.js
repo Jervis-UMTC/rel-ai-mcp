@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import {
   CategoryScale,
   Chart as ChartJS,
@@ -15,7 +15,7 @@ import { COLOR_THEMES } from '../colorTokens.mjs';
 ChartJS.register(CategoryScale, LinearScale, LineElement, PointElement, Filler, Tooltip);
 
 const h = React.createElement;
-const DEFAULT_THEME = Object.freeze({
+const LIGHT_FALLBACK = Object.freeze({
   action: COLOR_THEMES.light.actionPrimary,
   border: COLOR_THEMES.light.borderSubtle,
   borderDefault: COLOR_THEMES.light.borderDefault,
@@ -29,10 +29,39 @@ const DEFAULT_THEME = Object.freeze({
   reducedMotion: false
 });
 
+// Read live CSS tokens at import time when a document exists so first-frame
+// chart colors match the active theme instead of always flashing light mode.
+// Falls back to light tokens during SSR/tests.
+function initialChartTheme() {
+  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return LIGHT_FALLBACK;
+  try {
+    const styles = getComputedStyle(document.documentElement);
+    if (!styles?.getPropertyValue) return LIGHT_FALLBACK;
+    const token = (name, fallback) => String(styles.getPropertyValue(name) || '').trim() || fallback;
+    if (!token('--ui-action-primary', '')) return LIGHT_FALLBACK;
+    return Object.freeze({
+      action: token('--ui-action-primary', LIGHT_FALLBACK.action),
+      border: token('--ui-border-subtle', LIGHT_FALLBACK.border),
+      borderDefault: token('--ui-border-default', LIGHT_FALLBACK.borderDefault),
+      text: token('--ui-text-secondary', LIGHT_FALLBACK.text),
+      textMuted: token('--ui-text-tertiary', LIGHT_FALLBACK.textMuted),
+      surface: token('--ui-surface-primary', LIGHT_FALLBACK.surface),
+      raised: token('--ui-surface-raised', LIGHT_FALLBACK.raised),
+      success: token('--ui-status-success-foreground', LIGHT_FALLBACK.success),
+      danger: token('--ui-status-danger-foreground', LIGHT_FALLBACK.danger),
+      warning: token('--ui-status-warning-foreground', LIGHT_FALLBACK.warning),
+      reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    });
+  } catch { return LIGHT_FALLBACK; }
+}
+
+const DEFAULT_THEME = initialChartTheme();
+
 export function SparkChart({ values = [], className = '', tone = '', ariaLabel = '', decorative = true }) {
   const data = safeValues(values);
   const theme = useChartTheme();
   const accent = toneColor(theme, tone);
+  const toneLabel = tone === 'good' ? 'positive trend' : tone === 'bad' ? 'negative trend' : 'trend';
   const chartData = useMemo(() => ({
     labels: data.map((_, index) => String(index + 1)),
     datasets: [{
@@ -61,12 +90,17 @@ export function SparkChart({ values = [], className = '', tone = '', ariaLabel =
     }
   }), []);
   if (!data.some(value => value !== null)) return null;
+  if (decorative && !ariaLabel) {
+    return h('div', { className, 'aria-hidden': 'true' }, h(Line, {
+      data: chartData,
+      options
+    }));
+  }
   return h('div', { className }, h(Line, {
     data: chartData,
     options,
-    role: decorative ? undefined : 'img',
-    'aria-hidden': decorative ? 'true' : undefined,
-    'aria-label': decorative ? undefined : ariaLabel
+    role: 'img',
+    'aria-label': ariaLabel || `Sparkline showing ${toneLabel}`
   }));
 }
 
@@ -87,6 +121,8 @@ export function AnalyticsTimelineChart({
   const theme = useChartTheme();
   const chartRef = useRef(null);
   const latestIndex = Math.max(0, lastDefinedIndex(data));
+  const firstMeasuredIndex = data.findIndex(value => value !== null);
+  const hasLeadingGap = firstMeasuredIndex > 0;
   const accent = theme.action;
   const trailingData = trailingGapContinuation(data);
   const chartData = useMemo(() => ({
@@ -100,9 +136,9 @@ export function AnalyticsTimelineChart({
       tension: 0.34,
       fill: true,
       spanGaps: false,
-      pointRadius: context => context.dataIndex === peakIndex ? 3 : 0,
-      pointHoverRadius: 4,
-      pointHitRadius: 10,
+      pointRadius: context => context.dataIndex === peakIndex || (hasLeadingGap && context.dataIndex === firstMeasuredIndex) ? 4 : 0,
+      pointHoverRadius: 6,
+      pointHitRadius: 22,
       pointBackgroundColor: context => context.dataIndex === peakIndex ? theme.warning : accent,
       pointBorderColor: theme.surface,
       pointBorderWidth: 2
@@ -119,7 +155,7 @@ export function AnalyticsTimelineChart({
       pointHoverRadius: 0,
       pointHitRadius: 0
     }] : [])]
-  }), [accent, data, labels, peakIndex, theme.surface, theme.warning, trailingData]);
+  }), [accent, data, firstMeasuredIndex, hasLeadingGap, labels, peakIndex, theme.surface, theme.warning, trailingData]);
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -152,11 +188,11 @@ export function AnalyticsTimelineChart({
         grid: { display: false },
         border: { color: theme.borderDefault },
         ticks: {
-          color: theme.textMuted,
+          color: theme.text,
           maxRotation: 0,
           autoSkip: true,
-          maxTicksLimit: 3,
-          font: { size: 10, weight: 600 }
+          maxTicksLimit: 4,
+          font: { size: 12, weight: 600 }
         }
       },
       y: {
@@ -164,10 +200,10 @@ export function AnalyticsTimelineChart({
         border: { display: false },
         grid: { color: theme.border, lineWidth: 1 },
         ticks: {
-          color: theme.textMuted,
-          maxTicksLimit: 4,
+          color: theme.text,
+          maxTicksLimit: 5,
           padding: 8,
-          font: { size: 10, weight: 600 },
+          font: { size: 12, weight: 600 },
           callback: value => formatValue(Number(value) || 0)
         }
       }
@@ -195,18 +231,152 @@ export function AnalyticsTimelineChart({
   };
 
   return h('div', {
-    className,
+    className: ['analytics-chart-group', className].filter(Boolean).join(' '),
     role: 'group',
     tabIndex: 0,
-    'aria-label': `${ariaLabel} Use Left and Right Arrow keys to inspect periods. Home selects the first period and End selects the latest.`,
+    'aria-label': ariaLabel
+      ? `${ariaLabel} Use Left and Right Arrow keys to inspect periods. Home selects the first period and End selects the latest.`
+      : 'Analytics chart. Use Left and Right Arrow keys to inspect periods. Home selects the first period and End selects the latest.',
     'aria-describedby': ariaDescribedBy || undefined,
     onFocus: () => selectIndex(Number.isInteger(activeIndex) ? activeIndex : latestIndex),
-    onBlur: () => selectIndex(latestIndex),
-    onPointerLeave: () => selectIndex(latestIndex),
     onKeyDown
   },
   h(Line, { ref: chartRef, data: chartData, options, 'aria-hidden': 'true' }),
   h(AccessibleChartTable, { labels: detailedLabels.length ? detailedLabels : labels, values: data, valueLabel, formatValue }));
+}
+
+export function AnalyticsBubbleMatrixChart({ cells = [], xLabels = [], yLabels = [], className = '', ariaLabel = 'Activity matrix' }) {
+  const bubbleRefs = useRef([]);
+  const normalized = useMemo(() => (Array.isArray(cells) ? cells : [])
+    .map(cell => ({
+      ...cell,
+      x: Number(cell?.x),
+      y: Number(cell?.y),
+      value: Math.max(0, Number(cell?.value) || 0),
+      share: Math.max(0, Number(cell?.share) || 0)
+    }))
+    .filter(cell => Number.isInteger(cell.x) && Number.isInteger(cell.y) && cell.value > 0), [cells]);
+  const cellIndex = useMemo(() => new Map(normalized.map((cell, index) => [`${cell.y}:${cell.x}`, index])), [normalized]);
+  const maxValue = Math.max(1, ...normalized.map(cell => cell.value));
+  const minWidth = Math.max(720, 176 + xLabels.length * 74);
+
+  if (!normalized.length) return null;
+
+  const onBubbleKeyDown = (event, currentIndex) => {
+    let next = null;
+    if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = normalized.length - 1;
+    else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) next = bubbleNeighborIndex(normalized, currentIndex, event.key);
+    if (next == null || next === currentIndex) return;
+    event.preventDefault();
+    bubbleRefs.current[next]?.focus?.();
+  };
+
+  const gridChildren = [
+    h('div', { key: 'corner', className: 'analytics-matrix-corner', 'aria-hidden': 'true' }, 'Work type'),
+    ...xLabels.map((label, x) => h('div', {
+      key: `column-${x}`,
+      className: 'analytics-matrix-column-label',
+      title: label,
+      'aria-hidden': 'true'
+    }, h('span', null, label))),
+    ...yLabels.flatMap((label, y) => [
+      h('div', { key: `row-${y}`, className: 'analytics-matrix-row-label', title: label, 'aria-hidden': 'true' }, label),
+      ...xLabels.map((_columnLabel, x) => {
+        const index = cellIndex.get(`${y}:${x}`);
+        const cell = Number.isInteger(index) ? normalized[index] : null;
+        if (!cell) return h('div', { key: `cell-${y}-${x}`, className: 'analytics-matrix-cell', 'aria-hidden': 'true' });
+        const workType = cell.intentLabel || yLabels[cell.y] || 'Work type';
+        const useCase = cell.useCaseLabel || xLabels[cell.x] || 'Use case';
+        const valueText = `${cell.value.toLocaleString()} ${cell.value === 1 ? 'action' : 'actions'}`;
+        const shareText = `${formatMatrixShare(cell.share)} of ${workType} activity`;
+        return h('div', { key: `cell-${y}-${x}`, className: 'analytics-matrix-cell' },
+          h('button', {
+            ref: element => { bubbleRefs.current[index] = element; },
+            type: 'button',
+            className: 'analytics-matrix-bubble',
+            style: {
+              '--matrix-bubble-size': `${matrixBubbleSize(cell.value, maxValue)}px`,
+              '--matrix-bubble-opacity': String(matrixBubbleOpacity(cell.value, maxValue))
+            },
+            'aria-label': `${workType} × ${useCase}: ${valueText}; ${shareText}`,
+            title: `${workType} × ${useCase}: ${valueText}`,
+            onKeyDown: event => onBubbleKeyDown(event, index)
+          },
+          h('span', { className: 'analytics-matrix-tooltip', 'aria-hidden': 'true' },
+            h('strong', null, `${workType} × ${useCase}`),
+            h('span', null, valueText),
+            h('small', null, shareText)
+          ))
+        );
+      })
+    ])
+  ];
+
+  return h('div', {
+    className: ['analytics-chart-group', 'analytics-categorical-matrix', className].filter(Boolean).join(' '),
+    role: 'group',
+    'aria-label': `${ariaLabel}. Bubble size and intensity represent action count. Tab between populated cells or use arrow keys to move through the matrix.`
+  },
+  h('div', {
+    className: 'analytics-matrix-grid',
+    style: {
+      '--matrix-columns': String(Math.max(1, xLabels.length)),
+      '--matrix-rows': String(Math.max(1, yLabels.length)),
+      '--matrix-min-width': `${minWidth}px`
+    }
+  }, gridChildren),
+  h(AccessibleMatrixTable, { cells: normalized, xLabels, yLabels }));
+}
+
+function AccessibleMatrixTable({ cells, xLabels, yLabels }) {
+  const values = new Map(cells.map(cell => [`${cell.y}:${cell.x}`, cell.value]));
+  return h('table', { className: 'sr-only' },
+    h('caption', null, 'Work type by use case chart data'),
+    h('thead', null, h('tr', null,
+      h('th', { scope: 'col' }, 'Work type'),
+      xLabels.map((label, index) => h('th', { key: `${label}-${index}`, scope: 'col' }, label))
+    )),
+    h('tbody', null, yLabels.map((label, y) => h('tr', { key: `${label}-${y}` },
+      h('th', { scope: 'row' }, label),
+      xLabels.map((_, x) => h('td', { key: `${y}:${x}` }, Number(values.get(`${y}:${x}`) || 0).toLocaleString()))
+    )))
+  );
+}
+
+function bubbleNeighborIndex(cells, currentIndex, key) {
+  const current = cells[currentIndex];
+  if (!current) return currentIndex;
+  const horizontal = key === 'ArrowLeft' || key === 'ArrowRight';
+  const direction = key === 'ArrowLeft' || key === 'ArrowUp' ? -1 : 1;
+  const candidates = cells.map((cell, index) => ({ cell, index })).filter(({ cell }) => {
+    const delta = horizontal ? cell.x - current.x : cell.y - current.y;
+    return delta * direction > 0;
+  });
+  if (!candidates.length) return currentIndex;
+  candidates.sort((left, right) => {
+    const primaryLeft = Math.abs((horizontal ? left.cell.x : left.cell.y) - (horizontal ? current.x : current.y));
+    const primaryRight = Math.abs((horizontal ? right.cell.x : right.cell.y) - (horizontal ? current.x : current.y));
+    const crossLeft = Math.abs((horizontal ? left.cell.y : left.cell.x) - (horizontal ? current.y : current.x));
+    const crossRight = Math.abs((horizontal ? right.cell.y : right.cell.x) - (horizontal ? current.y : current.x));
+    return crossLeft - crossRight || primaryLeft - primaryRight || left.index - right.index;
+  });
+  return candidates[0].index;
+}
+
+function matrixBubbleSize(value, maxValue) {
+  const ratio = Math.max(0, Number(value) || 0) / Math.max(1, Number(maxValue) || 1);
+  return Math.round(10 + Math.sqrt(ratio) * 24);
+}
+
+function matrixBubbleOpacity(value, maxValue) {
+  const ratio = Math.max(0, Number(value) || 0) / Math.max(1, Number(maxValue) || 1);
+  return Math.min(1, 0.5 + Math.sqrt(ratio) * 0.5).toFixed(2);
+}
+
+function formatMatrixShare(value) {
+  const number = Math.max(0, Number(value) || 0);
+  return `${number.toFixed(number >= 10 ? 0 : 1)}%`;
 }
 
 function AccessibleChartTable({ labels, values, valueLabel, formatValue }) {
@@ -230,22 +400,46 @@ function activateChartIndex(chart, index) {
   chart.update?.('none');
 }
 
+const chartThemeListeners = new Set();
+let chartThemeCleanup = null;
+let chartThemeRevision = 0;
+
+function subscribeChartTheme(listener) {
+  chartThemeListeners.add(listener);
+  if (chartThemeListeners.size === 1) chartThemeCleanup = observeChartTheme();
+  return () => {
+    chartThemeListeners.delete(listener);
+    if (!chartThemeListeners.size && chartThemeCleanup) {
+      chartThemeCleanup();
+      chartThemeCleanup = null;
+    }
+  };
+}
+
+function observeChartTheme() {
+  if (typeof document === 'undefined') return () => {};
+  const refresh = () => {
+    chartThemeRevision += 1;
+    for (const listener of chartThemeListeners) listener();
+  };
+  const observer = typeof MutationObserver === 'function' ? new MutationObserver(refresh) : null;
+  observer?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  const media = typeof matchMedia === 'function'
+    ? [matchMedia('(prefers-color-scheme: dark)'), matchMedia('(prefers-reduced-motion: reduce)'), matchMedia('(forced-colors: active)')]
+    : [];
+  for (const query of media) query.addEventListener?.('change', refresh);
+  return () => {
+    observer?.disconnect();
+    for (const query of media) query.removeEventListener?.('change', refresh);
+  };
+}
+
+function chartThemeSnapshot() {
+  return chartThemeRevision;
+}
+
 function useChartTheme() {
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    if (typeof document === 'undefined') return undefined;
-    const refresh = () => setRevision(value => value + 1);
-    const observer = typeof MutationObserver === 'function' ? new MutationObserver(refresh) : null;
-    observer?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    const media = typeof matchMedia === 'function'
-      ? [matchMedia('(prefers-color-scheme: dark)'), matchMedia('(prefers-reduced-motion: reduce)'), matchMedia('(forced-colors: active)')]
-      : [];
-    for (const query of media) query.addEventListener?.('change', refresh);
-    return () => {
-      observer?.disconnect();
-      for (const query of media) query.removeEventListener?.('change', refresh);
-    };
-  }, []);
+  const revision = useSyncExternalStore(subscribeChartTheme, chartThemeSnapshot, chartThemeSnapshot);
   return useMemo(() => readChartTheme(), [revision]);
 }
 

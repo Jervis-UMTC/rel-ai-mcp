@@ -28,9 +28,9 @@
 
 .task-progress { @apply grid min-w-0 gap-1.5; }
 .task-progress.compact { @apply mt-1 gap-1; }
-.task-progress-label { @apply flex min-w-0 items-center justify-between gap-3 text-[11px]; color: var(--ui-text-secondary); }
+.task-progress-label { @apply flex min-w-0 items-center justify-between gap-3 text-[12px] leading-5; color: var(--ui-text-secondary); }
 .task-progress-label span { @apply min-w-0 truncate; }
-.task-progress-label strong { @apply shrink-0 text-[11px] font-bold tabular-nums; color: var(--ui-text-primary); }
+.task-progress-label strong { @apply shrink-0 text-[12px] font-bold tabular-nums; color: var(--ui-text-primary); }
 .task-progress.static { @apply rounded-md px-2 py-1; background: var(--ui-status-neutral-background); border: 1px solid var(--ui-status-neutral-border); }
 .task-progress.static.terminal.failed, .task-progress.static.paused.failed, .task-progress.static.paused.blocked { background: var(--ui-status-danger-background); border-color: var(--ui-status-danger-border); }
 .task-progress.static.terminal.failed .task-progress-label, .task-progress.static.paused.failed .task-progress-label, .task-progress.static.paused.blocked .task-progress-label { color: var(--ui-status-danger-foreground); }
@@ -51,8 +51,8 @@
 .session-list-footer span { @apply text-[12px]; color: var(--ui-text-secondary); }
 
 .session-detail { @apply gap-4; }
-.inspector-tabs { display: flex; gap: 4px; position: sticky; top: -18px; z-index: 4; margin: 0 -18px 14px; padding: 10px 18px; background: var(--ui-surface-primary); border-bottom: 1px solid var(--ui-border-default); }
-.inspector-tab { min-height: 36px; padding: 0 12px; border-radius: 8px; color: var(--ui-text-secondary); background: transparent; border: 1px solid transparent; font-size: 12px; font-weight: 600; }
+.inspector-tabs { display: flex; gap: 4px; position: sticky; top: -18px; z-index: var(--z-sticky); margin: 0 -18px 14px; padding: 10px 18px; background: var(--ui-surface-primary); border-bottom: 1px solid var(--ui-border-default); }
+.inspector-tab { min-height: 44px; padding: 0 14px; border-radius: 8px; color: var(--ui-text-secondary); background: transparent; border: 1px solid transparent; font-size: 13px; font-weight: 600; cursor: pointer; }
 .inspector-tab:hover { color: var(--ui-text-primary); background: var(--ui-surface-secondary); }
 .inspector-tab.is-active { color: var(--ui-text-primary); background: var(--ui-surface-raised); border-color: var(--ui-border-default); }
 .inspector-panel { display: grid; gap: 14px; }
@@ -68,7 +68,7 @@
 .task-detail-grid { @apply grid gap-1.5; grid-template-columns: repeat(2,minmax(0,1fr)); }
 .task-detail-facts { grid-template-columns: repeat(auto-fit,minmax(110px,1fr)); }
 .task-detail-grid > div { @apply grid min-w-0 gap-1 rounded-md px-2.5 py-2; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
-.task-detail-grid span { @apply text-[11px] font-bold uppercase tracking-[.05em]; color: var(--ui-text-tertiary); }
+.task-detail-grid span { @apply text-[12px] font-bold uppercase tracking-[.05em] leading-5; color: var(--ui-text-secondary); }
 .task-detail-grid strong { @apply break-words text-[12px]; }
 .task-detail-clock { @apply tabular-nums; }
 .task-detail-identifier { @apply flex min-w-0 items-center justify-between gap-2; }
@@ -154,7 +154,7 @@
   .task-detail-header { @apply flex-col; }
 }
 
-@media (max-width: 240px) {
+@media (max-width: 320px) {
   .sessions-history-card .task-list { padding: 5px; }
   .session-row, .task-row { min-height: 0; padding: 7px; }
   .task-row-status .status-pill { min-height: 28px; padding-inline: 8px; font-size: 11px; }

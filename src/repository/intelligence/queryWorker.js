@@ -1,5 +1,5 @@
 import { cachedRepositoryContext, cachedRepositorySummary, cachedSearchGraphContext } from './contextPlanner.js';
-import { currentGeneration, openIndexDatabase, repositoryIndexPath } from './database.js';
+import { currentGeneration, indexProducerVersion, openIndexDatabase, repositoryIndexPath } from './database.js';
 import { executeCodeInspectQuery, executeSemanticSearchQuery } from './queryService.js';
 
 let sourceCacheIdentity = '';
@@ -52,8 +52,16 @@ async function executeIndexedQuery(job, options, execute) {
     db.exec('BEGIN');
     transactionOpen = true;
     const expectedGeneration = Number(job.index?.generation || 0);
-    const actualGeneration = Number(currentGeneration(db)?.id || 0);
-    if (!expectedGeneration || actualGeneration !== expectedGeneration) {
+    const expectedBuiltAt = String(job.index?.builtAt || '');
+    const expectedProducerVersion = String(job.index?.producerVersion || '');
+    const actual = currentGeneration(db);
+    const actualGeneration = Number(actual?.id || 0);
+    const actualBuiltAt = String(actual?.completed_at || actual?.started_at || '');
+    const actualProducerVersion = indexProducerVersion(db);
+    if (!expectedGeneration
+      || actualGeneration !== expectedGeneration
+      || (expectedBuiltAt && actualBuiltAt !== expectedBuiltAt)
+      || (expectedProducerVersion && actualProducerVersion !== expectedProducerVersion)) {
       const error = new Error(`Repository Intelligence index changed before the query started (expected generation ${expectedGeneration || 'none'}, found ${actualGeneration || 'none'}).`);
       error.code = 'QUERY_INDEX_CHANGED';
       throw error;

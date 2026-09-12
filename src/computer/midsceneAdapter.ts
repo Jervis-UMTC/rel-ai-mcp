@@ -19,6 +19,8 @@ type ComputerImage = Readonly<{
   height: number;
 }>;
 
+type ComputerScreenshotOptions = Readonly<{ fresh?: boolean }>;
+
 type ComputerEnvironment = Readonly<{
   available?: boolean;
   platform?: string;
@@ -73,7 +75,7 @@ interface ComputerAdapter {
   environment(): Promise<ComputerEnvironment>;
   listDisplays(): Promise<ComputerDisplay[]>;
   size(displayId?: string): Promise<{ width: number; height: number }>;
-  screenshot(displayId?: string): Promise<ComputerImage>;
+  screenshot(displayId?: string, options?: ComputerScreenshotOptions): Promise<ComputerImage>;
   move(displayId: string | undefined, point: ComputerPoint): Promise<void>;
   click(displayId: string | undefined, point: ComputerPoint): Promise<void>;
   doubleClick(displayId: string | undefined, point: ComputerPoint): Promise<void>;
@@ -92,6 +94,10 @@ function createMidsceneComputerAdapter(options: MidsceneAdapterOptions = {}): Co
   const importMidscene = options.importMidscene || (() => import('@midscene/computer'));
   let modulePromise: Promise<MidsceneModule> | null = null;
   const devicePromises = new Map<string, Promise<MidsceneDevice>>();
+  const sizeCache = new Map<string, { value: { width: number; height: number }; expiresAt: number }>();
+  const screenshotCache = new Map<string, { value: ComputerImage; expiresAt: number }>();
+  const SIZE_CACHE_TTL_MS = 3000;
+  const SCREENSHOT_CACHE_TTL_MS = 750;
 
   async function runtime(): Promise<MidsceneModule> {
     if (!modulePromise) {
@@ -147,56 +153,75 @@ function createMidsceneComputerAdapter(options: MidsceneAdapterOptions = {}): Co
   }
 
   async function size(displayId?: string): Promise<{ width: number; height: number }> {
+    const key = normalizeDisplayId(displayId) || PRIMARY_DISPLAY_KEY;
+    const cached = sizeCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
     const instance = await device(displayId);
     const value = await instance.size();
-    return {
+    const resolved = {
       width: positiveInteger(value?.width, 'screen width'),
       height: positiveInteger(value?.height, 'screen height')
     };
+    sizeCache.set(key, { value: resolved, expiresAt: Date.now() + SIZE_CACHE_TTL_MS });
+    return resolved;
   }
 
-  async function screenshot(displayId?: string): Promise<ComputerImage> {
+  async function screenshot(displayId?: string, options: ComputerScreenshotOptions = {}): Promise<ComputerImage> {
+    const key = normalizeDisplayId(displayId) || PRIMARY_DISPLAY_KEY;
+    const cachedShot = screenshotCache.get(key);
+    if (options.fresh !== true && cachedShot && cachedShot.expiresAt > Date.now()) return cachedShot.value;
     const instance = await device(displayId);
     const [encoded, dimensions] = await Promise.all([
       instance.screenshotBase64(),
-      instance.size()
+      size(displayId)
     ]);
     const image = decodeScreenshot(encoded);
-    if (image.buffer.length > MAX_SCREENSHOT_BYTES) {
+    if (image.bytes > MAX_SCREENSHOT_BYTES) {
       throw new Error(`Computer screenshot exceeds the ${MAX_SCREENSHOT_BYTES}-byte image limit.`);
     }
-    return {
+    const resolved: ComputerImage = {
       mimeType: image.mimeType,
-      data: image.buffer.toString('base64'),
-      bytes: image.buffer.length,
+      data: image.data,
+      bytes: image.bytes,
       width: positiveInteger(dimensions?.width, 'screenshot width'),
       height: positiveInteger(dimensions?.height, 'screenshot height')
     };
+    screenshotCache.set(key, { value: resolved, expiresAt: Date.now() + SCREENSHOT_CACHE_TTL_MS });
+    return resolved;
+  }
+
+  function invalidateScreenshot(displayId?: string): void {
+    screenshotCache.delete(normalizeDisplayId(displayId) || PRIMARY_DISPLAY_KEY);
   }
 
   async function move(displayId: string | undefined, point: ComputerPoint): Promise<void> {
     const instance = await device(displayId);
     await instance.inputPrimitives.pointer.hover(point);
+    invalidateScreenshot(displayId);
   }
 
   async function click(displayId: string | undefined, point: ComputerPoint): Promise<void> {
     const instance = await device(displayId);
     await instance.inputPrimitives.pointer.tap(point);
+    invalidateScreenshot(displayId);
   }
 
   async function doubleClick(displayId: string | undefined, point: ComputerPoint): Promise<void> {
     const instance = await device(displayId);
     await instance.inputPrimitives.pointer.doubleClick(point);
+    invalidateScreenshot(displayId);
   }
 
   async function rightClick(displayId: string | undefined, point: ComputerPoint): Promise<void> {
     const instance = await device(displayId);
     await instance.inputPrimitives.pointer.rightClick(point);
+    invalidateScreenshot(displayId);
   }
 
   async function drag(displayId: string | undefined, from: ComputerPoint, to: ComputerPoint): Promise<void> {
     const instance = await device(displayId);
     await instance.inputPrimitives.pointer.dragAndDrop(from, to);
+    invalidateScreenshot(displayId);
   }
 
   async function scroll(
@@ -210,16 +235,19 @@ function createMidsceneComputerAdapter(options: MidsceneAdapterOptions = {}): Co
       distance: param.distance,
       ...(param.point ? { locate: { center: [param.point.x, param.point.y] as const } } : {})
     });
+    invalidateScreenshot(displayId);
   }
 
   async function typeText(text: string): Promise<void> {
     const instance = await device();
     await instance.inputPrimitives.keyboard.typeText(text, { replace: false });
+    invalidateScreenshot();
   }
 
   async function pressKey(keyName: string): Promise<void> {
     const instance = await device();
     await instance.inputPrimitives.keyboard.keyboardPress(keyName);
+    invalidateScreenshot();
   }
 
   return Object.freeze({
@@ -253,15 +281,15 @@ function normalizeDisplayId(value: unknown): string | undefined {
   return id || undefined;
 }
 
-function decodeScreenshot(value: unknown): { mimeType: string; buffer: Buffer } {
+function decodeScreenshot(value: unknown): { mimeType: string; data: string; bytes: number } {
   const encoded = String(value || '').trim();
   if (!encoded) throw new Error('Midscene returned an empty screenshot.');
   const match = /^data:([^;,]+);base64,(.+)$/s.exec(encoded);
   const mimeType = match?.[1] || 'image/png';
-  const data = match?.[2] || encoded;
-  const buffer = Buffer.from(data, 'base64');
-  if (!buffer.length) throw new Error('Midscene returned invalid screenshot data.');
-  return { mimeType, buffer };
+  const data = (match?.[2] || encoded).trim();
+  const bytes = Buffer.byteLength(data, 'base64');
+  if (!bytes) throw new Error('Midscene returned invalid screenshot data.');
+  return { mimeType, data, bytes };
 }
 
 function positiveInteger(value: unknown, label: string): number {
@@ -273,6 +301,8 @@ function positiveInteger(value: unknown, label: string): number {
 export { createMidsceneComputerAdapter };
 export type {
   ComputerAdapter,
+  ComputerImage,
   ComputerPoint,
+  ComputerScreenshotOptions,
   ScrollDirection
 };

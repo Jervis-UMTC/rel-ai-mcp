@@ -252,6 +252,11 @@ function sampleArgs(entry) {
     case 'relai_computer:type': args.text = 'hello'; break;
     case 'relai_computer:key': args.key = 'enter'; break;
     case 'relai_computer:hotkey': args.keys = ['ctrl', 's']; break;
+    case 'relai_computer:activate': Object.assign(args, { semanticObservationId: 'uia_fixture', targetId: 'e1' }); break;
+    case 'relai_computer:batch': args.actions = [{ action: 'move', x: 10, y: 20 }]; break;
+    case 'relai_computer:stop': break;
+    case 'relai_computer:approve_app':
+    case 'relai_computer:revoke_app': args.app = 'example-app'; break;
     case 'relai_validate:http': args.route = '/health'; break;
     case 'relai_changes:restore': args.paths = ['README.md']; break;
     case 'relai_changes:reset': break;
@@ -259,5 +264,6 @@ function sampleArgs(entry) {
     case 'relai_changes:tidy_run': args.planId = 'tidy_abcdefghijklmnopqrst'; break;
     case 'relai_publish:commit': args.message = 'Contract commit'; break;
   }
+  if (entry.publicTool === 'relai_computer' && entry.required?.includes('app') && !args.app) args.app = 'example-app';
   return args;
 }

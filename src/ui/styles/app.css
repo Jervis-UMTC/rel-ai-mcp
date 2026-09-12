@@ -26,10 +26,10 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
-  --font-11: 11px;
+  --font-11: 12px;
   --font-12: 12px;
   --font-13: 13px;
-  --font-14: 14px;
+  --font-14: 15px;
   --font-16: 16px;
   --font-20: 20px;
   --font-24: 24px;
@@ -45,7 +45,15 @@
   --ease: cubic-bezier(.4, 0, .2, 1);
   --ease-out: cubic-bezier(.16, 1, .3, 1);
   --sidebar-width: 240px;
-  --control-height: 34px;
+  --control-height: 44px;
+  --z-skip: 100;
+  --z-toast: 80;
+  --z-modal: 50;
+  --z-drawer: 55;
+  --z-titlebar: 40;
+  --z-sidebar: 30;
+  --z-topbar: 20;
+  --z-sticky: 10;
   --window-titlebar-height: 40px;
   --scrollbar-size: 10px;
   --scrollbar-size-compact: 8px;
@@ -59,8 +67,8 @@
     background: var(--ui-canvas);
     color: var(--ui-text-primary);
     font-family: "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
-    font-size: 14px;
-    line-height: 1.45;
+    font-size: 15px;
+    line-height: 1.6;
   }
   body.overlay-open { overflow: hidden; }
   button, input, select, textarea { font: inherit; color: inherit; }
@@ -115,7 +123,8 @@
   }
 
   .skip-link {
-    @apply fixed left-4 top-3 z-[100] -translate-y-20 rounded-md px-4 py-2 font-semibold transition-transform;
+    @apply fixed left-4 top-3 -translate-y-20 rounded-md px-4 py-2 font-semibold transition-transform;
+    z-index: var(--z-skip);
     background: var(--ui-surface-primary);
     border: 1px solid var(--ui-border-default);
   }
@@ -125,7 +134,7 @@
     display: none;
     position: fixed;
     inset: 0 0 auto 0;
-    z-index: 40;
+    z-index: var(--z-titlebar);
     height: var(--window-titlebar-height);
     align-items: center;
     color: var(--ui-text-secondary);
@@ -200,24 +209,23 @@
     overscroll-behavior-y: contain;
     scrollbar-gutter: stable;
   }
-  :root[data-window-chrome="custom"] .toast-region { top: calc(var(--window-titlebar-height) + 16px); }
+  /* Toast offset for custom chrome is defined once at the end of this file. */
 
   .app-shell {
     @apply grid min-h-screen w-full;
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
     max-width: 100vw;
     overflow-x: clip;
-    transition: grid-template-columns var(--dur) var(--ease);
   }
 
   .sidebar {
-    @apply fixed inset-y-0 left-0 z-30 flex flex-col overflow-y-auto p-3;
+    @apply fixed inset-y-0 left-0 flex flex-col overflow-y-auto p-3;
+    z-index: var(--z-sidebar);
     width: var(--sidebar-width);
     scrollbar-gutter: stable;
     background: var(--ui-surface-primary);
     border-right: 1px solid var(--ui-border-subtle);
     box-shadow: none;
-    transition: width var(--dur) var(--ease), padding var(--dur) var(--ease);
   }
 
   .brand { @apply mb-3 flex items-center justify-between gap-2 border-b pb-3; border-color: var(--ui-border-subtle); }
@@ -236,7 +244,7 @@
   .sidebar-group-label { @apply px-2 text-[11px] font-bold uppercase tracking-[.08em]; color: var(--ui-text-tertiary); }
   .nav a, .secondary-nav a, .mobile-nav a, .sidebar-accordion > summary {
     @apply flex items-center gap-2.5 rounded-md px-2.5 text-[13px] font-semibold transition-colors;
-    min-height: 36px;
+    min-height: 44px;
     color: var(--ui-text-secondary);
     border: 1px solid transparent;
   }
@@ -262,13 +270,14 @@
   }
   .mobile-nav { @apply hidden; }
   .topbar {
-    @apply sticky top-0 z-20 mb-4 flex min-h-[64px] items-center justify-between gap-6 px-0 py-2;
+    @apply sticky top-0 mb-4 flex min-h-[64px] items-center justify-between gap-6 px-0 py-2;
+    z-index: var(--z-topbar);
     background: var(--ui-canvas);
     border-bottom: 1px solid var(--ui-border-subtle);
     box-shadow: none;
   }
-  .title-wrap { @apply min-w-0 flex-1; }
-  .page-title { @apply truncate text-[23px] font-extrabold; line-height: 1.35; }
+  .title-wrap { @apply min-w-0 flex-1 py-0.5; }
+  .page-title { @apply text-[23px] font-extrabold; line-height: 1.35; overflow-wrap: anywhere; }
   .page-subtitle { @apply mt-1 text-[13px]; overflow-wrap: anywhere; color: var(--ui-text-secondary); }
   .top-controls { @apply flex min-w-0 items-center justify-end gap-2; }
 
@@ -296,8 +305,8 @@
   .ui-icon { @apply size-4 shrink-0 fill-none stroke-current; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
   button, .buttonlike {
-    @apply inline-flex items-center justify-center gap-2 rounded-md px-3 text-[12px] font-semibold transition-[background-color,border-color,color,opacity,transform] duration-150;
-    min-height: 36px;
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-3 text-[13px] font-semibold transition-[background-color,border-color,color,opacity,transform] duration-150;
+    min-height: 44px;
     background: var(--ui-surface-secondary);
     border: 1px solid var(--ui-border-default);
     color: var(--ui-text-primary);
@@ -324,9 +333,9 @@
     background: var(--ui-surface-primary);
     border: 1px solid var(--ui-border-subtle);
   }
-  .feature-toolbar > p { @apply max-w-3xl text-[12px]; color: var(--ui-text-secondary); }
+  .feature-toolbar > p { @apply max-w-3xl text-[13px] leading-6; color: var(--ui-text-secondary); max-width: 75ch; }
   .section-head-actions { @apply flex items-center gap-2; }
-  .feature-count, .section-action { @apply text-[11px] font-medium; color: var(--ui-text-tertiary); }
+  .feature-count, .section-action { @apply text-[12px] font-medium; color: var(--ui-text-tertiary); }
   a.section-action:hover { color: var(--ui-action-primary); }
 
   .card, .metric, .workspace-card, .tool-card {
@@ -337,17 +346,18 @@
   }
   .card-head { @apply flex min-h-12 items-center justify-between gap-4 border-b px-4 py-3; border-color: var(--ui-border-default); }
   .card-head h3 { @apply text-[13px] font-bold; }
+  .layout-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .card-body { @apply min-w-0 p-4; }
   .card-body.flush { @apply p-0; }
   .list { @apply flex flex-col; }
   .list-item { @apply flex min-h-12 items-center gap-3 border-b px-3 py-2.5 last:border-b-0; border-color: var(--ui-border-subtle); }
   .list-item:hover { background: color-mix(in srgb, var(--ui-surface-secondary) 68%, transparent); }
   .item-title { @apply text-[13px] font-semibold; }
-  .item-sub { @apply mt-0.5 text-[11px]; color: var(--ui-text-secondary); }
-  .item-time { @apply ml-auto shrink-0 text-[11px]; color: var(--ui-text-tertiary); }
+  .item-sub { @apply mt-0.5 text-[12px] leading-5; color: var(--ui-text-secondary); }
+  .item-time { @apply ml-auto shrink-0 text-[12px]; color: var(--ui-text-tertiary); }
 
   .status-pill {
-    @apply inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold;
+    @apply inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold;
     background: var(--ui-surface-secondary);
     border: 1px solid var(--ui-border-default);
     color: var(--ui-text-secondary);
@@ -375,8 +385,8 @@
   label { @apply text-[12px] font-semibold; }
   .field, .field-stack { @apply flex min-w-0 flex-col gap-1.5; }
   .field-row, .ws-form-row { @apply grid gap-3; grid-template-columns: repeat(2, minmax(0,1fr)); }
-  .field-caption { @apply text-[11px] font-semibold uppercase tracking-[.08em]; color: var(--ui-text-tertiary); }
-  .field-help, .muted { @apply text-[12px]; color: var(--ui-text-secondary); }
+  .field-caption { @apply text-[12px] font-semibold uppercase tracking-[.08em]; color: var(--ui-text-tertiary); }
+  .field-help, .muted { @apply text-[13px] leading-6; color: var(--ui-text-secondary); max-width: 75ch; }
   .form-actions { @apply flex items-center justify-end gap-2 border-t pt-4; border-color: var(--ui-border-default); }
 
 
@@ -387,8 +397,8 @@
     overscroll-behavior-y: auto;
   }
   .data-table { @apply w-full border-collapse text-left; table-layout: fixed; }
-  .data-table th { @apply sticky top-0 z-10 h-10 border-b px-4 text-[11px] font-bold uppercase tracking-[.06em]; color: var(--ui-text-tertiary); background: var(--ui-surface-secondary); border-color: var(--ui-border-default); }
-  .data-table td { @apply h-12 border-b px-4 text-[12px] align-middle; border-color: var(--ui-border-subtle); }
+  .data-table th { @apply sticky top-0 h-10 border-b px-4 text-[12px] font-bold uppercase tracking-[.06em]; z-index: var(--z-sticky); color: var(--ui-text-tertiary); background: var(--ui-surface-secondary); border-color: var(--ui-border-default); }
+  .data-table td { @apply h-12 border-b px-4 text-[13px] align-middle; border-color: var(--ui-border-subtle); }
   .data-table tbody tr:last-child td { border-bottom: 0; }
   .data-table tbody tr:hover td { background: color-mix(in srgb, var(--ui-surface-secondary) 62%, transparent); }
   .table-virtual-sentinel-cell { height: 1px; padding: 4px; }
@@ -410,19 +420,19 @@
   .update-installing-modal { @apply grid gap-3 py-1 text-center; }
   .update-installing-modal .loading-mark { @apply mb-1; }
   .skeleton-grid { @apply mt-6 grid gap-3; grid-template-columns: repeat(3,minmax(0,1fr)); }
-  .skeleton-block { @apply h-20 rounded-xl; background: linear-gradient(90deg,var(--ui-surface-secondary),var(--ui-surface-raised),var(--ui-surface-secondary)); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
-  .empty { @apply rounded-lg px-4 py-6 text-center text-[12px]; color: var(--ui-text-secondary); background: color-mix(in srgb, var(--ui-surface-secondary) 70%, transparent); }
+  .skeleton-block { @apply h-24 rounded-xl; background: linear-gradient(90deg,var(--ui-surface-secondary),var(--ui-surface-raised),var(--ui-surface-secondary)); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+  .empty { @apply rounded-lg px-4 py-6 text-center text-[13px] leading-6; color: var(--ui-text-secondary); background: color-mix(in srgb, var(--ui-surface-secondary) 70%, transparent); }
 
-  .modal-backdrop, #__relai-modal-backdrop { @apply fixed inset-0 z-50; background: var(--ui-overlay-modal); }
-  .drawer-backdrop, #__relai-drawer-backdrop { @apply fixed inset-0 z-50; background: var(--ui-overlay-drawer); }
-  .modal-shell, .modal-panel { @apply fixed left-1/2 top-1/2 z-[51] max-h-[calc(100dvh-32px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl; width: min(600px, calc(100vw - 32px)); background: var(--ui-surface-primary); border: 1px solid var(--ui-border-default); box-shadow: var(--ui-shadow-popover); }
+  .modal-backdrop, #__relai-modal-backdrop { @apply fixed inset-0; z-index: var(--z-modal); background: var(--ui-overlay-modal); }
+  .drawer-backdrop, #__relai-drawer-backdrop { @apply fixed inset-0; z-index: var(--z-drawer); background: var(--ui-overlay-drawer); }
+  .modal-shell, .modal-panel { @apply fixed left-1/2 top-1/2 z-[51] max-h-[calc(100dvh-32px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl; width: min(600px, calc(100vw - 32px)); background: var(--ui-surface-primary); border: 1px solid var(--ui-border-default); box-shadow: var(--ui-shadow-popover); z-index: calc(var(--z-modal) + 1); }
   .modal-panel { @apply flex flex-col; }
   .modal-panel.modal-compact { width: min(500px, calc(100vw - 32px)); }
   .modal-panel.modal-wide { width: min(680px, calc(100vw - 32px)); }
   .modal-head { @apply flex min-h-14 shrink-0 items-center justify-between gap-3 px-5; }
   .drawer-head { @apply flex min-h-14 shrink-0 items-center justify-between gap-3 border-b px-4; border-color: var(--ui-border-default); background: var(--ui-surface-primary); }
   .modal-title, .drawer-title { @apply text-[16px] font-bold; }
-  .modal-close { @apply grid size-9 min-h-9 shrink-0 place-items-center rounded-lg p-0 leading-none; background: transparent; border-color: transparent; color: var(--ui-text-secondary); }
+  .modal-close { @apply grid size-11 min-h-11 shrink-0 place-items-center rounded-lg p-0 leading-none; background: transparent; border-color: transparent; color: var(--ui-text-secondary); }
   .modal-close .ui-icon { @apply size-[18px]; }
   .modal-close:hover:not(:disabled) { background: var(--ui-surface-secondary); border-color: var(--ui-border-subtle); color: var(--ui-text-primary); }
   .modal-body { @apply min-h-0 overflow-y-auto px-5 pb-5; overscroll-behavior: contain; }
@@ -435,8 +445,9 @@
   .modal-inline-confirm-title { @apply text-[15px] font-bold; }
   .modal-step-list { @apply grid gap-1 pl-5 text-[13px] leading-5; list-style: decimal; color: var(--ui-text-secondary); }
   .drawer-body { @apply min-h-0 flex-1 overflow-y-auto p-5; overscroll-behavior: contain; }
-  .drawer-panel { @apply fixed bottom-4 right-4 top-4 z-[51] flex w-[min(760px,calc(100vw-48px))] flex-col overflow-hidden rounded-xl; background: var(--ui-surface-primary); border: 1px solid var(--ui-border-default); box-shadow: var(--ui-shadow-popover); }
+  .drawer-panel { @apply fixed bottom-4 right-4 top-4 flex w-[min(760px,calc(100vw-48px))] flex-col overflow-hidden rounded-xl; z-index: calc(var(--z-drawer) + 1); background: var(--ui-surface-primary); border: 1px solid var(--ui-border-default); box-shadow: var(--ui-shadow-popover); }
   .session-detail-drawer { width: min(820px, calc(100vw - 48px)); }
+  @media (max-width: 900px) { .session-detail-drawer { width: min(640px, calc(100vw - 32px)); } }
   .confirm-dialog { @apply flex flex-col gap-3; }
   .detail-stack { @apply flex flex-col gap-4; }
   .activity-detail-head { @apply flex items-center justify-between gap-3; }
@@ -444,7 +455,7 @@
   .activity-detail-section h3 { @apply text-[12px]; }
   .detail-field { @apply grid gap-3 border-b py-2 text-[12px] last:border-b-0; grid-template-columns: 110px minmax(0,1fr); border-color: var(--ui-border-subtle); }
   .detail-field-label { @apply font-semibold; color: var(--ui-text-secondary); }
-  .detail-pre { @apply max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 text-[11px]; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
+  .detail-pre { @apply max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 text-[12px] leading-6; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
   .activity-detail-actions { @apply flex justify-end; }
 
   .command-panel { @apply w-[min(680px,calc(100vw-32px))]; }
@@ -455,18 +466,18 @@
   .command-search { @apply min-h-12 border-0 bg-transparent pl-3 pr-14 shadow-none; }
   .command-search:focus { box-shadow: none; }
   .command-search-wrap kbd { @apply absolute right-3 rounded px-1.5 py-0.5 text-[10px]; color: var(--ui-text-tertiary); background: var(--ui-surface-primary); border: 1px solid var(--ui-border-default); }
-  .command-help { @apply px-1 text-[11px]; color: var(--ui-text-tertiary); }
+  .command-help { @apply px-1 text-[12px]; color: var(--ui-text-tertiary); }
   .command-list { @apply max-h-[52vh] overflow-y-auto rounded-xl; border: 1px solid var(--ui-border-subtle); }
   .command-option { @apply flex cursor-pointer items-center justify-between gap-4 border-b px-3 py-3 last:border-b-0; border-color: var(--ui-border-subtle); }
   .command-option.active { background: var(--ui-surface-raised); }
   .command-option-copy { @apply min-w-0; }
-  .command-option-copy strong { @apply block text-[12px]; }
-  .command-option-copy small { @apply mt-1 block truncate text-[11px]; color: var(--ui-text-secondary); }
-  .command-group { @apply shrink-0 text-[11px] font-semibold; color: var(--ui-text-tertiary); }
-  .command-empty { @apply p-6 text-center text-[12px]; color: var(--ui-text-secondary); }
+  .command-option-copy strong { @apply block text-[13px] leading-5; }
+  .command-option-copy small { @apply mt-1 block truncate text-[12px]; color: var(--ui-text-secondary); }
+  .command-group { @apply shrink-0 text-[12px] font-semibold; color: var(--ui-text-tertiary); }
+  .command-empty { @apply p-6 text-center text-[13px]; color: var(--ui-text-secondary); }
 
-  .toast { @apply grid items-center gap-3 rounded-xl px-4 py-3 text-[12px]; grid-template-columns: auto minmax(0,1fr) auto; background: var(--ui-surface-primary); border: 1px solid var(--ui-border-default); box-shadow: var(--ui-shadow-popover); }
-  .toast-marker { @apply grid size-5 place-items-center rounded-full text-[11px] font-bold; color: var(--ui-status-neutral-foreground); background: var(--ui-status-neutral-background); border: 1px solid var(--ui-status-neutral-border); }
+  .toast { @apply grid items-center gap-3 rounded-xl px-4 py-3 text-[13px] leading-6; grid-template-columns: auto minmax(0,1fr) auto; background: var(--ui-surface-primary); border: 1px solid var(--ui-border-default); box-shadow: var(--ui-shadow-popover); }
+  .toast-marker { @apply grid size-6 place-items-center rounded-full text-[12px] font-bold; color: var(--ui-status-neutral-foreground); background: var(--ui-status-neutral-background); border: 1px solid var(--ui-status-neutral-border); }
   .toast-copy { @apply min-w-0 break-words leading-5; }
   .toast-dismiss { @apply size-11 min-h-11 shrink-0 rounded-lg px-0; background: transparent; border-color: transparent; color: var(--ui-text-secondary); }
   .toast-dismiss .ui-icon { @apply size-[17px]; }
@@ -482,10 +493,10 @@
   /* Feature contracts preserved after the Tailwind v4 stylesheet consolidation. */
   .section-head { @apply flex items-end justify-between gap-4; }
   .section-head h2 { @apply text-[15px] font-bold; }
-  .section-head p { @apply mt-1 text-[12px] leading-5; color: var(--ui-text-secondary); }
+  .section-head p { @apply mt-1 text-[13px] leading-6; color: var(--ui-text-secondary); max-width: 75ch; }
   .card-head-actions { @apply flex flex-wrap items-center gap-3; }
 
-  .badge { @apply inline-flex min-h-6 items-center rounded-full px-2 text-[10px] font-semibold; background: var(--ui-selection-background); border: 1px solid color-mix(in srgb, var(--ui-action-primary) 28%, transparent); color: var(--ui-action-primary); }
+  .badge { @apply inline-flex min-h-8 items-center rounded-full px-2 text-[11px] font-semibold; background: var(--ui-selection-background); border: 1px solid color-mix(in srgb, var(--ui-action-primary) 28%, transparent); color: var(--ui-action-primary); }
   .badge.good { background: var(--ui-status-success-background); border-color: color-mix(in srgb, var(--ui-status-success-foreground) 28%, transparent); color: var(--ui-status-success-foreground); }
   .badge.warn { background: var(--ui-status-warning-background); border-color: color-mix(in srgb, var(--ui-status-warning-foreground) 28%, transparent); color: var(--ui-status-warning-foreground); }
   .badge.bad { background: var(--ui-status-danger-background); border-color: color-mix(in srgb, var(--ui-status-danger-foreground) 28%, transparent); color: var(--ui-status-danger-foreground); }
@@ -496,12 +507,12 @@
   .dot.neutral { background: var(--ui-status-neutral-foreground); }
 
   input[type="checkbox"]:not(.toggle-input), input[type="radio"] {
-    @apply h-4 w-4 min-h-0 shrink-0 cursor-pointer p-0;
+    @apply h-5 w-5 min-h-0 shrink-0 cursor-pointer p-0;
     accent-color: var(--ui-action-primary);
   }
   .toggle-control { @apply inline-flex min-h-11 w-fit cursor-pointer items-center gap-3 text-[12px] font-semibold; }
   .toggle-input {
-    @apply relative h-6 w-11 min-h-6 shrink-0 cursor-pointer appearance-none rounded-full p-0;
+    @apply relative h-7 w-12 min-h-7 shrink-0 cursor-pointer appearance-none rounded-full p-0;
     background: var(--ui-surface-raised);
     border: 1px solid var(--ui-border-default);
   }
@@ -529,12 +540,12 @@
   .empty-state { @apply grid justify-items-center gap-2 px-4 py-8; }
   .empty-state-icon { @apply text-2xl; color: var(--ui-text-tertiary); }
   .empty-state-title { @apply text-[14px] font-bold; }
-  .empty-state-copy { @apply max-w-lg text-[12px] leading-5; color: var(--ui-text-secondary); }
+  .empty-state-copy { @apply max-w-lg text-[13px] leading-6; color: var(--ui-text-secondary); max-width: 65ch; }
   .empty-state-action { @apply mt-2; }
 
   .overlay-backdrop { @apply fixed inset-0 overflow-auto; overscroll-behavior: contain; }
   .drawer-panel { @apply flex flex-col; }
-  .toast-region { @apply fixed right-4 top-4 z-[80] flex w-[min(380px,calc(100vw-32px))] flex-col gap-2; }
+  .toast-region { @apply fixed right-4 top-4 flex w-[min(380px,calc(100vw-32px))] flex-col gap-2; z-index: var(--z-toast); }
   .toast-info { border-color: var(--ui-status-info-border); }
   .toast-success { border-color: color-mix(in srgb, var(--ui-status-success-foreground) 40%, transparent); }
   .toast-warn { border-color: color-mix(in srgb, var(--ui-status-warning-foreground) 40%, transparent); }
@@ -542,7 +553,7 @@
 }
 
 :root[data-density="compact"] {
-  --control-height: 32px;
+  --control-height: 36px;
 }
 :root[data-density="compact"] .card-body { padding: 12px; }
 :root[data-density="compact"] .data-table td { height: 46px; }
@@ -597,7 +608,7 @@
   .nav-icon { @apply size-5; }
   .topbar { @apply flex-col items-stretch gap-3; }
   .top-controls { @apply justify-start; }
-  .layout-grid { grid-template-columns: 1fr; }
+  .layout-grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
 }
 
 @media (max-width: 760px) {
@@ -658,7 +669,7 @@
   .status-pill { white-space: normal; }
 }
 
-@media (max-width: 240px) {
+@media (max-width: 320px) {
   .main { padding: 6px 6px calc(74px + env(safe-area-inset-bottom)); }
   .page-subtitle, #lastUpdated { display: none; }
   .topbar { gap: 6px; margin-bottom: 6px; }
@@ -666,6 +677,11 @@
   .card-head { min-height: 0; padding: 8px; }
 }
 
+
+  .analytics-chart-group { border-radius: 8px; }
+  .analytics-chart-group:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
+  .analytics-chart-group .chart-loading { min-height: 64px; }
+  .filter-drawer-form button:focus-visible, .browser-copy-url:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
 
 @media (pointer: coarse) {
   :root, :root[data-density="compact"] { --control-height: 44px; }
@@ -681,7 +697,8 @@
   *::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: Canvas; }
   *::-webkit-scrollbar-thumb { background: CanvasText; border-color: Canvas; forced-color-adjust: none; }
   button, .buttonlike, input, select, textarea, .card, .metric, .workspace-card, .tool-card, .topbar, .sidebar, .window-titlebar { border: 1px solid CanvasText; }
-  .status-pill::before, .connection-layer-dot, .workspace-readiness-fact dt i { forced-color-adjust: none; }
+  .status-pill, .badge, .dot { forced-color-adjust: none; border: 1px solid CanvasText; }
+  .status-pill::before, .connection-layer-dot, .workspace-readiness-fact dt i, .dot { forced-color-adjust: none; background: CanvasText; }
   .task-overview-spinner { border-color: Canvas; border-top-color: CanvasText; forced-color-adjust: none; }
 }
 

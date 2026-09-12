@@ -72,7 +72,9 @@ const startTaskHandler = inWorkspace(async (workspace, config, args, context) =>
     cachedIntelligence = bootstrapMode === 'full'
       ? await repositoryIntelligence.cachedContext(workspace, config, { maxResults: 10 })
       : await repositoryIntelligence.cachedSummary(workspace, config);
-  } catch {}
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] cached intelligence fallback:', error);
+  }
   const bootstrap = {
     ...baseBootstrap,
     ...supplemental,
@@ -172,14 +174,18 @@ function withWorkflowTaskContext(config, workspace, args, context = {}) {
     const topology = requestState?.topology || discoverRepositoryTopology(workspace.path);
     if (requestState && !requestState.topology) requestState.topology = topology;
     packagePaths = [...new Set(owned.map(file => packageForPath(topology, file)?.path).filter(value => value && value !== '.'))];
-  } catch {}
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] workflow context ownership fallback:', error);
+  }
   try {
     const evidence = requestState?.workflowContextEvidence || readRecentWorkflowEvidence(config, taskId, 30);
     if (requestState && !requestState.workflowContextEvidence) requestState.workflowContextEvidence = evidence;
     readEvidence = evidence
       .flatMap(receipt => Array.isArray(receipt?.metadata?.reads) ? receipt.metadata.reads : [])
       .slice(-100);
-  } catch {}
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] workflow evidence fallback:', error);
+  }
   return { ...args, _workflowContext: { taskOwnedPaths: owned, packagePaths, readEvidence } };
 }
 

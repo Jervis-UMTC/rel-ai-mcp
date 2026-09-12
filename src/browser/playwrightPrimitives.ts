@@ -99,14 +99,16 @@ async function screenshotPage(
     throw new Error(`${label} is ${buffer.length} bytes; the limit is ${MAX_SCREENSHOT_BYTES} bytes. Use the current viewport instead of fullPage.`);
   }
   const viewport = page.viewportSize() || DEFAULT_VIEWPORT;
+  const imageWidth = buffer.length >= 24 ? buffer.readUInt32BE(16) : viewport.width;
+  const imageHeight = buffer.length >= 24 ? buffer.readUInt32BE(20) : viewport.height;
   return {
     viewport,
     image: {
       mimeType: 'image/png',
       data: buffer.toString('base64'),
       bytes: buffer.length,
-      width: viewport.width,
-      height: viewport.height,
+      width: imageWidth,
+      height: imageHeight,
       fullPage
     }
   };

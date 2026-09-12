@@ -1,4 +1,9 @@
 import { normalizeFailureCategory } from '../../../analyticsFailureCategory.js';
+import {
+  isPrimaryAnalyticsUseCase,
+  normalizeAnalyticsTaskIntent,
+  normalizeAnalyticsUseCase
+} from '../../../contracts/analyticsTaxonomy.js';
 
 const RANGE_MS = Object.freeze({
   '1h': 60 * 60 * 1000,
@@ -72,10 +77,18 @@ export function normalizeUsageSnapshot(snapshot, requestedMonth = '') {
     tools: normalizeBreakdown(snapshot.tools, 'tool'),
     workspaces: normalizeBreakdown(snapshot.workspaces, 'workspace'),
     workspaceTools: normalizeBreakdown(snapshot.workspaceTools, 'workspaceTool'),
+    activityMatrix: normalizeActivityMatrix(snapshot.activityMatrix),
+    workspaceActivityMatrix: normalizeActivityMatrix(snapshot.workspaceActivityMatrix, { workspace: true }),
+    taskIntents: normalizeTaskIntentRows(snapshot.taskIntents),
+    workspaceTaskIntents: normalizeTaskIntentRows(snapshot.workspaceTaskIntents, { workspace: true }),
     series: normalizeSeries(snapshot.series, 'overall'),
     toolSeries: normalizeSeries(snapshot.toolSeries, 'tool'),
     workspaceSeries: normalizeSeries(snapshot.workspaceSeries, 'workspace'),
     workspaceToolSeries: normalizeSeries(snapshot.workspaceToolSeries, 'workspaceTool'),
+    activityMatrixSeries: normalizeActivityMatrix(snapshot.activityMatrixSeries, { series: true }),
+    workspaceActivityMatrixSeries: normalizeActivityMatrix(snapshot.workspaceActivityMatrixSeries, { workspace: true, series: true }),
+    taskIntentSeries: normalizeTaskIntentRows(snapshot.taskIntentSeries, { series: true }),
+    workspaceTaskIntentSeries: normalizeTaskIntentRows(snapshot.workspaceTaskIntentSeries, { workspace: true, series: true }),
     failureCategories: normalizeFailureRows(snapshot.failureCategories),
     workspaceFailureCategories: normalizeFailureRows(snapshot.workspaceFailureCategories, { workspace: true }),
     failureCategorySeries: normalizeFailureRows(snapshot.failureCategorySeries, { series: true }),
@@ -111,16 +124,36 @@ export function analyticsRangeScope(models, bounds, { workspace = '', monthlyFal
     : all.flatMap(model => model.toolSeries).filter(row => inRange(row.hour, bounds.start, bounds.end));
   const tools = groupRows(toolRows, row => row.tool || 'Unknown tool', 'tool');
   const workspaces = workspace ? [] : groupRows(all.flatMap(model => model.workspaceSeries).filter(row => inRange(row.hour, bounds.start, bounds.end)), row => row.workspace || 'Unattributed', 'workspace');
+  let matrixRows = workspace
+    ? all.flatMap(model => model.workspaceActivityMatrixSeries).filter(row => inRange(row.hour, bounds.start, bounds.end) && workspaceMatch(row, workspace))
+    : all.flatMap(model => model.activityMatrixSeries).filter(row => inRange(row.hour, bounds.start, bounds.end));
+  let taskRows = workspace
+    ? all.flatMap(model => model.workspaceTaskIntentSeries).filter(row => inRange(row.hour, bounds.start, bounds.end) && workspaceMatch(row, workspace))
+    : all.flatMap(model => model.taskIntentSeries).filter(row => inRange(row.hour, bounds.start, bounds.end));
   const categoryRows = workspace
     ? all.flatMap(model => model.workspaceFailureCategorySeries).filter(row => inRange(row.hour, bounds.start, bounds.end) && workspaceMatch(row, workspace))
     : all.flatMap(model => model.failureCategorySeries).filter(row => inRange(row.hour, bounds.start, bounds.end));
   let failureCategories = groupFailureCategories(categoryRows);
   if (usedMonthlyFallback && fallbackModel) {
+    matrixRows = workspace
+      ? fallbackModel.workspaceActivityMatrix.filter(row => workspaceMatch(row, workspace))
+      : fallbackModel.activityMatrix;
+    taskRows = workspace
+      ? fallbackModel.workspaceTaskIntents.filter(row => workspaceMatch(row, workspace))
+      : fallbackModel.taskIntents;
     const monthlyCategories = workspace
       ? fallbackModel.workspaceFailureCategories.filter(row => workspaceMatch(row, workspace))
       : fallbackModel.failureCategories;
     failureCategories = groupFailureCategories(monthlyCategories);
   }
+  const primaryMatrixRows = matrixRows.filter(row => isPrimaryAnalyticsUseCase(row.useCase));
+  const useCases = groupAnalyticsRows(primaryMatrixRows, row => row.useCase, 'useCase');
+  const activityMatrix = groupAnalyticsMatrix(primaryMatrixRows.filter(row => row.intent !== 'untracked'));
+  const taskTypes = groupTaskIntents(taskRows);
+  const categorizedActions = primaryMatrixRows.reduce((sum, row) => sum + Number(row.toolCalls || 0), 0);
+  const allMatrixActions = matrixRows.reduce((sum, row) => sum + Number(row.toolCalls || 0), 0);
+  const untrackedActions = primaryMatrixRows.filter(row => row.intent === 'untracked').reduce((sum, row) => sum + Number(row.toolCalls || 0), 0);
+  const completedTasks = taskTypes.reduce((sum, row) => sum + Number(row.tasks || 0), 0);
   const points = bucketSeries(baseRows, bounds.start, bounds.end);
   return {
     kind: workspace ? 'workspace' : 'all',
@@ -134,6 +167,13 @@ export function analyticsRangeScope(models, bounds, { workspace = '', monthlyFal
     averageDuration: totals.successes + totals.failures ? totals.executionMs / (totals.successes + totals.failures) : 0,
     tools,
     workspaces,
+    useCases,
+    taskTypes,
+    activityMatrix,
+    categorizedActions,
+    untrackedActions,
+    legacyUncategorizedActions: Math.max(0, Number(totals.toolCalls || 0) - allMatrixActions),
+    completedTasks,
     failureCategories,
     points,
     usedMonthlyFallback
@@ -197,6 +237,34 @@ function normalizeBreakdown(value, kind) {
   });
 }
 
+function normalizeActivityMatrix(value, { workspace = false, series = false } = {}) {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => {
+    const row = item && typeof item === 'object' ? item : {};
+    return {
+      ...(series ? { hour: String(row.hour || '') } : {}),
+      ...(workspace ? { workspace: String(row.workspace || '') } : {}),
+      intent: normalizeAnalyticsTaskIntent(row.intent, 'untracked'),
+      useCase: normalizeAnalyticsUseCase(row.useCase),
+      toolCalls: exactNumber(row.toolCalls ?? row.calls ?? 0, 'activityMatrix.toolCalls'),
+      successes: exactNumber(row.successes ?? 0, 'activityMatrix.successes'),
+      failures: exactNumber(row.failures ?? 0, 'activityMatrix.failures'),
+      ...normalizeReliability(row, 'activityMatrix'),
+      executionMs: exactNumber(row.executionMs ?? 0, 'activityMatrix.executionMs')
+    };
+  }).filter(row => row.toolCalls > 0 && (!series || hourTime(row.hour) !== null));
+}
+
+function normalizeTaskIntentRows(value, { workspace = false, series = false } = {}) {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => ({
+    ...(series ? { hour: String(item?.hour || '') } : {}),
+    ...(workspace ? { workspace: String(item?.workspace || '') } : {}),
+    intent: normalizeAnalyticsTaskIntent(item?.intent, 'auto'),
+    tasks: exactNumber(item?.tasks ?? 0, 'taskIntents.tasks')
+  })).filter(row => row.tasks > 0 && (!series || hourTime(row.hour) !== null));
+}
+
 function normalizeSeries(value, kind) {
   if (!Array.isArray(value)) return [];
   return value.map(item => {
@@ -255,6 +323,39 @@ function groupRows(rows, identity, kind) {
     ...(kind === 'workspace' ? { workspace: key } : {}),
     ...totals
   })).sort((a, b) => b.toolCalls - a.toolCalls);
+}
+
+function groupAnalyticsRows(rows, identity, field) {
+  const grouped = new Map();
+  for (const row of rows || []) {
+    const key = identity(row);
+    if (!key) continue;
+    if (!grouped.has(key)) grouped.set(key, Object.fromEntries(GROUP_KEYS.map(name => [name, 0])));
+    const target = grouped.get(key);
+    for (const name of GROUP_KEYS) target[name] += Number(row[name] || 0);
+  }
+  return [...grouped.entries()].map(([key, totals]) => ({ [field]: key, ...totals }))
+    .sort((a, b) => b.toolCalls - a.toolCalls || String(a[field]).localeCompare(String(b[field])));
+}
+
+function groupAnalyticsMatrix(rows) {
+  const grouped = new Map();
+  for (const row of rows || []) {
+    const key = `${row.intent}\u0000${row.useCase}`;
+    if (!grouped.has(key)) grouped.set(key, { intent: row.intent, useCase: row.useCase, ...Object.fromEntries(GROUP_KEYS.map(name => [name, 0])) });
+    const target = grouped.get(key);
+    for (const name of GROUP_KEYS) target[name] += Number(row[name] || 0);
+  }
+  return [...grouped.values()].filter(row => row.toolCalls > 0)
+    .sort((a, b) => b.toolCalls - a.toolCalls || a.intent.localeCompare(b.intent) || a.useCase.localeCompare(b.useCase));
+}
+
+function groupTaskIntents(rows) {
+  const grouped = new Map();
+  for (const row of rows || []) grouped.set(row.intent, (grouped.get(row.intent) || 0) + Number(row.tasks || 0));
+  return [...grouped.entries()].map(([intent, tasks]) => ({ intent, tasks }))
+    .filter(row => row.tasks > 0)
+    .sort((a, b) => b.tasks - a.tasks || a.intent.localeCompare(b.intent));
 }
 
 function bucketSeries(rows, start, end) {

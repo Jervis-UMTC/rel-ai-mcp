@@ -4,41 +4,20 @@ const PUBLIC_INPUT_DESCRIPTIONS = Object.freeze({
   ]),
   relai_edit: new Set([
     'description',
-    'properties.workspace.description',
-    'properties.path.description',
-    'properties.oldText.description',
-    'properties.newText.description',
-    'properties.occurrence.description',
-    'properties.replacements.description',
-    'properties.content.description',
     'properties.file.description',
     'properties.expectedSha256.description',
     'properties.updateText.description',
-    'properties.envAction.description',
-    'properties.key.description',
-    'properties.value.description',
-    'properties.templatePath.description',
-    'properties.edits.description',
-    'properties.runChecks.description',
-    'properties.level.description',
-    'properties.returnDiff.description',
-    'properties.dryRun.description'
+    'properties.envAction.description'
   ]),
   relai_exec: new Set([
     'description',
     'properties.command.description',
     'properties.executable.description',
-    'properties.argv.description',
-    'properties.input.description',
-    'properties.cwd.description',
-    'properties.env.description',
-    'properties.timeoutMs.description',
-    'properties.maxOutputBytes.description'
+    'properties.input.description'
   ]),
   relai_process: new Set([
     'properties.command.description',
     'properties.executable.description',
-    'properties.argv.description',
     'properties.input.description'
   ])
 });
@@ -52,7 +31,7 @@ function compactPublicInputSchema(name, inputSchema, catalogTool) {
   // untyped argument object.
   const schema = importSafeInputSchema(inputSchema || {});
   const discoverySchema = name === 'relai_edit' ? hideInternalEditTransportFields(schema) : schema;
-  const compact = stripPublicDescriptions(discoverySchema, PUBLIC_INPUT_DESCRIPTIONS[name] || new Set());
+  const compact = stripDiscoveryValidationNoise(stripPublicDescriptions(discoverySchema, PUBLIC_INPUT_DESCRIPTIONS[name] || new Set()));
   const withInputForm = annotateInputForm(compact, inputSchema);
   if (name === 'relai_computer') return compactComputerInputSchema(withInputForm);
   return annotateActionGrammar(withInputForm, catalogTool);
@@ -72,7 +51,7 @@ function compactComputerInputSchema(schema) {
       ...schema.properties,
       action: {
         ...schema.properties.action,
-        description: 'Actions: status/displays; screenshot(displayId?); move/click/double_click/right_click(x,y,displayId?); drag(x,y,toX,toY,displayId?); scroll(direction,distance?,x?,y?,displayId?); type(text); key(key); hotkey(keys).'
+        description: 'Fields: screenshot(app!,displayId); move/click/double_click/right_click(app!,x!,y!,displayId); drag(app!,x!,y!,toX!,toY!,displayId); scroll(app!,direction!,distance,x,y,displayId); type(app!,text!); key(app!,key!); hotkey(app!,keys!); batch(app!,actions!); approve_app/revoke_app(app!). Browsers view-only; terminals/IDEs click-only.'
       }
     }
   };
@@ -105,6 +84,17 @@ function stripPublicDescriptions(value, retained, path = '') {
   return compact;
 }
 
+function stripDiscoveryValidationNoise(value) {
+  if (Array.isArray(value)) return value.map(stripDiscoveryValidationNoise);
+  if (!value || typeof value !== 'object') return value;
+  const compact = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (['minLength', 'maxLength', 'minimum', 'maximum'].includes(key)) continue;
+    compact[key] = stripDiscoveryValidationNoise(child);
+  }
+  return compact;
+}
+
 function annotateActionGrammar(schema, catalogTool) {
   const actions = (catalogTool?.actions || []).filter(entry => entry.action !== 'default');
   if (!actions.length || !schema?.properties?.action) return schema;
@@ -118,9 +108,8 @@ function annotateActionGrammar(schema, catalogTool) {
       action: {
         ...schema.properties.action,
         description: [
-          `Actions: ${actions.map(entry => entry.action).join(', ')}.`,
           actionGrammar,
-          formHints.length ? `Input forms: ${formHints.join('; ')}.` : ''
+          formHints.length ? `Forms: ${formHints.join('; ')}.` : ''
         ].filter(Boolean).join(' ')
       }
     }
@@ -154,50 +143,20 @@ function inputFormAlternatives(schema) {
 
 function compactActionGrammar(actions) {
   const fields = [...new Set(actions.flatMap(entry => entry.fields || []))].filter(field => field !== 'action');
-  const actionSpecific = new Map();
-
-  for (const field of fields) {
+  const actionSpecific = new Set(fields.filter(field => {
     const owners = actions.filter(entry => entry.fields?.includes(field));
     const requirements = owners.map(entry => entry.required?.includes(field) === true);
-    const constraints = owners.map(entry => fieldConstraintSignature(entry.inputSchema?.properties?.[field]));
-    const varyingConstraint = new Set(constraints).size > 1;
-    if (owners.length !== actions.length || new Set(requirements).size > 1 || varyingConstraint) {
-      actionSpecific.set(field, { varyingConstraint });
-    }
-  }
+    return owners.length !== actions.length || new Set(requirements).size > 1;
+  }));
 
   const parts = actions.map(entry => {
     const fieldsForAction = (entry.fields || [])
       .filter(field => actionSpecific.has(field))
-      .map(field => {
-        const required = entry.required?.includes(field) ? '!' : '';
-        const constraint = actionSpecific.get(field).varyingConstraint
-          ? fieldConstraintSignature(entry.inputSchema?.properties?.[field])
-          : '';
-        return `${field}${required}${constraint}`;
-      });
+      .map(field => `${field}${entry.required?.includes(field) ? '!' : ''}`);
     return fieldsForAction.length ? `${entry.action}(${fieldsForAction.join(',')})` : '';
   }).filter(Boolean);
 
-  return parts.length ? `Action-specific fields: ${parts.join('; ')}. ! = required.` : '';
-}
-
-function fieldConstraintSignature(schema) {
-  if (!schema || typeof schema !== 'object') return '';
-  if (schema.type === 'number' || schema.type === 'integer') {
-    if (Number.isFinite(schema.minimum) && Number.isFinite(schema.maximum)) return `[${schema.minimum}-${schema.maximum}]`;
-    if (Number.isFinite(schema.minimum)) return `[>=${schema.minimum}]`;
-    if (Number.isFinite(schema.maximum)) return `[<=${schema.maximum}]`;
-  }
-  if (schema.type === 'string') {
-    if (Number.isFinite(schema.minLength) && Number.isFinite(schema.maxLength)) return `[${schema.minLength}-${schema.maxLength} chars]`;
-    if (Number.isFinite(schema.maxLength)) return `[<=${schema.maxLength} chars]`;
-  }
-  if (schema.type === 'array') {
-    if (Number.isFinite(schema.minItems) && Number.isFinite(schema.maxItems)) return `[${schema.minItems}-${schema.maxItems} items]`;
-    if (Number.isFinite(schema.maxItems)) return `[<=${schema.maxItems} items]`;
-  }
-  return '';
+  return parts.length ? `Fields: ${parts.join('; ')}. ! required.` : '';
 }
 
 export { compactPublicInputSchema };

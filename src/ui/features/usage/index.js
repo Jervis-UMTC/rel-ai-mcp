@@ -33,7 +33,7 @@ export function analyticsPrivacyCopy(privacy = {}) {
       ? 'External developer telemetry is off. An OTLP endpoint is configured, but the telemetry switch is disabled, so Rel.AI does not export traces.'
       : 'External developer telemetry is off. No OTLP trace endpoint is active.';
   return {
-    retention: `${retention} Prompts, file paths, command output, action results, and raw errors are not stored in local analytics.`,
+    retention: `${retention} Aggregate action categories and work-type labels are stored locally. Prompts, task objectives, file paths, command output, action results, and raw errors are not stored in local analytics.`,
     telemetry: telemetryCopy
   };
 }

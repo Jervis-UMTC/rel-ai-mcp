@@ -19,7 +19,6 @@ import {
   sourcePathsFromWorkspace,
   workspaceConflict
 } from './model.js';
-import { recordRecentWorkspace, removeRecentWorkspace, renameRecentWorkspace } from './recents.js';
 
 const h = React.createElement;
 
@@ -176,8 +175,6 @@ export function ProjectFormModal({ configuredWorkspaces = [], mode = 'add', onCl
     clearDirty();
     invalidateCache();
     requestDashboardRefresh();
-    if (isEdit && originalAlias !== cleanAlias) renameRecentWorkspace(originalAlias, cleanAlias);
-    recordRecentWorkspace(cleanAlias);
     toast(`${isEdit ? 'Project updated' : 'Project added'}: ${cleanAlias}`, { variant: 'success' });
     onClose?.();
     if (getWorkspaceFilter() === originalAlias && originalAlias !== cleanAlias) setWorkspaceFilter(cleanAlias);
@@ -295,7 +292,6 @@ export function RepairProjectModal({ configuredWorkspaces = [], onClose, opener 
     clearDirty();
     invalidateCache();
     requestDashboardRefresh();
-    recordRecentWorkspace(workspace.alias);
     toast(`Project folder repaired: ${workspace.alias}`, { variant: 'success' });
     onClose?.();
     navigate('workspaces', { workspace: workspace.alias, focus: '1' });
@@ -515,7 +511,6 @@ async function deleteProject(alias, { forgetLocalData = true, onSuccess, setBusy
   const result = await postJson('/api/workspaces', { action: 'delete', alias, confirmDelete: true, forgetLocalData });
   setBusy?.(false);
   if (!result?.ok) { toast(`Could not delete project from Rel.AI: ${result?.error || 'unknown error'}`, { variant: 'error' }); return false; }
-  removeRecentWorkspace(alias);
   toast(`Project deleted from Rel.AI: ${alias}`, { variant: 'success' });
   onSuccess?.();
   if (getWorkspaceFilter() === alias) setWorkspaceFilter('');

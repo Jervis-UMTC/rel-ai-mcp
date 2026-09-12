@@ -29,7 +29,7 @@ export function confirmAction({
         confirmLabel: String(confirmLabel || 'Continue'),
         cancelLabel: String(cancelLabel || 'Cancel'),
         danger: danger === true,
-        onCancel: () => { void modal?.dismiss(); },
+        onCancel: () => settle(false),
         onConfirm: () => settle(true)
       },
       size: 'compact',

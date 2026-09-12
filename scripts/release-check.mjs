@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import semver from 'semver';
+import { normalizeTargetArch } from './platform-architecture.mjs';
 import { VERSION_JSON_FILES } from './release-surfaces.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -57,7 +58,7 @@ function assertTunnelClient() {
   // fetches and verifies the pinned build-time binary for the explicit target.
   const platform = String(process.env.REL_AI_TARGET_PLATFORM || '').trim();
   if (!platform) return;
-  const targetArch = normalizeArch(process.env.REL_AI_TARGET_ARCH || process.arch);
+  const targetArch = normalizeTargetArch(process.env.REL_AI_TARGET_ARCH || process.arch, { allowUnknown: true });
   const manifestPath = rel('vendor', 'tunnel-client', 'manifest.json');
   if (!fs.existsSync(manifestPath)) {
     fail(`OpenAI tunnel-client provenance manifest is missing: ${path.relative(root, manifestPath)}`);
@@ -79,13 +80,6 @@ function assertTunnelClient() {
   const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
   expectEqual(bytes.length, Number(spec.size), `bundled OpenAI tunnel-client size for ${platform}/${targetArch}`);
   expectEqual(sha256, String(spec.sha256).toLowerCase(), `bundled OpenAI tunnel-client SHA-256 for ${platform}/${targetArch}`);
-}
-
-function normalizeArch(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (['x64', 'amd64', 'x86_64'].includes(normalized)) return 'x64';
-  if (['arm64', 'aarch64'].includes(normalized)) return 'arm64';
-  return normalized;
 }
 
 const packageJson = readJson('package.json');

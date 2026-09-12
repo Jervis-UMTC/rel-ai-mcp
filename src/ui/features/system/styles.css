@@ -16,7 +16,7 @@
 .chatgpt-connector-values dd { min-width: 0; margin: 0 0 7px; overflow-wrap: anywhere; color: var(--ui-text-primary); font-size: 13px; font-weight: 700; }
 .chatgpt-connector-note { color: var(--ui-text-secondary); font-size: 13px; line-height: 1.5; }
 .chatgpt-connector-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.chatgpt-connector-actions button span { display: block; margin-top: 2px; font-size: 11px; font-weight: 600; opacity: .76; }
+.chatgpt-connector-actions button span { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; line-height: 1.5; }
 .chatgpt-connector-note { margin: 0; }
 .chatgpt-first-prompt { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--ui-border-default); border-radius: var(--radius-md); background: var(--ui-surface-secondary); }
 .chatgpt-first-prompt span { color: var(--ui-text-secondary); font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
@@ -39,10 +39,10 @@
 .connector-summary { @apply mt-1 text-[12px]; color: var(--ui-text-secondary); }
 .connection-field { @apply flex flex-col gap-2; }
 .connection-endpoint-row { @apply flex min-w-0 gap-2; }
-.connector-endpoint { @apply flex min-h-[38px] min-w-0 flex-1 items-center overflow-x-auto rounded-lg px-3 text-[11px]; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-default); }
+.connector-endpoint { @apply flex min-h-11 min-w-0 flex-1 items-center overflow-x-auto rounded-lg px-3 text-[12px] leading-6; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-default); }
 .connection-layer-heading { @apply mb-2 flex items-end justify-between gap-3; }
 .connection-layer-heading h3 { @apply text-[13px]; }
-.connection-layer-heading p { @apply text-[11px]; color: var(--ui-text-secondary); }
+.connection-layer-heading p { @apply text-[12px] leading-5; color: var(--ui-text-secondary); max-width: 75ch; }
 .connection-path { @apply grid overflow-hidden rounded-xl; grid-template-columns: repeat(4,minmax(0,1fr)); background: var(--ui-surface-primary); border: 1px solid var(--ui-border-default); }
 .connection-path-step { @apply relative min-h-36 border-r p-4 last:border-r-0; border-color: var(--ui-border-default); }
 .connection-path-step::after { content: ""; @apply absolute right-[-6px] top-[34px] z-10 size-3 rotate-45; background: var(--ui-surface-primary); border-right: 1px solid var(--ui-border-default); border-top: 1px solid var(--ui-border-default); }
@@ -54,7 +54,7 @@
 .connection-path-step.warn .connection-layer-dot { background: var(--ui-status-warning-foreground); }
 .connection-path-step.bad .connection-layer-dot { background: var(--ui-status-danger-foreground); }
 .connection-layer-card-head h4 { @apply text-[12px]; }
-.connection-layer-state { @apply mt-1 block text-[11px] font-semibold; color: var(--ui-text-secondary); }
+.connection-layer-state { @apply mt-1 block text-[12px] font-semibold; color: var(--ui-text-secondary); }
 .connection-layer-state.ok { color: var(--ui-status-success-foreground); }
 .connection-layer-state.working { color: var(--ui-status-info-foreground); }
 .connection-layer-state.warn { color: var(--ui-status-warning-foreground); }

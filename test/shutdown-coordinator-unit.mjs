@@ -25,6 +25,12 @@ assert.equal(result.clean, true);
 assert.equal(coordinator.isPrepared(), true);
 assert.deepEqual(calls, ['updater', 'activity', 'windows', 'service', 'telemetry', 'marker', 'clean', 'logs']);
 
+coordinator.reset();
+assert.equal(coordinator.isPrepared(), false, 'a reset coordinator must allow a fresh shutdown preparation after a failed update');
+const retried = await coordinator.prepare('update-retry');
+assert.equal(retried.clean, true);
+assert.equal(coordinator.isPrepared(), true);
+
 const failureCalls = [];
 const failed = createShutdownCoordinator({
   stopService: async () => ({ cleanup: { clean: false } }),

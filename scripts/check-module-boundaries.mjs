@@ -7,6 +7,7 @@ const IMPORT_PATTERN = /\b(?:import|export)\s+(?:type\s+)?(?:[^'";]*?\s+from\s+)
 const TYPED_BOUNDARY_PREFIXES = ['src/contracts/', 'src/core/', 'src/http/'];
 const UI_SHARED_PURE_MODULES = new Set([
   'src/analyticsFailureCategory.js',
+  'src/taskActivityPresentation.js',
   'src/taskEvents.js',
   'src/taskSemanticProgress.js',
   'src/taskState.js'

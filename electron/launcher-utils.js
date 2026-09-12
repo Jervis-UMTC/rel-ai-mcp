@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { importResourceModule } from './resource-path.js';
 
 const connection = await importResourceModule('src/connectionProfile.js');
@@ -30,6 +32,45 @@ function hasExistingConfig() {
   }
 }
 
+function hasPriorConfigEvidence() {
+  // Manual full-installer updates can arrive with a partially preserved state
+  // dir (elevated installer home, interrupted migration, strict validation on
+  // an older profile). Any leftover connection artifact means this machine has
+  // seen Rel.AI before, so it must never be treated as a brand-new install.
+  try {
+    const profile = connection.readConnectionProfile();
+    const env = connection.readLaunchEnv();
+    if (profile && typeof profile === 'object' && Object.keys(profile).length > 0) return true;
+    if (env && typeof env === 'object' && Object.keys(env).length > 0) return true;
+  } catch {
+    return true;
+  }
+  try {
+    const stateDir = typeof connection.stateDir === 'function' ? String(connection.stateDir() || '') : '';
+    if (!stateDir) return false;
+    for (const name of ['connection.json', 'connection.json.bak', '.env', '.env.bak']) {
+      try {
+        if (fs.existsSync(path.join(stateDir, name))) return true;
+      } catch {}
+    }
+  } catch {}
+  return false;
+}
+
+function isReturningUserLifecycle(status = {}) {
+  if (!status || typeof status !== 'object') return false;
+  if (status.updated === true) return true;
+  if (String(status.previousVersion || '').trim()) return true;
+  if (status.firstLaunch === false) return true;
+  if (Number(status.launchCount || 0) > 1) return true;
+  return false;
+}
+
+function isManualUpdateInstall({ lifecycleStatus = {}, hasConfig = false } = {}) {
+  if (hasConfig) return false;
+  return isReturningUserLifecycle(lifecycleStatus) || hasPriorConfigEvidence();
+}
+
 function readGuiConfig() {
   const profile = connection.readConnectionProfile();
   const env = connection.readLaunchEnv();
@@ -40,4 +81,4 @@ function readGuiConfig() {
   };
 }
 
-export { normalizePort, normalizeTunnelId, hasExistingConfig, readGuiConfig };
+export { normalizePort, normalizeTunnelId, hasExistingConfig, hasPriorConfigEvidence, isManualUpdateInstall, isReturningUserLifecycle, readGuiConfig };

@@ -114,6 +114,7 @@
     "benchmark:internal-parallelism": "node scripts/benchmark-internal-parallelism.mjs",
     "benchmark:repository-index": "node scripts/repository-intelligence-benchmark.mjs --files 100000 --json",
     "benchmark:tool-orchestration": "node scripts/benchmark-exec-phases.mjs",
+    "benchmark:computer": "node scripts/computer-control-benchmark.mjs",
     "benchmark:mcp-startup": "node test/mcp-startup-budget-unit.mjs",
     "verify:packaged": "node scripts/verify-packaged-wrapper.mjs",
     "verify:updater-artifacts": "node scripts/verify-updater-artifacts.mjs",
@@ -163,6 +164,7 @@
   "devDependencies": {
     "@electron/asar": "^4.3.0",
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/core": "2.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
@@ -183,7 +185,6 @@
   "dependencies": {
     "@hono/node-server": "2.1.1",
     "@midscene/computer": "1.12.5",
-    "@modelcontextprotocol/core": "2.0.0",
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@opentelemetry/api": "^1.9.1",
@@ -202,6 +203,7 @@
     "playwright-core": "^1.63.0",
     "pyright": "1.1.413",
     "semver": "^7.8.5",
+    "sharp": "0.35.4",
     "simple-git": "^3.36.0",
     "tree-sitter-wasms": "^0.1.13",
     "typescript-language-server": "6.0.0",
@@ -222,7 +224,6 @@
   "bundleDependencies": [
     "@hono/node-server",
     "@midscene/computer",
-    "@modelcontextprotocol/core",
     "@modelcontextprotocol/server",
     "@opentelemetry/api",
     "@opentelemetry/exporter-trace-otlp-http",
@@ -239,6 +240,7 @@
     "playwright-core",
     "pyright",
     "semver",
+    "sharp",
     "simple-git",
     "tree-sitter-wasms",
     "typescript-language-server",

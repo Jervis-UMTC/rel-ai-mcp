@@ -69,6 +69,10 @@ function importBindingMap(imports) {
   return result;
 }
 
+function projectImports(imports, provider, confidence) {
+  return (imports || []).map(({ bindings: _bindings, ...item }) => ({ ...item, provider, confidence }));
+}
+
 function boundTarget(raw, bindings) {
   const rawText = String(raw || '').trim();
   const qualified = rawText.match(/^([A-Za-z_$][A-Za-z0-9_$]*)[.:]{1,2}([A-Za-z_$][A-Za-z0-9_$]*)/);
@@ -136,6 +140,6 @@ function stripQuotes(value) { return String(value || '').trim().replace(/^['"`]|
 
 export {
   dedupeRelations, descendantsOfTypes, endpointRelation, fieldNode, followingSymbolForNode, httpKey,
-  importBindingMap, namedChildren, nodeText, nodesOfTypes, relation, simpleName,
+  importBindingMap, namedChildren, nodeText, nodesOfTypes, projectImports, relation, simpleName,
   stripQuotes, symbolForNode
 };

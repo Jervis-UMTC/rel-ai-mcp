@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { rankBootstrapGroups } from '../src/context/taskContinuity.js';
-import { getTaskHistoryDir, readRelevantTaskEpisodes } from '../src/taskHistoryStore.ts';
+import { getTaskHistoryDir, readCrossWorkspaceTaskEpisodes, readRelevantTaskEpisodes } from '../src/taskHistoryStore.ts';
 import { writeSession } from '../src/taskHistoryStorage.ts';
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-task-retrieval-quality-'));
@@ -96,6 +96,23 @@ try {
     changedFiles: ['src/ui/features/usage/styles.css'],
     updatedAt: new Date(base + 200_000).toISOString()
   }));
+  writeSession(historyDir, completed('portable-secondary-noise', {
+    workspace: 'portfolio',
+    title: 'Refresh portfolio colors and button contrast',
+    objective: 'Apply a new portfolio color palette without changing layout',
+    resultSummary: 'Updated the portfolio appearance. A handoff also mentioned Rel.AI MCP model context skill behavior from unrelated work.',
+    contextSummary: 'Unrelated notes referenced Rel.AI MCP model context optimization.',
+    changedFiles: ['src/styles/theme.css'],
+    updatedAt: new Date(base + 201_000).toISOString()
+  }));
+  writeSession(historyDir, completed('portable-primary-signal', {
+    workspace: 'other-runtime',
+    title: 'Repair UNIQUE_PORTABLE_SENTINEL connector timeout',
+    objective: 'Fix UNIQUE_PORTABLE_SENTINEL connector timeout handling',
+    resultSummary: 'Fixed the portable connector timeout failure.',
+    changedFiles: ['src/connector/timeout.js'],
+    updatedAt: new Date(base + 202_000).toISOString()
+  }));
 
   const cases = [
     {
@@ -168,6 +185,13 @@ try {
 
   const generic = readRelevantTaskEpisodes(config, 'repo', 'update analytics styling', { limit: 3 });
   assert.equal(generic.some(item => /overview analytics/i.test(item.goal || '')), false, 'one shared domain word must not create a false positive');
+
+  const portableNoise = readCrossWorkspaceTaskEpisodes(config, 'repo', 'Optimize Rel.AI MCP model context skill behavior', { limit: 4 });
+  assert.equal(portableNoise.some(item => /portfolio color palette/i.test(item.goal || '')), false,
+    'secondary handoff/context vocabulary must not turn unrelated cross-workspace work into portable task evidence');
+  const portableSignal = readCrossWorkspaceTaskEpisodes(config, 'repo', 'Investigate UNIQUE_PORTABLE_SENTINEL connector timeout', { limit: 4 });
+  assert.match(portableSignal[0]?.goal || '', /UNIQUE_PORTABLE_SENTINEL/i,
+    'distinctive primary cross-workspace evidence must remain portable');
 
   for (const unrelatedQuery of [
     'Rename analytics tab label',

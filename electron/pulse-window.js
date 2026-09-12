@@ -4,7 +4,7 @@ import { projectPulseStatus } from './pulse-state.js';
 const PULSE_WIDTH = 286;
 const PULSE_HEIGHT = 48;
 const PULSE_EXPANDED_WIDTH = 364;
-const PULSE_EXPANDED_HEIGHT = 288;
+const PULSE_EXPANDED_HEIGHT = 384;
 const PULSE_MARGIN = 18;
 
 function createPulseWindowManager(options = {}) {

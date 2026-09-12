@@ -95,7 +95,7 @@ try {
     await flushLocalAnalytics({ stateDir: legacyStateDir });
     assert.equal(fs.existsSync(analyticsDir), false, 'legacy analytics JSON must be removed after SQLite migration');
     const migratedDocument = withStateDatabase({ stateDir: legacyStateDir }, db => JSON.parse(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08').payload));
-    assert.equal(migratedDocument.schemaVersion, 3);
+    assert.equal(migratedDocument.schemaVersion, 4);
     assert.equal(migratedDocument.totals.reliabilityCalls, 1);
   } finally {
     fs.rmSync(legacyStateDir, { recursive: true, force: true });
@@ -131,12 +131,49 @@ try {
     assert.equal(migrated.totals.infrastructureFailures, 0, 'schema-v2 internal-error counts must not be relabeled as confirmed failures');
     recordLocalToolOutcome({ stateDir: previousStateDir }, { tool: 'relai_read', workspace: 'repo', ok: true, durationMs: 5, at: '2026-08-15T02:30:00Z' });
     const persistedDocument = withStateDatabase({ stateDir: previousStateDir }, db => JSON.parse(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08').payload));
-    assert.equal(persistedDocument.schemaVersion, 3);
+    assert.equal(persistedDocument.schemaVersion, 4);
     assert.equal(persistedDocument.totals.successes, 10);
     assert.equal(persistedDocument.totals.failures, 1);
     assert.equal(persistedDocument.totals.reliabilityCalls, 1);
   } finally {
     fs.rmSync(previousStateDir, { recursive: true, force: true });
+  }
+
+  const v3StateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-reliability-v3-'));
+  try {
+    const v3Aggregate = {
+      requests: 10, toolCalls: 10, successes: 9, failures: 1, executionMs: 100,
+      reliabilityCalls: 10, reliableCalls: 9, infrastructureFailures: 0,
+      operationFailures: 1, recoverableFailures: 0, cancellations: 0
+    };
+    const v3Document = {
+      schemaVersion: 3,
+      month: '2026-08',
+      totals: v3Aggregate,
+      tools: [], workspaces: [], workspaceTools: [],
+      failureCategories: [{ category: 'process', failures: 1 }], workspaceFailureCategories: [],
+      performancePhases: {},
+      hours: [{
+        hour: '2026-08-15T02', ...v3Aggregate,
+        tools: [], workspaces: [], workspaceTools: [],
+        failureCategories: [{ category: 'process', failures: 1 }], workspaceFailureCategories: [], performancePhases: {}
+      }]
+    };
+    withStateDatabase({ stateDir: v3StateDir }, db => {
+      db.prepare('INSERT INTO analytics_months(month,updated_at_ms,payload) VALUES(?,?,?)').run('2026-08', Date.now(), JSON.stringify(v3Document));
+    });
+    const migrated = readLocalUsageSnapshot({ stateDir: v3StateDir }, '2026-08');
+    assert.equal(migrated.totals.reliabilityCalls, 10, 'schema-v3 reliability counters must survive the v4 migration');
+    assert.equal(migrated.totals.reliableCalls, 9);
+    assert.equal(migrated.totals.operationFailures, 1);
+    recordLocalToolOutcome({ stateDir: v3StateDir }, { tool: 'relai_read', operationName: 'read', taskIntent: 'investigation', workspace: 'repo', ok: true, durationMs: 5, at: '2026-08-15T02:30:00Z' });
+    const persistedDocument = withStateDatabase({ stateDir: v3StateDir }, db => JSON.parse(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08').payload));
+    assert.equal(persistedDocument.schemaVersion, 4);
+    assert.equal(persistedDocument.totals.reliabilityCalls, 11);
+    assert.equal(persistedDocument.totals.reliableCalls, 10);
+    assert.equal(persistedDocument.activityMatrix.find(row => row.intent === 'investigation' && row.useCase === 'explore')?.toolCalls, 1);
+  } finally {
+    fs.rmSync(v3StateDir, { recursive: true, force: true });
   }
 
   const metrics = analyticsMetrics(scope, analyticsRangeScope([], bounds));

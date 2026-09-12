@@ -1,4 +1,5 @@
 import React, { memo, useMemo, useState } from 'react';
+import { Icon } from '../../components/icons.js';
 import { postJson, requestDashboardRefresh } from '../../api.js';
 import { processListView } from './index.js';
 
@@ -122,8 +123,8 @@ function StatusPill({ label, tone = '' }) {
 
 function EmptyProcesses() {
   return h('div', { className: 'empty-state' },
-    h('span', { className: 'empty-state-icon', 'aria-hidden': 'true' }, '›_'),
-    h('strong', null, 'No running commands'),
-    h('p', null, 'Servers, watchers, debuggers, and other long-running commands will appear here.')
+    h('span', { className: 'empty-state-icon', 'aria-hidden': 'true' }, h(Icon, { name: 'processes', size: 28 })),
+    h('strong', { className: 'empty-state-title' }, 'No running commands'),
+    h('p', { className: 'empty-state-copy' }, 'Servers, watchers, debuggers, and other long-running commands will appear here.')
   );
 }

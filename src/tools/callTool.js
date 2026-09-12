@@ -18,7 +18,8 @@ import { getToolNames, isToolCallable } from './schema.js';
 import { applyCautionAudit, buildExtraAudit, invalidateSessionCacheForCall } from './session.js';
 import { assertKnownTask, assertTaskWorkspaceOwnership, findReusableTask, isTerminalTaskReference, taskAuditContext, withTaskIdentity } from './task.js';
 import { deterministicActionId } from '../workflow/contracts.js';
-import { recordLocalToolOutcome } from '../localAnalytics.js';
+import { classifyTaskIntent } from '../workflow/intent.js';
+import { recordLocalTaskCompletion, recordLocalToolOutcome } from '../localAnalytics.js';
 import { buildWorkflowEvidenceReceipt } from '../workflow/evidence.js';
 import { invalidateRepositoryTopology } from '../workflow/topology.js';
 import { OPERATION_IDS as OP } from './operationIds.js';
@@ -51,6 +52,7 @@ async function callToolObserved(name, args = {}, context = {}) {
   let sessionStart;
   let resolvedAction = '';
   let effectivePrincipal = null;
+  let completedTaskAnalytics = null;
   try {
     if (!isToolCallable(name, config)) {
       throw new Error(`Unknown tool '${name}'. Available tools: ${getToolNames(config).join(', ')}. Removed direct operation names are not callable; restart or reconnect if discovery is stale.`);
@@ -232,6 +234,17 @@ async function callToolObserved(name, args = {}, context = {}) {
         { persist: true }
       );
     }
+    if (
+      valueOk
+      && value?.completionKnown === true
+      && value?.duplicate !== true
+      && (operationName === OP.WORK_FINISH || operationName === OP.VALIDATE_CHECKS)
+    ) {
+      completedTaskAnalytics = {
+        workspace: workspaceResolution?.alias || effectiveArgs?.workspace || knownTask?.workspace || '',
+        taskIntent: knownTask?.intent || requestTaskContext?.session?.intent || 'auto'
+      };
+    }
     const responseValue = connector && resolved.compact
       ? measurePerformancePhaseSync('serialization', () => serializeConnectorResult({
         publicName: name,
@@ -306,6 +319,7 @@ async function callToolObserved(name, args = {}, context = {}) {
       tool: name,
       operationName,
       workspace: workspaceResolution?.alias || knownTask?.workspace || '',
+      taskIntent: knownTask?.intent || (operationName === OP.WORK_BEGIN ? classifyTaskIntent(effectiveArgs?.objective) : 'untracked'),
       ok: activityResult.ok === true,
       durationMs: Date.now() - started,
       timings: performanceBreakdownSnapshot(),
@@ -313,6 +327,9 @@ async function callToolObserved(name, args = {}, context = {}) {
       errorMessage: activityResult.error || ''
     });
     finishActivity?.(activityResult);
+    if (activityResult.ok === true && completedTaskAnalytics) {
+      recordLocalTaskCompletion(config, completedTaskAnalytics);
+    }
   }
 }
 

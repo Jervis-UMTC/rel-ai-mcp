@@ -58,4 +58,3 @@ export const MCP_RESULT_TYPE = Object.freeze({
   COMPLETE: 'complete',
   TASK: 'task'
 } as const);
-

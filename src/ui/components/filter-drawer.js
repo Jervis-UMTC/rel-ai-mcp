@@ -53,13 +53,13 @@ function FilterDrawerContent({ value, resetValue, renderFields, onApply }) {
     }
   };
 
-  return h('form', { className: 'filter-drawer-form', onSubmit: submit },
+  return h('form', { className: 'filter-drawer-form', onSubmit: submit, 'aria-busy': busy ? 'true' : 'false' },
     h('div', { className: 'filter-drawer-fields' }, fields.map((field, index) => h(FilterField, {
       field,
       key: field.key || `${field.type}-${field.label}-${index}`,
       onChange: value => changeField(field, value)
     }))),
-    h('div', { className: 'filter-drawer-footer' },
+    h('div', { className: 'filter-drawer-footer', role: 'status', 'aria-live': 'polite' },
       h('div', { className: 'filter-drawer-secondary-actions' },
         h('button', { type: 'button', className: 'secondary', disabled: busy, onClick: () => setDraft(clone(resetValue)) }, 'Reset'),
         h('button', { type: 'button', className: 'secondary', disabled: busy, onClick: closeDrawer }, 'Cancel')
@@ -70,8 +70,10 @@ function FilterDrawerContent({ value, resetValue, renderFields, onApply }) {
 }
 
 function FilterField({ field, onChange }) {
+  const radioId = React.useId();
   if (field.type === 'radio') {
-    const name = `filter-${String(field.label || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    const slug = `filter-${String(field.key || field.label || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    const name = `${slug}-${radioId.replace(/[^a-z0-9]+/gi, '')}`;
     return h('fieldset', { className: 'filter-field filter-radio-field' },
       h('legend', null, field.label),
       h('div', { className: 'filter-radio-options' }, (field.options || []).map(option => h('label', { key: option.value },
@@ -86,12 +88,12 @@ function FilterField({ field, onChange }) {
       )))
     );
   }
-  return h('label', { className: 'filter-field' },
+  return h('label', { className: 'filter-field', htmlFor: `filter-select-${field.key || 'field'}` },
     h('span', null, field.label),
     h('select', {
+      id: `filter-select-${field.key || 'field'}`,
       disabled: field.disabled === true,
       value: field.value,
-      autoFocus: field.autoFocus === true,
       onChange: event => onChange(event.currentTarget.value)
     }, (field.options || []).map(option => h('option', { key: option.value, value: option.value }, option.label))),
     field.help ? h('small', null, field.help) : null

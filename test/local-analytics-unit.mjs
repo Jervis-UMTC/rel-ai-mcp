@@ -2,16 +2,17 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { LOCAL_ANALYTICS_RETENTION_DAYS, clearLocalAnalytics, flushLocalAnalytics, pruneLocalAnalytics, recordLocalToolOutcome, readLocalUsageSnapshot, readLocalUsageSnapshotAsync } from '../src/localAnalytics.js';
+import { LOCAL_ANALYTICS_RETENTION_DAYS, clearLocalAnalytics, flushLocalAnalytics, pruneLocalAnalytics, recordLocalTaskCompletion, recordLocalToolOutcome, readLocalUsageSnapshot, readLocalUsageSnapshotAsync } from '../src/localAnalytics.js';
 import { failureCategoryFromCode } from '../src/analyticsFailureCategory.js';
 import { stateDatabasePath, withStateDatabase } from '../src/stateDatabase.ts';
 
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-local-analytics-'));
 const config = { stateDir };
 try {
-  assert.equal(recordLocalToolOutcome(config, { tool: 'relai_inspect', workspace: 'repo', ok: true, durationMs: 100, at: '2026-08-08T10:15:00Z', prompt: 'SECRET_PROMPT', path: 'C:/SECRET_PATH', resultBody: 'SECRET_RESULT' }), true);
-  assert.equal(recordLocalToolOutcome(config, { tool: 'relai_edit', workspace: 'repo', ok: false, durationMs: 300, at: '2026-08-08T11:15:00Z', errorCode: 'SENSITIVE_PATH_RESTRICTED', error: 'SECRET_ERROR_MESSAGE', command: 'SECRET_COMMAND' }), true);
-  assert.equal(recordLocalToolOutcome(config, { tool: 'relai_inspect', workspace: 'other', ok: true, durationMs: 50, at: '2026-08-08T11:45:00Z' }), true);
+  assert.equal(recordLocalToolOutcome(config, { tool: 'relai_inspect', operationName: 'inspect', taskIntent: 'bugfix', workspace: 'repo', ok: true, durationMs: 100, at: '2026-08-08T10:15:00Z', prompt: 'SECRET_PROMPT', taskObjective: 'SECRET_OBJECTIVE', path: 'C:/SECRET_PATH', resultBody: 'SECRET_RESULT' }), true);
+  assert.equal(recordLocalToolOutcome(config, { tool: 'relai_edit', operationName: 'edit', taskIntent: 'bugfix', workspace: 'repo', ok: false, durationMs: 300, at: '2026-08-08T11:15:00Z', errorCode: 'SENSITIVE_PATH_RESTRICTED', error: 'SECRET_ERROR_MESSAGE', command: 'SECRET_COMMAND' }), true);
+  assert.equal(recordLocalToolOutcome(config, { tool: 'relai_inspect', operationName: 'inspect', taskIntent: 'investigation', workspace: 'other', ok: true, durationMs: 50, at: '2026-08-08T11:45:00Z' }), true);
+  assert.equal(recordLocalTaskCompletion(config, { workspace: 'repo', taskIntent: 'bugfix', at: '2026-08-08T11:30:00Z' }), true);
 
   const snapshot = readLocalUsageSnapshot(config, '2026-08');
   assert.deepEqual(snapshot.privacy, {
@@ -32,6 +33,13 @@ try {
   assert.equal(snapshot.workspaces.find(row => row.workspace === 'repo')?.toolCalls, 2);
   assert.equal(snapshot.workspaceTools.find(row => row.workspace === 'repo' && row.tool === 'relai_edit')?.failures, 1);
   assert.equal(snapshot.workspaceSeries.filter(row => row.workspace === 'repo').reduce((sum, row) => sum + row.toolCalls, 0), 2);
+  assert.equal(snapshot.activityMatrix.find(row => row.intent === 'bugfix' && row.useCase === 'explore')?.toolCalls, 1);
+  assert.equal(snapshot.activityMatrix.find(row => row.intent === 'bugfix' && row.useCase === 'edit')?.failures, 1);
+  assert.equal(snapshot.workspaceActivityMatrix.find(row => row.workspace === 'repo' && row.intent === 'bugfix' && row.useCase === 'edit')?.toolCalls, 1);
+  assert.deepEqual(snapshot.taskIntents, [{ intent: 'bugfix', tasks: 1 }]);
+  assert.deepEqual(snapshot.workspaceTaskIntents, [{ workspace: 'repo', intent: 'bugfix', tasks: 1 }]);
+  assert.equal(snapshot.activityMatrixSeries.filter(row => row.intent === 'bugfix').reduce((sum, row) => sum + row.toolCalls, 0), 2);
+  assert.deepEqual(snapshot.taskIntentSeries, [{ hour: '2026-08-08T11', intent: 'bugfix', tasks: 1 }]);
   assert.equal('source' in snapshot, false, 'local-only analytics must not retain a cloud/local source discriminator');
   assert.equal('devices' in snapshot, false, 'single-device analytics must not expose a redundant device dimension');
   assert.equal('requestBytes' in snapshot.totals, false, 'unused byte counters must not remain in the analytics projection');
@@ -45,7 +53,7 @@ try {
   assert.equal(fs.existsSync(stateDatabasePath(config)), true, 'local analytics must use the shared SQLite state database');
   assert.equal(fs.existsSync(path.join(stateDir, 'analytics', 'local', '2026-08.json')), false, 'canonical analytics must not create monthly JSON files');
   const persisted = withStateDatabase(config, db => String(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08')?.payload || ''));
-  for (const secret of ['SECRET_PROMPT', 'SECRET_PATH', 'SECRET_RESULT', 'SECRET_COMMAND', 'SECRET_ERROR_MESSAGE', 'SENSITIVE_PATH_RESTRICTED']) assert.equal(persisted.includes(secret), false, `local analytics must not persist ${secret}`);
+  for (const secret of ['SECRET_PROMPT', 'SECRET_OBJECTIVE', 'SECRET_PATH', 'SECRET_RESULT', 'SECRET_COMMAND', 'SECRET_ERROR_MESSAGE', 'SENSITIVE_PATH_RESTRICTED']) assert.equal(persisted.includes(secret), false, `local analytics must not persist ${secret}`);
 
   const external = JSON.parse(persisted);
   external.totals.requests = 9;

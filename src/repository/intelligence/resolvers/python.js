@@ -1,4 +1,4 @@
-import { dedupeRelations, fieldNode, importBindingMap, namedChildren, nodeText, nodesOfTypes, relation, simpleName, symbolForNode } from './common.js';
+import { dedupeRelations, fieldNode, importBindingMap, namedChildren, nodeText, nodesOfTypes, projectImports, relation, simpleName, symbolForNode } from './common.js';
 import { frameworkRelations } from './frameworks.js';
 
 const PROVIDER = 'resolver-python-v2';
@@ -14,7 +14,7 @@ const pythonResolver = Object.freeze({ id: PROVIDER, capabilities: CAPABILITIES,
     ...callRelations(root, symbols, bindings),
     ...frameworkRelations(language, { root, symbols, provider: PROVIDER })
   ];
-  return { provider: PROVIDER, capabilities: CAPABILITIES, imports: enrichImports(imports), relations: dedupeRelations(relations) };
+  return { provider: PROVIDER, capabilities: CAPABILITIES, imports: projectImports(imports, PROVIDER, 0.97), relations: dedupeRelations(relations) };
 }});
 
 function parseImports(root) {
@@ -90,6 +90,5 @@ function pythonSpecifier(value) {
   const raw = String(value || '').trim(); const dots = raw.match(/^\.+/)?.[0].length || 0; const body = raw.slice(dots).replaceAll('.', '/');
   if (!dots) return body; return `${dots === 1 ? './' : '../'.repeat(dots - 1)}${body}`.replace(/\/$/, '');
 }
-function enrichImports(imports) { return imports.map(({ bindings: _bindings, ...item }) => ({ ...item, provider: PROVIDER, confidence: 0.97 })); }
 
 export { pythonResolver };

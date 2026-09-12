@@ -43,6 +43,20 @@ try {
   assert.equal(directories.length, logFiles.length, 'spill pruning must remove empty per-task directories');
   assert.equal(directories.includes('legacy-empty-task'), false, 'spill pruning must remove legacy empty task directories');
 
+  const activeWriters = Array.from({ length: 101 }, (_, index) => createOutputSpillWriter(config, `active-${index}`));
+  for (const [index, writer] of activeWriters.entries()) writer.start(`active-spill-${index}`);
+  const activeResults = activeWriters.map(writer => writer.finish());
+  assert.equal(activeResults.filter(Boolean).length, 100, 'the file cap must refuse a new spill rather than unlink an active writer');
+  const firstActive = activeResults[0];
+  assert.ok(firstActive?.outputRef);
+  const firstActiveSpill = readOutputSpill(config, 'active-0', firstActive.outputRef);
+  assert.equal(fs.readFileSync(firstActiveSpill.file, 'utf8'), 'active-spill-0', 'an active spill must survive pruning by later writers');
+  const activeLogCount = fs.readdirSync(spillRoot, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .flatMap(entry => fs.readdirSync(path.join(spillRoot, entry.name)).filter(name => name.endsWith('.log')))
+    .length;
+  assert.equal(activeLogCount, 100, 'active spill protection must preserve the global file-count bound');
+
   const concurrentWriters = Array.from({ length: 9 }, (_, index) => createOutputSpillWriter(config, `concurrent-${index}`));
   for (const writer of concurrentWriters) writer.start();
   const block = Buffer.alloc(32 * 1024 * 1024, 0x61);

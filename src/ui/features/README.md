@@ -6,7 +6,7 @@ The dashboard uses a feature-first React structure. Each user-facing capability 
 
 - `home/` owns the Overview experience and its presentation model.
 - `sessions/` owns Tasks/Sessions history, live task presentation, and inspector behavior.
-- `workspaces/` owns Projects/Workspaces cards, forms, repair/delete flows, recents, and project-specific navigation.
+- `workspaces/` owns Projects/Workspaces cards, forms, repair/delete flows, and project-specific navigation.
 - `activity/` owns activity history, filters, stable event-row presentation, and its inspector.
 - `code/` owns the read-only Changes/Monaco route.
 - `processes/` owns managed-process presentation and controls.

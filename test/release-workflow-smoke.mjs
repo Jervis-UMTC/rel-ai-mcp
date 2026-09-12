@@ -34,6 +34,7 @@ function copyFixture() {
     'src/packageMetadata.js',
     'src/version.js',
     'scripts/release-check.mjs',
+    'scripts/platform-architecture.mjs',
     'scripts/release-bump.mjs',
     'scripts/release-surfaces.mjs',
     'scripts/check-generated.mjs',
@@ -53,6 +54,11 @@ function copyFixture() {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.copyFileSync(source, destination);
   }
+
+  const semverSource = path.join(root, 'node_modules', 'semver');
+  const semverDestination = path.join(tmp, 'node_modules', 'semver');
+  fs.mkdirSync(path.dirname(semverDestination), { recursive: true });
+  fs.cpSync(semverSource, semverDestination, { recursive: true });
 
   const seedPath = path.join(tmp, 'vendor', 'tunnel-client', 'win32', 'tunnel-client.exe');
   const seedBytes = Buffer.alloc(5 * 1024 * 1024);
@@ -262,7 +268,7 @@ function verifyWorkflowContracts() {
     /CSC_IDENTITY_AUTO_DISCOVERY:\s*'false'/,
     /verify-macos-release\.mjs --unpacked/,
     /System Settings → Privacy & Security → Open Anyway/,
-    /npm run test:observability-browser/,
+    /npm run test:frontend/,
     /npm run test:release/
   ]) assert.match(workflow, pattern);
 

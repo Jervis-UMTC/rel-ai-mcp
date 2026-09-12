@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import { throwIfAborted, withAbort, withAbortResource } from '../abortablePromise.ts';
 import { readConfig } from '../config.js';
 import { taskError } from '../toolActivity.js';
 import {
@@ -11,6 +12,7 @@ import {
   type AutomationWorkspace
 } from '../computer/automationAttribution.ts';
 import { normalizeViewport, timeoutFor } from '../computer/webPolicy.ts';
+import { normalizeBrowserSnapshotDetail } from './layoutSnapshot.js';
 import {
   downloadBrowserFile,
   uploadAuthorizedBrowserFile,
@@ -35,6 +37,7 @@ type BrowserArgs = Readonly<Record<string, unknown> & StructuredInteractionArgs 
   headless?: unknown;
   ignoreHTTPSErrors?: unknown;
   timeoutMs?: unknown;
+  detail?: unknown;
   fullPage?: unknown;
   path?: unknown;
   profile?: unknown;
@@ -124,7 +127,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     context: BrowserContext = {},
     options: BrowserOperationOptions = {}
   ): Promise<Record<string, unknown>> {
-    throwIfAborted(options.signal);
+    throwIfAborted(options.signal, browserCancellationError);
     const attribution = createAutomationAttribution(workspace, args, context);
     const taskId = attribution.taskId;
     const existing = taskId ? [...sessions.values()].find(record =>
@@ -166,7 +169,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
         ignoreHTTPSErrors: args.ignoreHTTPSErrors === true,
         ...(options.signal ? { signal: options.signal } : {}),
         ...(profileDirectory ? { profileDirectory } : {})
-      }), options.signal, launchedDriver => launchedDriver.close());
+      }), options.signal, launchedDriver => launchedDriver.close(), browserCancellationError);
       record = {
         sessionId,
         attribution,
@@ -186,7 +189,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
       const tab = await createTab(record, options.signal);
       const initial = args.url
         ? await navigateTab(tab, normalizeBrowserUrl(args.url), timeoutFor(args.timeoutMs), options.signal)
-        : await withAbort(tab.page.describe(options.signal), options.signal);
+        : await withAbort(tab.page.describe(options.signal), options.signal, browserCancellationError);
       return sessionResult(record, 'start', {
         tabId: tab.tabId,
         viewport,
@@ -226,7 +229,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     try {
       const result = args.url
         ? await navigateTab(tab, normalizeBrowserUrl(args.url), timeoutFor(args.timeoutMs), options.signal)
-        : await withAbort(tab.page.describe(options.signal), options.signal);
+        : await withAbort(tab.page.describe(options.signal), options.signal, browserCancellationError);
       return sessionResult(record, 'open_tab', { tabId: tab.tabId, ...result });
     } catch (error) {
       record.tabs.delete(tab.tabId);
@@ -268,8 +271,9 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     context: BrowserContext = {},
     options: BrowserOperationOptions = {}
   ): Promise<Record<string, unknown>> {
+    const detail = normalizeBrowserSnapshotDetail(args.detail);
     return withTab(workspace, args, context, 'snapshot', options, (record, tab) =>
-      withAbort(tab.page.snapshot(timeoutFor(args.timeoutMs), options.signal), options.signal).then(result => sessionResult(record, 'snapshot', { tabId: tab.tabId, ...result })));
+      withAbort(tab.page.snapshot(timeoutFor(args.timeoutMs), detail, options.signal), options.signal, browserCancellationError).then(result => sessionResult(record, 'snapshot', { tabId: tab.tabId, ...result })));
   }
 
   async function interact(
@@ -279,7 +283,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     options: BrowserOperationOptions = {}
   ): Promise<Record<string, unknown>> {
     return withTab(workspace, args, context, 'interact', options, (record, tab) =>
-      withAbort(tab.page.interact(args, timeoutFor(args.timeoutMs), options.signal), options.signal).then(result => sessionResult(record, 'interact', { tabId: tab.tabId, ...result })));
+      withAbort(tab.page.interact(args, timeoutFor(args.timeoutMs), options.signal), options.signal, browserCancellationError).then(result => sessionResult(record, 'interact', { tabId: tab.tabId, ...result })));
   }
 
   async function screenshot(
@@ -289,7 +293,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     options: BrowserOperationOptions = {}
   ): Promise<Record<string, unknown>> {
     return withTab(workspace, args, context, 'screenshot', options, (record, tab) =>
-      withAbort(tab.page.screenshot(args.fullPage === true, options.signal), options.signal).then(result => sessionResult(record, 'screenshot', { tabId: tab.tabId, ...result })));
+      withAbort(tab.page.screenshot(args.fullPage === true, options.signal), options.signal, browserCancellationError).then(result => sessionResult(record, 'screenshot', { tabId: tab.tabId, ...result })));
   }
 
   async function upload(
@@ -351,8 +355,8 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
   }
 
   async function createTab(record: BrowserSessionRecord, signal?: AbortSignal): Promise<BrowserTabRecord> {
-    throwIfAborted(signal);
-    const page = await withAbortResource(record.driver.createPage(signal), signal, page => page.close());
+    throwIfAborted(signal, browserCancellationError);
+    const page = await withAbortResource(record.driver.createPage(signal), signal, page => page.close(), browserCancellationError);
     return registerTab(record, page, true);
   }
 
@@ -401,7 +405,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     options: BrowserOperationOptions,
     callback: (record: BrowserSessionRecord, tab: BrowserTabRecord) => Promise<T>
   ): Promise<T> {
-    throwIfAborted(options.signal);
+    throwIfAborted(options.signal, browserCancellationError);
     const record = requireSession(workspace, args, context);
     const tab = requireTab(record, args.tabId);
     record.activeTabId = tab.tabId;
@@ -455,7 +459,7 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
 }
 
 async function navigateTab(tab: BrowserTabRecord, url: string, timeoutMs: number, signal?: AbortSignal): Promise<Record<string, unknown>> {
-  return withAbort(tab.page.navigate(url, timeoutMs, signal), signal);
+  return withAbort(tab.page.navigate(url, timeoutMs, signal), signal, browserCancellationError);
 }
 
 function sessionResult(record: BrowserSessionRecord, action: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -523,63 +527,8 @@ function attributionMatches(attribution: AutomationAttribution, workspace: Autom
   }
 }
 
-function throwIfAborted(signal?: AbortSignal): void {
-  if (!signal?.aborted) return;
-  throw taskError('BROWSER_OPERATION_CANCELLED', errorMessage(signal.reason || 'Browser operation cancelled.'));
-}
-
-function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return promise;
-  throwIfAborted(signal);
-  return new Promise<T>((resolve, reject) => {
-    let aborted = false;
-    const onAbort = () => {
-      aborted = true;
-      reject(taskError('BROWSER_OPERATION_CANCELLED', errorMessage(signal.reason || 'Browser operation cancelled.')));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      value => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) resolve(value);
-      },
-      error => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) reject(error);
-      }
-    );
-  });
-}
-
-function withAbortResource<T>(
-  promise: Promise<T>,
-  signal: AbortSignal | undefined,
-  cleanup: (value: T) => Promise<unknown> | unknown
-): Promise<T> {
-  if (!signal) return promise;
-  throwIfAborted(signal);
-  return new Promise<T>((resolve, reject) => {
-    let aborted = false;
-    const onAbort = () => {
-      aborted = true;
-      reject(taskError('BROWSER_OPERATION_CANCELLED', errorMessage(signal.reason || 'Browser operation cancelled.')));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      value => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) {
-          resolve(value);
-          return;
-        }
-        void Promise.resolve(cleanup(value)).catch(() => {});
-      },
-      error => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) reject(error);
-      }
-    );
-  });
+function browserCancellationError(signal: AbortSignal): Error {
+  return taskError('BROWSER_OPERATION_CANCELLED', errorMessage(signal.reason || 'Browser operation cancelled.'));
 }
 
 function errorMessage(error: unknown): string {

@@ -158,6 +158,8 @@ try {
   );
   assert.ok(win.options.width < workArea.width * 0.9, 'default dashboard width must be visibly windowed');
   assert.ok(win.options.height < workArea.height * 0.9, 'default dashboard height must be visibly windowed');
+  assert.equal(win.options.minWidth, Math.min(900, win.options.width));
+  assert.equal(win.options.minHeight, Math.min(600, win.options.height));
   assert.equal(win.options.frame, false);
   assert.equal(win.options.thickFrame, true);
   assert.equal(win.options.titleBarStyle, 'hidden');
@@ -336,6 +338,25 @@ try {
     defaultDashboardBounds(fakeScreen),
     'legacy unversioned near-fullscreen bounds must migrate to the smaller default'
   );
+
+  const shortWorkArea = { x: 0, y: 0, width: 1280, height: 560 };
+  const shortScreen = {
+    getPrimaryDisplay: () => ({ workArea: shortWorkArea }),
+    getDisplayMatching: () => ({ workArea: shortWorkArea })
+  };
+  const shortSandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-dashboard-window-short-'));
+  const shortManager = createDashboardWindowManager({
+    ...dependencies,
+    app: { ...dependencies.app, getPath(name) { assert.equal(name, 'userData'); return shortSandbox; } },
+    screen: shortScreen
+  });
+  const shortWindow = await shortManager.open();
+  assert.ok(shortWindow.options.height <= shortWorkArea.height - 32, 'short displays must keep the dashboard inside the usable work area');
+  assert.ok(shortWindow.options.y >= shortWorkArea.y + 16, 'short displays must keep the dashboard below the top work-area inset');
+  assert.ok(shortWindow.options.y + shortWindow.options.height <= shortWorkArea.y + shortWorkArea.height - 16, 'short displays must keep the dashboard above the taskbar work-area edge');
+  assert.equal(shortWindow.options.minHeight, shortWindow.options.height, 'Electron minHeight must not exceed the constrained window height');
+  await shortManager.close();
+  fs.rmSync(shortSandbox, { recursive: true, force: true });
 
   assert.equal(validateConnection({ url: 'http://localhost:3333/dashboard' }).pathname, '/dashboard');
   assert.equal(normalizeRouteHash('settings/connection'), '#settings/connection');

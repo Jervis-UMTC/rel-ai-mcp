@@ -15,15 +15,14 @@ const workflow = read('skills/rel-ai-workflow/SKILL.md');
 assert.match(descriptionOf(workflow), /inspect.*read.*edit.*test.*build.*debug.*validate.*review.*publish/i);
 assert.match(descriptionOf(workflow), /Do not use.*no repository or local runtime access/i);
 assert.match(workflow, /durable `work_id` is optional/i);
-assert.match(workflow, /ownership, recovery, task-scoped review\/publication, or durable history is useful/i);
-assert.match(workflow, /Tests, builds, linters, source checks, and release gates are one-shot commands/);
+assert.match(workflow, /ownership, recovery, task-scoped review\/publication, or durable history materially helps/i);
+assert.match(workflow, /One-shot tests, builds, linters, source checks, and release gates belong in `relai_exec` or `relai_validate`/);
 assert.match(workflow, /relai:\/\/server\/tool-surface/);
 assert.match(workflow, /shortest sufficient path/i);
-assert.match(workflow, /Specialized Rel\.AI skills reuse an existing work session when one is already active/i);
+assert.match(workflow, /Reuse an active work session instead of opening another/i);
 assert.match(workflow, /invoking every specialist.*anti-pattern/i);
 assert.match(workflow, /continue through ordinary task boundaries/i);
 assert.match(workflow, /update.*checkbox/i);
-assert.match(workflow, /Authorization, containment, resource ownership, stale-write\/collision protection, sensitive-path controls, and defined destructive approvals remain authoritative/i);
 assert.match(workflow, /\[references\/workflows\.md\]\(references\/workflows\.md\)/);
 assert.match(workflow, /\[references\/safety\.md\]\(references\/safety\.md\).*destructive or approval-gated/i);
 

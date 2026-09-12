@@ -94,6 +94,7 @@ export interface ReliabilityCounters {
 
 export interface LocalToolOutcomeEvent extends ObservabilityResultInput {
   workspace?: unknown;
+  taskIntent?: unknown;
   durationMs?: unknown;
   at?: unknown;
   timings?: { phaseMs?: unknown } | null;

@@ -17,7 +17,7 @@ const bridge = async payload => {
     case 'describe':
       return { ok: true, nativeSessionId: 'embedded_browser_abcdefghijklmnop', nativePageId: 'embedded_page_abcdefghijklmnop', url: 'https://example.test/', title: 'Example', loading: false };
     case 'navigate':
-      return { ok: true, nativeSessionId: 'embedded_browser_abcdefghijklmnop', nativePageId: 'embedded_page_abcdefghijklmnop', url: payload.url, title: 'Navigated', loading: true }; 
+      return { ok: true, nativeSessionId: 'embedded_browser_abcdefghijklmnop', nativePageId: 'embedded_page_abcdefghijklmnop', url: payload.url, title: 'Navigated', loading: true };
     case 'close_page':
     case 'close_session':
       return { ok: true };

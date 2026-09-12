@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { throwIfAborted, withAbort, withAbortResource } from '../abortablePromise.ts';
 import { taskError } from '../toolActivity.js';
 import { resolveSafePath } from '../safety.js';
 import { resolveWorkspaceSourcePath } from '../workspaceSources.js';
@@ -28,14 +29,14 @@ async function uploadAuthorizedBrowserFile(
   timeoutMs: number,
   options: BrowserLocalIoOptions = {}
 ): Promise<Record<string, unknown>> {
-  throwIfCancelled(options.signal);
+  throwIfAborted(options.signal, cancelledError);
   const safe = resolveWorkspaceSourcePath(workspace, args.path, {
     operation: 'read',
     label: 'Browser upload file'
   });
   const before = await fs.promises.stat(safe.absolutePath);
   if (!before.isFile()) throw new Error(`Browser upload target is not a file: ${safe.relativePath}`);
-  const result = await withAbort(page.upload(args, safe.absolutePath, timeoutMs, options.signal), options.signal);
+  const result = await withAbort(page.upload(args, safe.absolutePath, timeoutMs, options.signal), options.signal, cancelledError);
   return {
     ...result,
     path: safe.relativePath,
@@ -50,7 +51,7 @@ async function downloadBrowserFile(
   timeoutMs: number,
   options: BrowserLocalIoOptions = {}
 ): Promise<Record<string, unknown>> {
-  throwIfCancelled(options.signal);
+  throwIfAborted(options.signal, cancelledError);
   const safe = resolveSafePath(workspace.path, args.path, {
     operation: 'write',
     label: 'Browser download destination'
@@ -66,7 +67,8 @@ async function downloadBrowserFile(
   const download = await withAbortResource(
     page.beginDownload(args, timeoutMs, options.signal),
     options.signal,
-    handle => cleanupDownload(handle, true)
+    handle => cleanupDownload(handle, true),
+    cancelledError
   );
   const tempPath = path.join(
     path.dirname(verified.absolutePath),
@@ -85,7 +87,7 @@ async function downloadBrowserFile(
   });
 
   try {
-    const readable = await withAbortResource(download.createReadStream(), options.signal, stream => stream.destroy());
+    const readable = await withAbortResource(download.createReadStream(), options.signal, stream => stream.destroy(), cancelledError);
     const output = fs.createWriteStream(tempPath, { flags: 'wx', mode: 0o600 });
     try {
       await pipeline(readable, hashing, output, options.signal ? { signal: options.signal } : {});
@@ -123,66 +125,8 @@ async function cleanupDownload(download: BrowserDownloadHandle, cancel: boolean)
   await download.delete().catch(() => {});
 }
 
-function throwIfCancelled(signal?: AbortSignal): void {
-  if (signal?.aborted) throw cancelledError(signal);
-}
-
 function cancelledError(signal: AbortSignal): Error {
   return taskError('BROWSER_OPERATION_CANCELLED', errorMessage(signal.reason || 'Browser operation cancelled.'));
-}
-
-function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return promise;
-  throwIfCancelled(signal);
-  return new Promise<T>((resolve, reject) => {
-    let aborted = false;
-    const onAbort = () => {
-      aborted = true;
-      reject(cancelledError(signal));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      value => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) resolve(value);
-      },
-      error => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) reject(error);
-      }
-    );
-  });
-}
-
-function withAbortResource<T>(
-  promise: Promise<T>,
-  signal: AbortSignal | undefined,
-  cleanup: (value: T) => Promise<unknown> | unknown
-): Promise<T> {
-  if (!signal) return promise;
-  throwIfCancelled(signal);
-  return new Promise<T>((resolve, reject) => {
-    let aborted = false;
-    const onAbort = () => {
-      aborted = true;
-      reject(cancelledError(signal));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      value => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) {
-          resolve(value);
-          return;
-        }
-        void Promise.resolve(cleanup(value)).catch(() => {});
-      },
-      error => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) reject(error);
-      }
-    );
-  });
 }
 
 function errorMessage(error: unknown): string {

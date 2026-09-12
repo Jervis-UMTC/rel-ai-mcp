@@ -63,7 +63,12 @@ function createShutdownCoordinator(options = {}) {
     return prepared;
   }
 
-  return { prepare, isPrepared };
+  function reset() {
+    shutdownPromise = null;
+    prepared = false;
+  }
+
+  return { prepare, isPrepared, reset };
 }
 
 function closeHttpServer(server, options = {}) {

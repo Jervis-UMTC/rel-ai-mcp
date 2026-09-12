@@ -3,6 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { layoutSnapshotExpression, normalizeBrowserSnapshotDetail } from '../src/browser/layoutSnapshot.js';
+
 const MAX_SNAPSHOT_CHARS = 64 * 1024;
 const MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 const DOWNLOAD_TEMP_ROOT = path.resolve(os.tmpdir(), 'relai-browser-downloads');
@@ -91,7 +93,7 @@ function createBrowserSurfaceHost(options = {}) {
         profile: persistent ? 'persistent' : 'ephemeral',
         headless,
         viewport
-      }; 
+      };
     } catch (error) {
       await closeSession(nativeSessionId, { emit: false });
       throw error;
@@ -183,15 +185,25 @@ function createBrowserSurfaceHost(options = {}) {
   }
 
   async function snapshotPage(_record, page, payload, options = {}) {
-    const debuggerApi = await attachedDebugger(page.webContents);
-    const response = await withTimeout(
-      withAbort(debuggerApi.sendCommand('Accessibility.getFullAXTree'), options.signal),
-      timeoutFor(payload.timeoutMs),
-      'Browser accessibility snapshot timed out.'
-    );
-    const text = serializeAccessibilityTree(response?.nodes || []);
+    const detail = normalizeBrowserSnapshotDetail(payload.detail);
+    let text;
+    if (detail === 'layout') {
+      text = String(await withTimeout(
+        withAbort(page.webContents.executeJavaScript(layoutSnapshotExpression(), true), options.signal),
+        timeoutFor(payload.timeoutMs),
+        'Browser layout snapshot timed out.'
+      ));
+    } else {
+      const debuggerApi = await attachedDebugger(page.webContents);
+      const response = await withTimeout(
+        withAbort(debuggerApi.sendCommand('Accessibility.getFullAXTree'), options.signal),
+        timeoutFor(payload.timeoutMs),
+        'Browser accessibility snapshot timed out.'
+      );
+      text = serializeAccessibilityTree(response?.nodes || []);
+    }
     const bounded = boundText(text, MAX_SNAPSHOT_CHARS);
-    return { ...describePage(null, page), snapshot: bounded.text, truncated: bounded.truncated };
+    return { ...describePage(null, page), detail, snapshot: bounded.text, truncated: bounded.truncated };
   }
 
   async function interactPage(record, page, payload, options = {}) {
@@ -418,6 +430,9 @@ function createBrowserSurfaceHost(options = {}) {
       url: publicPageUrl(candidate.webContents.getURL()),
       title: String(candidate.webContents.getTitle?.() || ''),
       loading: candidate.loading === true,
+      loadFailed: candidate.loadFailed === true,
+      crashed: candidate.crashed === true,
+      unresponsive: candidate.unresponsive === true,
       createdAt: candidate.createdAt
     })) : [];
     return {
@@ -435,6 +450,10 @@ function createBrowserSurfaceHost(options = {}) {
       url: page ? publicPageUrl(page.webContents.getURL()) : '',
       title: page ? String(page.webContents.getTitle?.() || '') : '',
       loading: page?.loading === true,
+      loadFailed: page?.loadFailed === true,
+      crashed: page?.crashed === true,
+      unresponsive: page?.unresponsive === true,
+      lastLoadError: page?.lastLoadError || null,
       visible: surfaceBounds.visible === true && Boolean(attached)
     };
   }
@@ -508,9 +527,20 @@ function createBrowserSurfaceHost(options = {}) {
     };
     wc.on('will-navigate', guardNavigation);
     wc.on('will-redirect', guardNavigation);
-    wc.on('did-start-loading', () => { page.loading = true; publishState(); });
+    wc.on('did-start-loading', () => { page.loading = true; page.loadFailed = false; publishState(); });
     wc.on('did-stop-loading', () => { page.loading = false; publishState(); });
-    wc.on('did-navigate', () => publishState());
+    wc.on('did-finish-load', () => { page.loading = false; page.loadFailed = false; publishState(); });
+    wc.on('did-fail-load', (_event, code, description, validatedUrl, isMainFrame) => {
+      if (!isMainFrame || code === -3) return;
+      page.loading = false;
+      page.loadFailed = true;
+      page.lastLoadError = { code, description: String(description || ''), url: String(validatedUrl || '') };
+      publishState();
+      onError(new Error(`Embedded browser failed to load ${String(validatedUrl || page.webContents.getURL() || '')} (${code}): ${String(description || 'load failed')}`));
+    });
+    wc.on('unresponsive', () => { page.unresponsive = true; publishState(); });
+    wc.on('responsive', () => { page.unresponsive = false; publishState(); });
+    wc.on('did-navigate', () => { page.loadFailed = false; publishState(); });
     wc.on('did-navigate-in-page', () => publishState());
     wc.on('page-title-updated', () => publishState());
     wc.on('before-input-event', event => {
@@ -519,9 +549,30 @@ function createBrowserSurfaceHost(options = {}) {
     wc.on('before-mouse-event', event => {
       if (record.control === 'ai' && page.aiInputDepth === 0) event.preventDefault();
     });
-    wc.on('render-process-gone', () => {
+    wc.on('render-process-gone', (_event, details) => {
       if (page.closing) return;
-      void destroyPage(record, page, { emit: true, type: 'page_crashed' }).catch(onError);
+      page.crashed = true;
+      onEvent({
+        resource: 'browser',
+        type: 'page_crashed',
+        nativeSessionId: record.nativeSessionId,
+        nativePageId: page.nativePageId,
+        reason: String(details?.reason || 'crashed')
+      });
+      publishState();
+      const recoverUrl = publicPageUrl(page.webContents.getURL?.() || '');
+      if (!recoverUrl || recoverUrl === 'about:blank') {
+        void destroyPage(record, page, { emit: true, type: 'page_crashed' }).catch(onError);
+        return;
+      }
+      try {
+        page.crashed = false;
+        page.closing = false;
+        void page.webContents.reload?.();
+      } catch (error) {
+        void destroyPage(record, page, { emit: true, type: 'page_crashed' }).catch(() => {});
+        onError(error instanceof Error ? error : new Error(String(error)));
+      }
     });
     wc.once('destroyed', () => {
       if (page.closing) return;

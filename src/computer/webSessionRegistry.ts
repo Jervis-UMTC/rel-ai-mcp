@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import { throwIfAborted, withAbort, withAbortResource } from '../abortablePromise.ts';
 import { taskError } from '../toolActivity.js';
 import {
   assertAutomationAttribution,
@@ -68,7 +69,7 @@ async function startUiSession(
   args: UiArgs = {},
   context: UiContext = {}
 ): Promise<Record<string, unknown>> {
-  throwIfUiAborted(context.signal);
+  throwIfAborted(context.signal, uiCancellationError);
   const taskId = taskIdFor(args, context);
   const existing = taskId ? [...sessions.values()].find(record => record.attribution.taskId === taskId) : null;
   const pendingForTask = taskId ? [...pendingStarts].some(pending => pending.taskId === taskId) : false;
@@ -94,12 +95,12 @@ async function startUiSession(
   let browser: WebBrowserSession | null = null;
   let record: UiSessionRecord | null = null;
   try {
-    browser = await withUiAbortResource(launchWebBrowserSession({
+    browser = await withAbortResource(launchWebBrowserSession({
       protocol,
       viewport,
       headless: args.headless !== false,
       allowedPorts
-    }), context.signal, launchedBrowser => launchedBrowser.close());
+    }), context.signal, launchedBrowser => launchedBrowser.close(), uiCancellationError);
     record = Object.freeze({
       sessionId,
       attribution: createAutomationAttribution(workspace, args, context),
@@ -111,7 +112,7 @@ async function startUiSession(
     sessions.set(sessionId, record);
     browser.onDisconnected(() => sessions.delete(sessionId));
 
-    const initialNavigation = await withUiAbort(browser.navigate(initialUrl, timeoutFor(args.timeoutMs)), context.signal);
+    const initialNavigation = await withAbort(browser.navigate(initialUrl, timeoutFor(args.timeoutMs)), context.signal, uiCancellationError);
     return {
       ok: true,
       workspace: workspace.alias,
@@ -142,7 +143,7 @@ function withUiSession<T>(
   context: UiContext,
   callback: SessionCallback<T>
 ): Promise<T> | T {
-  throwIfUiAborted(context.signal);
+  throwIfAborted(context.signal, uiCancellationError);
   return callback(requireUiSession(workspace, args, context));
 }
 
@@ -228,63 +229,8 @@ async function closeUiRecords(records: readonly UiSessionRecord[]): Promise<void
   await Promise.allSettled(records.map(record => record.browser.close()));
 }
 
-function throwIfUiAborted(signal?: AbortSignal): void {
-  if (!signal?.aborted) return;
-  throw taskError('UI_OPERATION_CANCELLED', errorMessage(signal.reason || 'UI operation cancelled.'));
-}
-
-function withUiAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return promise;
-  throwIfUiAborted(signal);
-  return new Promise<T>((resolve, reject) => {
-    let aborted = false;
-    const onAbort = () => {
-      aborted = true;
-      reject(taskError('UI_OPERATION_CANCELLED', errorMessage(signal.reason || 'UI operation cancelled.')));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      value => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) resolve(value);
-      },
-      error => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) reject(error);
-      }
-    );
-  });
-}
-
-function withUiAbortResource<T>(
-  promise: Promise<T>,
-  signal: AbortSignal | undefined,
-  cleanup: (value: T) => Promise<unknown> | unknown
-): Promise<T> {
-  if (!signal) return promise;
-  throwIfUiAborted(signal);
-  return new Promise<T>((resolve, reject) => {
-    let aborted = false;
-    const onAbort = () => {
-      aborted = true;
-      reject(taskError('UI_OPERATION_CANCELLED', errorMessage(signal.reason || 'UI operation cancelled.')));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      value => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) {
-          resolve(value);
-          return;
-        }
-        void Promise.resolve(cleanup(value)).catch(() => {});
-      },
-      error => {
-        signal.removeEventListener('abort', onAbort);
-        if (!aborted) reject(error);
-      }
-    );
-  });
+function uiCancellationError(signal: AbortSignal): Error {
+  return taskError('UI_OPERATION_CANCELLED', errorMessage(signal.reason || 'UI operation cancelled.'));
 }
 
 function errorMessage(error: unknown): string {

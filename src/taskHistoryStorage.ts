@@ -12,6 +12,7 @@ const MAX_SESSIONS = 500;
 const TASK_HISTORY_VERSION = 3;
 const HISTORY_FORMAT_MARKER = '.task-history-v3';
 const LEGACY_MIGRATION_KEY = 'task_history_legacy_migrated_v1';
+const migratedStateDirs = new Set<string>();
 
 type TaskHistoryConfig = Record<string, unknown> & { stateDir?: string };
 type StoredTaskSession = TaskDto & Record<string, any>;
@@ -299,6 +300,13 @@ function upsertSession(db: DatabaseSync, session: StoredTaskSession, updatedAtMs
 }
 
 function migrateLegacyTaskHistory(config: TaskHistoryConfig = {}): void {
+  let stateKey = '';
+  try {
+    stateKey = path.resolve(getStateDir(config));
+  } catch {
+    stateKey = '';
+  }
+  if (stateKey && migratedStateDirs.has(stateKey)) return;
   let migrated = false;
   withStateDatabase(config, (db: DatabaseSync) => {
     if (stateMetaValue(db, LEGACY_MIGRATION_KEY, '') === '1') return;
@@ -325,6 +333,7 @@ function migrateLegacyTaskHistory(config: TaskHistoryConfig = {}): void {
     setStateMeta(db, LEGACY_MIGRATION_KEY, '1');
     migrated = true;
   }, { transaction: true });
+  if (stateKey) migratedStateDirs.add(stateKey);
   if (migrated) removeLegacyHistoryFiles(config);
 }
 
@@ -346,7 +355,9 @@ function removeLegacyHistoryFiles(config: TaskHistoryConfig = {}): void {
   try { fs.rmSync(path.join(getStateDir(config), HISTORY_FORMAT_MARKER), { force: true }); } catch {}
 }
 
-function resetTaskHistoryCaches(): void {}
+function resetTaskHistoryCaches(): void {
+  migratedStateDirs.clear();
+}
 
 function errorCode(error: unknown): string {
   return error && typeof error === 'object' && 'code' in error ? String(error.code || '') : '';

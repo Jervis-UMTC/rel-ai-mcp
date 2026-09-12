@@ -1,6 +1,5 @@
 import * as crypto from 'node:crypto';
-
-const WORKFLOW_INTENTS = Object.freeze(['auto', 'investigation', 'bugfix', 'feature', 'refactor', 'migration', 'cleanup', 'documentation', 'performance', 'review', 'release', 'other']);
+import { WORKFLOW_INTENTS } from '../contracts/analyticsTaxonomy.js';
 
 function deterministicActionId(action = {}) {
   const tool = String(action.tool || 'action');

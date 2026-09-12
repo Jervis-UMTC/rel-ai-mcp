@@ -92,12 +92,28 @@ assert.deepEqual(calls.filter(call => ['typeText', 'keyboardPress'].includes(cal
 ]);
 assert.equal(calls.filter(call => call[0] === 'construct' && call[1] === undefined).length, 1, 'primary Midscene device must be cached');
 
+calls.length = 0;
 const image = await adapter.screenshot('side');
 assert.equal(image.mimeType, 'image/png');
 assert.equal(image.data, screenshotBytes.toString('base64'));
 assert.equal(image.bytes, screenshotBytes.length);
 assert.equal(image.width, 1280);
 assert.equal(image.height, 1024);
+await adapter.screenshot('side');
+assert.equal(calls.filter(call => call[0] === 'screenshotBase64' && call[1] === 'side').length, 1, 'repeated observation may reuse the short screenshot cache');
+await adapter.screenshot('side', { fresh: true });
+assert.equal(calls.filter(call => call[0] === 'screenshotBase64' && call[1] === 'side').length, 2, 'fresh observation must bypass the short screenshot cache for local change detection');
+await adapter.click('side', { x: 20, y: 30 });
+await adapter.screenshot('side');
+assert.equal(calls.filter(call => call[0] === 'screenshotBase64' && call[1] === 'side').length, 3, 'display input must invalidate the cached screenshot immediately');
+
+calls.length = 0;
+await adapter.screenshot();
+await adapter.screenshot();
+assert.equal(calls.filter(call => call[0] === 'screenshotBase64' && call[1] === undefined).length, 1);
+await adapter.typeText('invalidate-primary');
+await adapter.screenshot();
+assert.equal(calls.filter(call => call[0] === 'screenshotBase64' && call[1] === undefined).length, 2, 'keyboard input must invalidate the primary screenshot cache');
 
 const tooLargeModule = {
   ...fakeModule,
@@ -124,4 +140,4 @@ await assert.rejects(() => retryingAdapter.size('side'), /connect failed/);
 assert.deepEqual(await retryingAdapter.size('side'), { width: 1280, height: 1024 }, 'failed device connections must be evicted so a later action can retry');
 
 assert.ok(instances.length >= 2);
-console.log('Midscene computer adapter caches connected devices, maps Rel.AI primitives to ComputerDevice input APIs, preserves bounded screenshots, and retries failed device initialization.');
+console.log('Midscene computer adapter caches connected devices, invalidates screenshots after input, preserves bounded screenshots, and retries failed device initialization.');

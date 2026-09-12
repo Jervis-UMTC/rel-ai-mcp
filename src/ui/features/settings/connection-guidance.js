@@ -8,6 +8,16 @@ const CHATGPT_REFRESH_STEPS = Object.freeze([
 ]);
 const CHATGPT_REFRESH_BUSINESS_NOTE = 'Business: published custom apps currently cannot update tools or metadata in place. Recreate and republish the app when the Rel.AI tool surface changes.';
 
+export function downloadRelaiConnectorIcon() {
+  const link = document.createElement('a');
+  link.href = RELAI_CONNECTOR_ICON_URL;
+  link.download = RELAI_CONNECTOR_ICON_FILENAME;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 export function chatGptFirstPrompt(workspaceAlias = 'myapp') {
   const alias = String(workspaceAlias || 'myapp').trim() || 'myapp';
   return `Use Rel.AI MCP with project "${alias.replaceAll('"', '\\"')}". Look through its files and folders and summarize the project structure. Do not change any files yet.`;

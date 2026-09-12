@@ -573,7 +573,7 @@ function requireTaskUnlocked(config: any, taskId: any, options: any = {}) {
 }
 
 function reconcileTaskUnlocked(config: any, task: any, nowSource: any) {
-  if (isTerminalNativeTaskStatus(task.status) || task.status === 'input_required') return task;
+  if (isTerminalNativeTaskStatus(task.status)) return task;
   if (executors.has(task.taskId)) return task;
   const nowMs = nowValue(nowSource);
   if (task.cancelRequested) {

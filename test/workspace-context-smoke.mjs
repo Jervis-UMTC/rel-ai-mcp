@@ -27,6 +27,16 @@ fs.writeFileSync(path.join(repo, '.relaiignore'), `tmp-cache/\n`);
 fs.mkdirSync(path.join(repo, 'tmp-cache'), { recursive: true });
 fs.writeFileSync(path.join(repo, 'tmp-cache', 'ignored.txt'), `ignored\n`);
 const shouldCollect = createCollectionPathFilter(repo, { excludePaths: ['.dart_tool'] });
+const defaultCollection = createCollectionPathFilter(repo);
+for (const genericPath of ['src/tmp/parser.ts', 'src/temp/parser.ts', 'src/logs/parser.ts', 'out/main.c']) {
+  assert.equal(defaultCollection(genericPath), true, `generic repository path must remain collectable by default: ${genericPath}`);
+}
+assert.equal(defaultCollection('.output/cache.json'), false, 'framework output directories must remain excluded by default');
+assert.equal(defaultCollection('playwright-report/index.html'), false, 'known test-report output must remain excluded by default');
+const explicitTmpInclude = createCollectionPathFilter(repo, { includeRoots: ['src/tmp'] });
+assert.equal(explicitTmpInclude('src'), true, 'an explicit nested include must keep its parent traversable');
+assert.equal(explicitTmpInclude('src/tmp'), true, 'an explicit include root must override default generic directory exclusions');
+assert.equal(explicitTmpInclude('src/tmp/parser.ts'), true, 'files below an explicitly included generic directory must remain collectable');
 assert.equal(shouldCollect('src/app.js'), true);
 assert.equal(shouldCollect('node_modules/noise.js'), false);
 assert.equal(shouldCollect('.dart_tool/noise.txt'), false);

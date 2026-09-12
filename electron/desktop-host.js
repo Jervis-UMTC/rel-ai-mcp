@@ -13,7 +13,7 @@ import { createDesktopTray } from './desktop-tray.js';
 import { desktopStatusFailure, initialDesktopStatus, normalizeDesktopStatus } from './desktop-status.js';
 import { createDiagnosticFiles } from './diagnostic-files.js';
 import { registerIpcHandlers } from './ipc-handlers.js';
-import { hasExistingConfig } from './launcher-utils.js';
+import { hasExistingConfig, isManualUpdateInstall } from './launcher-utils.js';
 import { installLocalProtocol, localRendererUrl, registerLocalScheme } from './local-protocol.js';
 import { createRecoveryWindowManager } from './recovery-window.js';
 import { createPulseWindowManager } from './pulse-window.js';
@@ -426,8 +426,7 @@ async function createDesktopHost(options = {}) {
     pulseWindowManager.update(currentStatus);
     serviceProcessClient.updateContext({ reducedBackgroundWork: lifecycleStatus.reducedBackgroundWork === true });
     desktopTray.setup();
-    if (hasExistingConfig()) void launchConfiguredDesktop({ background: lifecycleStatus.openedAtLogin });
-    else setupWindowManager.create();
+    routeInitialWindow(lifecycleStatus);
     desktopPower.start();
     setImmediate(() => {
       appUpdater.start();
@@ -649,7 +648,11 @@ async function createDesktopHost(options = {}) {
 
   async function commitApplicationUpdate() {
     if (!updateInstallPrepared) throw new Error('Rel.AI update preparation did not complete.');
+    // Close the app first so the installer never fights locked files or visible
+    // windows: shut down windows, tray, and background work, record a clean
+    // exit, then let electron-updater quit + relaunch into the installer.
     isQuitting = true;
+    await shutdownCoordinator.prepare('update');
     allowUpdaterQuit = true;
   }
 
@@ -657,9 +660,13 @@ async function createDesktopHost(options = {}) {
     allowUpdaterQuit = false;
     isQuitting = false;
     updateInstallPrepared = false;
+    shutdownCoordinator.reset();
+    desktopTray.setup();
     if (!serviceRuntime.isListening()) await startServer();
     if (dashboardWindowManager.getWindow()) {
       await showDashboardWindow('', { forceReload: true });
+    } else {
+      await showDashboardWindow('', { forceReload: true }).catch(() => recoveryWindowManager.show());
     }
   }
 
@@ -787,6 +794,29 @@ async function createDesktopHost(options = {}) {
 
   function openDashboardDiagnostics() {
     return openDashboardWindow('#diagnostics');
+  }
+
+  function routeInitialWindow(lifecycleStatus = {}) {
+    const hasConfig = hasExistingConfig();
+    if (hasConfig) {
+      if (lifecycleStatus.updated === true && lifecycleStatus.previousVersion) {
+        runtimeLogs.append(`Rel.AI MCP updated from ${lifecycleStatus.previousVersion} to ${lifecycleStatus.currentVersion}. Existing connection restored.`, { source: 'desktop-lifecycle' });
+      }
+      void launchConfiguredDesktop({ background: lifecycleStatus.openedAtLogin });
+      return { mode: 'configured', hasConfig: true };
+    }
+    if (isManualUpdateInstall({ lifecycleStatus, hasConfig })) {
+      const previousVersion = String(lifecycleStatus.previousVersion || '');
+      const currentVersion = String(lifecycleStatus.currentVersion || app.getVersion() || '');
+      runtimeLogs.append(`Rel.AI MCP full-installer update detected${previousVersion ? ` from ${previousVersion}` : ''}${currentVersion ? ` to ${currentVersion}` : ''}. Previous connection was not found, showing update reconnect instead of a fresh install.`, {
+        level: 'warning',
+        source: 'desktop-lifecycle'
+      });
+      setupWindowManager.create({ update: true, previousVersion, currentVersion });
+      return { mode: 'update', hasConfig: false };
+    }
+    setupWindowManager.create();
+    return { mode: 'fresh', hasConfig: false };
   }
 
   async function launchConfiguredDesktop(launchOptions = {}) {

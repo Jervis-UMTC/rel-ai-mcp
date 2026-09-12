@@ -233,7 +233,7 @@ function DiagnosticFilterBar({ filters, sources, summary, live, onChange, onClea
       type: 'button', className: 'secondary filter-chip', key: filter.key,
       'aria-label': `Remove ${filter.label} filter: ${filter.value}`,
       onClick: () => onChange({ ...filters, [filter.key]: 'all' })
-    }, `${filter.label}: ${filter.value} ×`))) : null,
+    }, h('span', null, `${filter.label}: ${filter.value} `), h('span', { 'aria-hidden': 'true' }, '×')))) : null,
     h('div', { className: 'filter-bar-footer' },
       h('span', { className: 'filter-summary', role: 'status', 'aria-live': 'polite' }, summary),
       h('button', { type: 'button', className: 'secondary filter-clear-button', hidden: !hasDiagnosticFilters(filters), onClick: () => { setSearch(''); onClear(); } }, 'Clear all')
@@ -249,6 +249,7 @@ function openDiagnosticFilters({ filters, sources, onChange }) {
     renderFields(fields, draft) {
       fields.append(
         filterRadioField({
+          key: 'scope',
           label: 'Scope',
           value: draft.scope,
           options: [
@@ -263,6 +264,7 @@ function openDiagnosticFilters({ filters, sources, onChange }) {
           }
         }),
         filterRadioField({
+          key: 'severity',
           label: 'Severity',
           value: draft.severity,
           options: [
@@ -275,6 +277,7 @@ function openDiagnosticFilters({ filters, sources, onChange }) {
           onChange: value => { draft.severity = value; }
         }),
         filterSelectField({
+          key: 'source',
           label: 'Source',
           value: draft.scope === 'findings' ? 'all' : draft.source,
           options: [{ value: 'all', label: 'All sources' }, ...sources.map(source => ({ value: source, label: source }))],

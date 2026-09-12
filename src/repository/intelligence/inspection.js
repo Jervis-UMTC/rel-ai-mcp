@@ -1,6 +1,6 @@
 import { diagnosticsWithLsp, inspectWithLsp, providerStatuses } from '../../codeIntelligence/lspManager.js';
 
-const GRAPH_ACTIONS = new Set(['symbol', 'related', 'impact', 'trace', 'architecture']);
+const GRAPH_ACTIONS = new Set(['symbol', 'related', 'impact', 'trace', 'architecture', 'audit']);
 const LSP_ACTIONS = new Set(['definition', 'hover', 'implementation']);
 
 async function inspectRepositoryCode(nativeInspect, workspace, config = {}, args = {}, options = {}) {

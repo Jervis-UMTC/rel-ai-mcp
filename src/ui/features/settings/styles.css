@@ -24,7 +24,7 @@
 .settings-panel-intro h2 { @apply text-lg; }
 .settings-panel-intro p { @apply mt-1 text-[12px]; color: var(--ui-text-secondary); }
 .settings-grid { @apply grid gap-3; grid-template-columns: repeat(2,minmax(0,1fr)); }
-.settings-save-row { @apply sticky bottom-3 z-10 flex items-center justify-between gap-3 rounded-lg px-3 py-2.5; background: var(--ui-surface-primary); border: 1px solid var(--ui-border-subtle); box-shadow: none; }
+.settings-save-row { @apply sticky bottom-3 flex items-center justify-between gap-3 rounded-lg px-3 py-2.5; z-index: var(--z-sticky); background: var(--ui-surface-primary); border: 1px solid var(--ui-border-subtle); box-shadow: none; }
 .settings-save-actions { @apply flex gap-2; }
 .setting-row { @apply flex min-h-12 items-center justify-between gap-4 border-b py-2.5 last:border-b-0; border-color: var(--ui-border-subtle); }
 .setting-row-copy { @apply min-w-0; }

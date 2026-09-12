@@ -274,7 +274,10 @@ try {
 
   const chatGptStatusResponse = await freshFetch(`${base}/mcp`, {
     method: 'POST',
-    headers: mcpHeaders('', primarySession),
+    headers: {
+      ...mcpHeaders('', primarySession),
+      'mcp-protocol-version': '2025-11-25'
+    },
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: 34,
@@ -283,9 +286,9 @@ try {
     })
   });
   const chatGptStatus = await readMcpResponse(chatGptStatusResponse);
-  assert.equal(chatGptStatusResponse.status, 200, JSON.stringify(chatGptStatus));
-  assert.equal(chatGptStatus.result?.isError, false, JSON.stringify(chatGptStatus));
-  assert.equal(chatGptStatus.result?.structuredContent?.ok, true);
+  assert.equal(chatGptStatusResponse.status, 400, JSON.stringify(chatGptStatus));
+  assert.equal(chatGptStatus.error?.code, -32022);
+  assert.deepEqual(chatGptStatus.error?.data?.supported, [mcpProtocolVersion]);
 
   const initializeInsideModernEnvelope = await freshFetch(`${base}/mcp`, {
     method: 'POST',

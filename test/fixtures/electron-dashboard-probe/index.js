@@ -6,6 +6,7 @@ const targetUrl = process.env.RELAI_PROBE_TARGET_URL;
 const outputPath = process.env.RELAI_PROBE_OUTPUT_PATH;
 const screenshotDir = process.env.RELAI_PROBE_SCREENSHOT_DIR;
 const createWorkspacePath = process.env.RELAI_PROBE_CREATE_WORKSPACE_PATH;
+const dashboardDelayMs = Math.max(0, Number(process.env.RELAI_PROBE_DASHBOARD_DELAY_MS || 0));
 if (!targetUrl || !outputPath || !screenshotDir || !createWorkspacePath) throw new Error('Electron dashboard probe environment is incomplete.');
 fs.writeFileSync(outputPath, JSON.stringify({ stage: 'script_started', argv: process.argv }, null, 2));
 
@@ -36,6 +37,17 @@ app.whenReady().then(async () => {
     }
   });
   const failures = [];
+  let delayedDashboardRequest = false;
+  if (dashboardDelayMs > 0) {
+    win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*'] }, (details, callback) => {
+      if (!delayedDashboardRequest && details.url.includes('/api/dashboard/v10')) {
+        delayedDashboardRequest = true;
+        setTimeout(() => callback({}), dashboardDelayMs);
+        return;
+      }
+      callback({});
+    });
+  }
   win.webContents.session.webRequest.onCompleted({ urls: ['http://*/*'] }, details => {
     if (details.statusCode >= 400) failures.push(`http:${details.statusCode}:${details.url}`);
   });
@@ -53,6 +65,13 @@ app.whenReady().then(async () => {
   });
   win.webContents.on('render-process-gone', (_event, details) => failures.push(`renderer:${details.reason}`));
   await win.loadURL(targetUrl);
+  const hydrationBefore = await readHydrationState(win);
+  if (dashboardDelayMs > 0) await new Promise(resolve => setTimeout(resolve, Math.min(350, Math.max(100, Math.floor(dashboardDelayMs / 2)))));
+  const hydrationDuring = await readHydrationState(win);
+  await waitFor(win, `document.querySelectorAll('.compact-workspace').length >= 1`);
+  const hydrationAfter = await readHydrationState(win);
+  const initialHydration = { before: hydrationBefore, during: hydrationDuring, after: hydrationAfter, delayedDashboardRequest };
+  await win.webContents.executeJavaScript(`location.hash = '#tasks'`);
   await waitFor(win, `document.querySelectorAll('.task-row').length >= 9`);
 
   const initial = await win.webContents.executeJavaScript(`(() => {
@@ -410,6 +429,7 @@ app.whenReady().then(async () => {
   }
 
   const result = {
+    initialHydration,
     initial,
     liveToolUpdate,
     navigationInteractions,
@@ -432,6 +452,15 @@ app.whenReady().then(async () => {
   fs.writeFileSync(outputPath, JSON.stringify({ error: error?.stack || String(error) }, null, 2));
   app.exit(1);
 });
+
+async function readHydrationState(win) {
+  return win.webContents.executeJavaScript(`(() => ({
+    loading: Boolean(document.querySelector('.dashboard-state')),
+    loadingText: document.querySelector('.dashboard-state')?.textContent?.trim() || '',
+    falseEmpty: Boolean(document.querySelector('.compact-workspace-list > .empty')),
+    workspaceCount: document.querySelectorAll('.compact-workspace').length
+  }))()`);
+}
 
 async function exerciseProjectPersistence(win, sourcePath) {
   await win.webContents.setZoomFactor(1);
@@ -471,7 +500,8 @@ async function exerciseProjectPersistence(win, sourcePath) {
     created: ${JSON.stringify(created)},
     edited: Boolean(document.querySelector('[data-workspace-card="acceptance-created-edited"]')),
     oldAliasRemoved: !document.querySelector('[data-workspace-card="acceptance-created"]'),
-    finalAlias: document.querySelector('[data-workspace-card="acceptance-created-edited"]')?.getAttribute('data-workspace-card') || ''
+    finalAlias: document.querySelector('[data-workspace-card="acceptance-created-edited"]')?.getAttribute('data-workspace-card') || '',
+    recentProjectsAbsent: !document.querySelector('.workspace-recents') && !document.body.textContent.includes('Recent projects')
   }))()`);
 }
 

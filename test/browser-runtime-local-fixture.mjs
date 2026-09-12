@@ -75,7 +75,12 @@ try {
   assert.match(started.url, /^http:\/\/127\.0\.0\.1:/);
 
   const initial = await runtime.snapshot(workspace, { sessionId, work_id: context.taskId }, context);
+  assert.equal(initial.detail, 'semantic');
   assert.match(initial.snapshot, /Local browser fixture/);
+  const layout = await runtime.snapshot(workspace, { sessionId, detail: 'layout', work_id: context.taskId }, context);
+  assert.equal(layout.detail, 'layout');
+  assert.match(layout.snapshot, /^viewport \d+x\d+ scroll /);
+  assert.match(layout.snapshot, /input|button|main|form/);
 
   await runtime.interact(workspace, {
     sessionId,

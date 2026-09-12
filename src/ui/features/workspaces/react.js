@@ -1,14 +1,12 @@
-import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { SparkChart } from '../../components/charts.js';
+import React, { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/icons.js';
 import { pillClass } from '../../components/pill.js';
 import { statusTone } from '../../status-tone.js';
 import { toast } from '../../components/toast.js';
 import { postJson } from '../../api.js';
-import { getRouteParams, getWorkspaceFilter, navigate, replaceRouteParams, routeHref } from '../../router.js';
+import { getRouteParams, getWorkspaceFilter, replaceRouteParams, routeHref } from '../../router.js';
 import { analyticsRangeScope } from '../usage/range-model.js';
 import { loadAnalyticsModels } from '../usage/data.js';
-import { recentWorkspaceAliases, recordRecentWorkspace } from './recents.js';
 import {
   actionableFindings,
   findingSeverityLabel,
@@ -20,6 +18,7 @@ import {
 import { DeleteProjectModal, ProjectFormModal, RepairProjectModal } from './react-modals.js';
 
 const h = React.createElement;
+const SparkChart = lazy(() => import('../../components/charts.js').then(module => ({ default: module.SparkChart })));
 const WORKSPACE_STORE_KEYS = Object.freeze(['config', 'health', 'live']);
 
 export function createWorkspacesRoute(useDashboardSlices) {
@@ -54,8 +53,6 @@ function WorkspacesView({ data = {} }) {
   const findings = useMemo(() => actionableFindings(health), [health]);
   const availableCount = views.filter(view => view.available).length;
   const [modal, setModal] = useState(null);
-  const [recentRevision, setRecentRevision] = useState(0);
-  const recent = useMemo(() => recentWorkspaceAliases(allWorkspaces), [allWorkspaces, recentRevision]);
   const analyticsAliases = useMemo(() => views.map(view => view.alias), [views]);
   const analyticsState = useWorkspaceAnalytics(analyticsAliases, Number(data.live?.revisions?.task || 0));
 
@@ -64,8 +61,6 @@ function WorkspacesView({ data = {} }) {
     if (!alias || focusRequest !== '1') return;
     const card = document.querySelector(`[data-workspace-card="${cssEscape(alias)}"]`);
     if (!(card instanceof HTMLElement)) return;
-    recordRecentWorkspace(alias);
-    setRecentRevision(value => value + 1);
     card.tabIndex = -1;
     card.classList.add('workspace-card-focused');
     card.focus({ preventScroll: true });
@@ -95,24 +90,11 @@ function WorkspacesView({ data = {} }) {
           href: '#workspaces',
           'aria-label': `Clear selected project filter: ${workspaceFilter}`,
           title: 'Show all projects'
-        }, h('span', null, workspaceFilter), h('span', { 'aria-hidden': 'true' }, '×')) : null,
+        }, h('span', null, workspaceFilter), h(Icon, { name: 'close', size: 14 })) : null,
         h('span', { className: 'feature-count' }, `${allWorkspaces.length} project${allWorkspaces.length === 1 ? '' : 's'}`),
         h('button', { className: 'primary', type: 'button', onClick: event => openForm('add', null, event.currentTarget) }, 'Add project')
       )
     ),
-    !workspaceFilter && recent.length ? h('section', { className: 'workspace-recents', 'aria-label': 'Recent projects' },
-      h('span', null, 'Recent projects'),
-      h('div', null, recent.map(alias => h('button', {
-        className: 'secondary workspace-recent-chip',
-        type: 'button',
-        key: alias,
-        onClick: () => {
-          recordRecentWorkspace(alias);
-          setRecentRevision(value => value + 1);
-          navigate('workspaces', { workspace: alias, focus: '1' });
-        }
-      }, alias)))
-    ) : null,
     !workspaces.length ? h(EmptyWorkspaceState, { onAdd: event => openForm('add', null, event.currentTarget) }) : h(React.Fragment, null,
       h('div', { className: 'overview-grid overview-grid-compact summary-metrics overview-grid-two' },
         h(Metric, {
@@ -170,7 +152,6 @@ const WorkspaceCard = memo(function WorkspaceCard({ analytics, analyticsStatus, 
   if (view.cautionCount > 0) notices.push(`${view.cautionCount} protected configuration change${view.cautionCount === 1 ? '' : 's'} recorded`);
   const openFolder = async event => {
     if (folderBusy) return;
-    recordRecentWorkspace(view.alias);
     setFolderBusy(true);
     const result = await postJson('/api/open-folder', { workspace: view.alias });
     setFolderBusy(false);
@@ -211,7 +192,7 @@ const WorkspaceCard = memo(function WorkspaceCard({ analytics, analyticsStatus, 
 function WorkspaceReadiness({ available, repository }) {
   return h('section', { className: `workspace-readiness${available ? ' compact good' : ' bad'}`, 'aria-label': 'Project status' },
     available ? null : h('div', { className: 'workspace-access-summary' },
-      h('span', { className: 'workspace-readiness-icon', 'aria-hidden': 'true' }, '!'),
+      h('span', { className: 'workspace-readiness-icon', 'aria-hidden': 'true' }, h(Icon, { name: 'warning', size: 16 })),
       h('div', { className: 'workspace-readiness-copy' },
         h('span', { className: 'workspace-readiness-kicker' }, 'Project access'),
         h('strong', null, 'Project folder unavailable'),
@@ -259,7 +240,7 @@ function HealthFindings({ findings, workspaces, onDelete, onRepair }) {
 
 function EmptyWorkspaceState({ onAdd }) {
   return h('section', { className: 'workspace-empty-state' },
-    h('div', { className: 'workspace-empty-mark', 'aria-hidden': 'true' }, '+'),
+    h('div', { className: 'workspace-empty-mark', 'aria-hidden': 'true' }, h(Icon, { name: 'add', size: 24 })),
     h('strong', null, 'Add your first project'),
     h('p', null, 'Select a local folder and give it a short name. Rel.AI detects Git features and available checks when they are present.'),
     h('button', { className: 'primary', type: 'button', onClick: onAdd }, 'Add project')
@@ -293,7 +274,8 @@ function WorkspaceAnalytics({ scope }) {
       ? h('div', { className: 'connection-notice bad', role: 'status' }, `${formatInteger(infrastructureFailures)} Rel.AI internal ${infrastructureFailures === 1 ? 'error' : 'errors'}`)
       : null,
     values.length
-      ? h(SparkChart, { values, className: 'workspace-analytics-sparkline' })
+      ? h(Suspense, { fallback: h('span', { className: 'workspace-analytics-sparkline-empty', 'aria-hidden': 'true' }) },
+        h(SparkChart, { values, className: 'workspace-analytics-sparkline' }))
       : h('span', { className: 'workspace-analytics-sparkline-empty', 'aria-hidden': 'true' })
   );
 }
@@ -313,28 +295,42 @@ function WorkspaceAnalyticsState({ label, loading = false }) {
 
 function useWorkspaceAnalytics(aliases, taskRevision = 0) {
   const key = aliases.join('\u0000');
+  const previousKeyRef = useRef('');
   const [state, setState] = useState(() => ({ scopes: new Map(), status: 'loading' }));
   useEffect(() => {
     const desktop = globalThis.window?.relaiDesktop;
     if (!aliases.length || !desktop?.getLocalUsage) {
+      previousKeyRef.current = key;
       setState({ scopes: new Map(), status: 'unavailable' });
       return undefined;
     }
     let active = true;
-    setState(current => ({ ...current, status: 'loading' }));
-    void loadAnalyticsModels({ desktop, range: '24h', now: new Date() })
-      .then(({ bounds, models }) => {
-        if (!active) return;
-        setState({
-          scopes: new Map(aliases.map(alias => [alias, analyticsRangeScope(models, bounds, { workspace: alias })])),
-          status: 'ready'
+    const aliasChanged = previousKeyRef.current !== key;
+    previousKeyRef.current = key;
+    const load = () => {
+      setState(current => ({ ...current, status: 'loading' }));
+      void loadAnalyticsModels({ desktop, range: '24h', now: new Date() })
+        .then(({ bounds, models }) => {
+          if (!active) return;
+          setState({
+            scopes: new Map(aliases.map(alias => [alias, analyticsRangeScope(models, bounds, { workspace: alias })])),
+            status: 'ready'
+          });
+        })
+        .catch(() => {
+          if (!active) return;
+          setState(current => ({ ...current, status: 'error' }));
         });
-      })
-      .catch(() => {
-        if (!active) return;
-        setState(current => ({ ...current, status: 'error' }));
-      });
-    return () => { active = false; };
+    };
+    if (aliasChanged) {
+      load();
+      return () => { active = false; };
+    }
+    const timer = window.setTimeout(load, 180);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
   }, [key, taskRevision]);
   return state;
 }

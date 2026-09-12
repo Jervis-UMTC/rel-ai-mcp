@@ -85,7 +85,7 @@ assert.equal(currentMenu.find(item => item.label === 'Installing update…')?.en
 assert.notEqual(currentMenu.find(item => item.label === 'Open Dashboard')?.enabled, false, 'the dashboard must remain reachable so the user can see update progress');
 
 updateStatus = { state: 'downloaded', availableVersion: '0.28.0', installMode: 'restart', integrityVerified: true };
-status = { ...status, localMcpUrl: 'http://127.0.0.1:4444/mcp' }; 
+status = { ...status, localMcpUrl: 'http://127.0.0.1:4444/mcp' };
 assert.equal(tray.update(), true, 'menu actions must refresh when their captured desktop state changes');
 const copyItem = currentMenu.find(item => item.label === 'Copy local MCP address');
 copyItem.click();
