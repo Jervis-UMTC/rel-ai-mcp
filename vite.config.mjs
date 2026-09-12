@@ -59,16 +59,7 @@ export default defineConfig({
       output: {
         entryFileNames: chunk => chunk.name === 'dashboardApp' ? 'dashboard-app.js' : 'dashboard-react.js',
         chunkFileNames: 'dashboard-chunks/[name]-[hash].js',
-        assetFileNames: assetInfo => assetInfo.name?.endsWith('.css') ? 'dashboard.css' : 'dashboard-assets/[name]-[hash][extname]',
-        manualChunks: id => {
-          if (!id.includes('node_modules')) return undefined;
-          if (id.includes('chart.js') || id.includes('react-chartjs-2')) return 'vendor-charts';
-          if (id.includes('@radix-ui')) return 'vendor-radix';
-          if (id.includes('@tanstack/react-query')) return 'vendor-query';
-          if (id.includes('react-router') || id.includes('react-dom') || id.includes('/react/') || id.includes('node_modules/react')) return 'vendor-react';
-          if (id.includes('zustand')) return 'vendor-store';
-          return 'vendor';
-        }
+        assetFileNames: assetInfo => assetInfo.name?.endsWith('.css') ? 'dashboard.css' : 'dashboard-assets/[name]-[hash][extname]'
       }
     }
   }
