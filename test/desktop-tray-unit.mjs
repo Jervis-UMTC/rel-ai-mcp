@@ -10,12 +10,15 @@ let clipboardText = '';
 let trayConstructionCount = 0;
 let trayEvents = [];
 let trayListeners = new Map();
+let balloonOptions = null;
+let primaryFocusCount = 0;
 
 class FakeTray {
   constructor(image) { this.image = image; this.menu = null; this.destroyed = false; trayConstructionCount += 1; }
   setToolTip() {}
   on(name, listener) { trayEvents.push(name); trayListeners.set(name, listener); }
   setContextMenu(menu) { this.menu = menu; currentMenu = menu; }
+  displayBalloon(options) { balloonOptions = options; }
   destroy() { this.destroyed = true; }
 }
 
@@ -44,7 +47,7 @@ const dependencies = {
   getStatus: () => status,
   getUpdateStatus: () => updateStatus,
   openDashboard: async () => {},
-  focusPrimaryWindow() {},
+  focusPrimaryWindow() { primaryFocusCount += 1; },
   openDiagnostics: async () => {},
   openSettings: async () => {},
   startServer: async () => {},
@@ -60,6 +63,19 @@ tray.setup();
 assert.equal(buildCount, 1, 'tray setup builds the initial menu once');
 assert.equal(tray.isAvailable(), true, 'successful tray construction must be observable by window close behavior');
 assert.ok(trayEvents.includes('double-click'));
+assert.ok(trayEvents.includes('balloon-click'), 'Windows notification balloons must focus the existing Rel.AI process instead of launching another Electron instance');
+assert.equal(tray.showBalloon({ category: 'taskCompleted', title: 'Task completed', body: 'Done.' }), true);
+assert.deepEqual(balloonOptions, {
+  title: 'Task completed',
+  content: 'Done.',
+  iconType: 'info',
+  noSound: false,
+  respectQuietTime: true
+});
+trayListeners.get('balloon-click')?.();
+assert.equal(primaryFocusCount, 1, 'clicking a Windows notification balloon must use the existing primary-window focus path');
+assert.equal(tray.showBalloon({ category: 'errors', title: 'Rel.AI needs attention', body: 'Check settings.' }), true);
+assert.equal(balloonOptions.iconType, 'error');
 updateStatus = { ...updateStatus, progress: { percent: 12.4 } };
 assert.equal(tray.update(), true, 'tray updates must rebuild the native context menu like the v0.25.1 implementation');
 assert.equal(buildCount, 2);
@@ -112,6 +128,7 @@ const linuxTray = createDesktopTray({
   focusPrimaryWindow() { linuxFocusCount += 1; }
 });
 linuxTray.setup();
+assert.equal(linuxTray.showBalloon({ title: 'Task completed', body: 'Done.' }), false, 'non-Windows trays must not pretend to support Windows notification balloons');
 assert.ok(trayEvents.includes('click'), 'Linux tray activation must use Electron\'s supported click event');
 assert.equal(trayEvents.includes('double-click'), false, 'Linux must not wait for the Windows/macOS double-click event');
 trayListeners.get('click')?.();

@@ -12,12 +12,14 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-generated-assets-c
 const testPublic = path.join(tempRoot, 'public');
 const dashboardCss = path.join(testPublic, 'dashboard.css');
 const dashboardReact = path.join(testPublic, 'dashboard-react.js');
+const dashboardManifest = path.join(testPublic, 'dashboard-generated-manifest.json');
 const dashboardChunks = path.join(testPublic, 'dashboard-chunks');
 const staleChunkProbe = path.join(dashboardChunks, 'intentional-stale-generated-probe.js');
 
 copyGeneratedAssets(sourcePublic, testPublic);
 const originalCss = fs.readFileSync(dashboardCss);
 const originalReact = fs.readFileSync(dashboardReact);
+const originalManifest = fs.readFileSync(dashboardManifest);
 
 function runCheck(publicRoot = '') {
   return spawnSync(process.execPath, [checker], {
@@ -32,7 +34,7 @@ function runCheck(publicRoot = '') {
 
 function copyGeneratedAssets(from, to) {
   fs.mkdirSync(to, { recursive: true });
-  for (const name of ['dashboard-app.js', 'dashboard-react.js', 'dashboard.css']) {
+  for (const name of ['dashboard-app.js', 'dashboard-react.js', 'dashboard.css', 'dashboard-generated-manifest.json']) {
     fs.copyFileSync(path.join(from, name), path.join(to, name));
   }
   for (const name of ['dashboard-chunks', 'dashboard-assets']) {
@@ -49,6 +51,14 @@ try {
   assert.equal(isolatedFresh.status, 0, isolatedFresh.stderr || isolatedFresh.stdout);
   assert.deepEqual(fs.readFileSync(dashboardCss), originalCss, 'verification must not rewrite fresh generated CSS');
   assert.deepEqual(fs.readFileSync(dashboardReact), originalReact, 'verification must not rewrite the fresh React bundle');
+
+  const staleManifest = JSON.parse(originalManifest.toString('utf8'));
+  staleManifest.sourceHash = '0'.repeat(64);
+  fs.writeFileSync(dashboardManifest, `${JSON.stringify(staleManifest, null, 2)}\n`);
+  const staleSourceCheck = runCheck(testPublic);
+  assert.notEqual(staleSourceCheck.status, 0, 'a source fingerprint mismatch must fail generated-asset verification');
+  assert.match(`${staleSourceCheck.stdout}\n${staleSourceCheck.stderr}`, /Generated dashboard assets are stale/i);
+  fs.writeFileSync(dashboardManifest, originalManifest);
 
   const staleCss = Buffer.concat([originalCss, Buffer.from('\n/* intentional stale dashboard probe */\n')]);
   fs.writeFileSync(dashboardCss, staleCss);

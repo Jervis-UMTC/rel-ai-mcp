@@ -27,6 +27,7 @@ function createDesktopTray(deps) {
       tray = new Tray(image);
       tray.setToolTip('Rel.AI MCP');
       tray.on(platform === 'linux' ? 'click' : 'double-click', focusPrimaryWindow);
+      if (platform === 'win32') tray.on('balloon-click', focusPrimaryWindow);
       update();
       return tray;
     } catch (error) {
@@ -92,6 +93,26 @@ function createDesktopTray(deps) {
     }).catch(onError);
   }
 
+  function showBalloon(content = {}) {
+    if (platform !== 'win32' || !tray || typeof tray.displayBalloon !== 'function') return false;
+    const title = String(content.title || '').trim();
+    const body = String(content.body || '').trim();
+    if (!title) return false;
+    try {
+      tray.displayBalloon({
+        title,
+        content: body,
+        iconType: content.category === 'errors' ? 'error' : 'info',
+        noSound: content.silent === true,
+        respectQuietTime: true
+      });
+      return true;
+    } catch (error) {
+      onError(error);
+      return false;
+    }
+  }
+
   function destroy() {
     if (!tray) return false;
     const current = tray;
@@ -105,7 +126,7 @@ function createDesktopTray(deps) {
     }
   }
 
-  return { setup, update, destroy, isAvailable: () => Boolean(tray) };
+  return { setup, update, showBalloon, destroy, isAvailable: () => Boolean(tray) };
 }
 
 export { createDesktopTray };

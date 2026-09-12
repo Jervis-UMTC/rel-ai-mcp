@@ -147,14 +147,14 @@ function verifyPackageContracts() {
   }
   assert.equal(rootPackage.scripts['test:installed'], undefined);
   assert.match(String(rootPackage.scripts['release:check'] || ''), /verify:generated[\s\S]*release-check\.mjs/, 'release preflight must reject stale generated assets before packaging starts');
-  assert.match(String(rootPackage.scripts['build:frontend'] || ''), /vite build/, 'normal frontend builds must use the canonical Vite pipeline');
+  assert.match(String(rootPackage.scripts['build:frontend'] || ''), /vite build[\s\S]*write-dashboard-generated-manifest\.mjs/, 'normal frontend builds must use Vite and record generated-asset integrity');
   assert.match(String(rootPackage.scripts['dev:frontend'] || ''), /\bvite\b/, 'frontend development must expose Vite HMR');
   assert.equal(rootPackage.scripts['build:css'], undefined, 'the obsolete standalone CSS generator must be removed');
   assert.equal(rootPackage.scripts['build:js'], undefined, 'the obsolete standalone JavaScript generator must be removed');
 
   const generatedCheck = fs.readFileSync(path.join(tmp, 'scripts', 'check-generated.mjs'), 'utf8');
-  assert.match(generatedCheck, /mergeConfig[\s\S]*viteConfig/, 'generated-asset verification must rebuild through the canonical Vite configuration');
-  assert.doesNotMatch(generatedCheck, /git\s+diff|runNpm/, 'generated-asset verification must not repair tracked files before reporting staleness');
+  assert.match(generatedCheck, /verifyDashboardGeneratedState/, 'generated-asset verification must use the platform-independent source and output integrity manifest');
+  assert.doesNotMatch(generatedCheck, /mergeConfig|viteConfig|git\s+diff|runNpm/, 'generated-asset verification must not rebuild or repair tracked files before reporting staleness');
 
   assert.equal(electronPackage.build.electronUpdaterCompatibility, '>=2.16');
   assert.deepEqual(electronPackage.build.electronLanguages, ['en-US']);

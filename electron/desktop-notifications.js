@@ -43,6 +43,8 @@ function createDesktopNotifications(options = {}) {
     Notification,
     iconPath = '',
     isReady = () => true,
+    useNativeNotifications = true,
+    showFallbackNotification = null,
     onNotificationClick = () => {},
     onLog = () => {}
   } = options;
@@ -122,14 +124,34 @@ function createDesktopNotifications(options = {}) {
     const version = cleanText(eventOptions.version, 80);
     if (category === 'applicationUpdates' && version && preferences.ignoredUpdateVersion === version) return false;
     if (!isReady()) return false;
+
+    const title = cleanText(content.title, 100);
+    const body = cleanText(content.body, 260);
+    if (!title) return false;
+    if (!useNativeNotifications) {
+      try {
+        const shown = typeof showFallbackNotification === 'function'
+          && showFallbackNotification({ category, title, body, silent: false }) === true;
+        if (!shown) {
+          reportDeliveryIssue('notification_delivery_unavailable', 'Desktop notifications are unavailable in the current system configuration.');
+          return false;
+        }
+        lastDeliveryIssueKey = '';
+        return true;
+      } catch (error) {
+        reportDeliveryIssue(
+          'notification_delivery_failed',
+          'Desktop notification could not be shown',
+          error?.message || error
+        );
+        return false;
+      }
+    }
     if (typeof Notification?.isSupported === 'function' && !Notification.isSupported()) {
       reportDeliveryIssue('notification_delivery_unavailable', 'Desktop notifications are unavailable in the current system configuration.');
       return false;
     }
 
-    const title = cleanText(content.title, 100);
-    const body = cleanText(content.body, 260);
-    if (!title) return false;
     try {
       const notificationOptions = { title, body, silent: false };
       if (iconPath) notificationOptions.icon = iconPath;

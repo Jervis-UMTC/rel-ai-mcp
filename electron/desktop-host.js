@@ -78,6 +78,7 @@ async function createDesktopHost(options = {}) {
   const iconPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app-icon.png')
     : path.join(electronRoot, 'build', 'icon.png');
+  const useTrayNotificationFallback = process.platform === 'win32' && app.isPackaged !== true;
 
   let serviceRuntime = null;
   let serviceProcessClient = null;
@@ -100,6 +101,8 @@ async function createDesktopHost(options = {}) {
     Notification,
     iconPath,
     isReady: () => app.isReady(),
+    useNativeNotifications: !useTrayNotificationFallback,
+    showFallbackNotification: content => desktopTray?.showBalloon(content) === true,
     onNotificationClick: focusActiveWindow,
     onLog: (message, logOptions) => runtimeLogs.append(message, logOptions)
   });
