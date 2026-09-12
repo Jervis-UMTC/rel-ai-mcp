@@ -285,7 +285,14 @@ function runRendererBenchmark() {
     const executable = path.join(electronRoot, 'dist', executableName);
     const fixture = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), 'test', 'fixtures', 'electron-observability-benchmark');
     if (!fs.existsSync(executable)) throw new Error(`Electron executable is missing: ${executable}`);
-    const child = spawnSync(executable, [fixture], {
+    const electronArgs = [
+      ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+      `--user-data-dir=${path.join(temp, 'electron-profile')}`,
+      fixture
+    ];
+    const child = spawnSync(executable, electronArgs, {
       cwd: fixture,
       env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' },
       encoding: 'utf8',
@@ -295,8 +302,11 @@ function runRendererBenchmark() {
       shell: false
     });
     if (child.error) throw child.error;
-    if (child.signal) throw new Error(`Electron renderer workload was terminated by ${child.signal}.`);
     const output = `${child.stdout || ''}\n${child.stderr || ''}`;
+    if (child.signal) {
+      const detail = output.trim().slice(-4000);
+      throw new Error(`Electron renderer workload was terminated by ${child.signal}.${detail ? ` ${detail}` : ''}`);
+    }
     const marker = output.match(/REL_AI_RENDERER_BENCHMARK_RESULT=([A-Za-z0-9+/=]+)/);
     if (child.status !== 0 || !marker) {
       const encodedError = output.match(/REL_AI_RENDERER_BENCHMARK_ERROR=([A-Za-z0-9+/=]+)/)?.[1];
