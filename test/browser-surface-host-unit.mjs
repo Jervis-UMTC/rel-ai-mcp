@@ -30,6 +30,7 @@ class FakeWebContents extends EventEmitter {
     this.focusCount = 0;
     this.executeJavaScriptError = null;
     this.onExecuteJavaScript = null;
+    this.capturePageHandler = null;
   }
   setWindowOpenHandler(handler) { this.windowOpenHandler = handler; }
   getURL() { return this.url; }
@@ -47,6 +48,13 @@ class FakeWebContents extends EventEmitter {
     if (this.executeJavaScriptError) throw this.executeJavaScriptError;
     if (String(script).includes('return { attached:')) return { attached: true, visible: true };
     return true;
+  }
+  async capturePage() {
+    if (this.capturePageHandler) return this.capturePageHandler();
+    return {
+      toPNG: () => Buffer.from('fake-png'),
+      getSize: () => ({ width: 320, height: 240 })
+    };
   }
   focus() { this.focusCount += 1; }
   isDestroyed() { return this.destroyed; }
@@ -154,6 +162,24 @@ function createHarness({ failOpen = false } = {}) {
   assert.equal(layout.detail, 'layout', 'embedded browser snapshots must expose the requested layout detail mode');
   assert.equal(layout.snapshot, 'true', 'embedded layout snapshots must execute through the page DOM rather than requiring the accessibility debugger');
   await host.run({ action: 'close_session', nativeSessionId: started.nativeSessionId });
+}
+
+{
+  const { host } = createHarness();
+  const started = await host.run({ action: 'start' });
+  const opened = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
+  const screenshot = await host.run({
+    action: 'screenshot',
+    nativeSessionId: started.nativeSessionId,
+    nativePageId: opened.nativePageId,
+    timeoutMs: 100
+  });
+  assert.ok(screenshot.image.bytes > 0, 'viewport screenshots must use Electron capturePage and return image bytes');
+  assert.deepEqual(
+    { width: screenshot.image.width, height: screenshot.image.height },
+    { width: 320, height: 240 }
+  );
+  await host.closeAll();
 }
 
 {

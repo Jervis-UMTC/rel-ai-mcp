@@ -235,31 +235,57 @@ function createBrowserSurfaceHost(options = {}) {
 
   async function screenshotPage(_record, page, payload, options = {}) {
     throwIfAborted(options.signal);
+    const timeoutMs = timeoutFor(payload.timeoutMs);
     let data;
     let width;
     let height;
     if (payload.fullPage === true) {
       const debuggerApi = await attachedDebugger(page.webContents);
-      const metrics = await withAbort(debuggerApi.sendCommand('Page.getLayoutMetrics'), options.signal);
+      const metrics = await withTimeout(
+        withAbort(debuggerApi.sendCommand('Page.getLayoutMetrics'), options.signal),
+        timeoutMs,
+        'Browser screenshot metrics timed out.'
+      );
       const size = metrics?.cssContentSize || metrics?.contentSize || {};
-      const shot = await withAbort(debuggerApi.sendCommand('Page.captureScreenshot', {
-        format: 'png',
-        fromSurface: true,
-        captureBeyondViewport: true
-      }), options.signal);
+      const shot = await withTimeout(
+        withAbort(debuggerApi.sendCommand('Page.captureScreenshot', {
+          format: 'png',
+          fromSurface: true,
+          captureBeyondViewport: true
+        }), options.signal),
+        timeoutMs,
+        'Browser screenshot timed out.'
+      );
       data = String(shot?.data || '');
       width = Math.max(1, Math.ceil(Number(size.width || page.bounds.width || 1)));
       height = Math.max(1, Math.ceil(Number(size.height || page.bounds.height || 1)));
     } else {
-      const debuggerApi = await attachedDebugger(page.webContents);
-      const shot = await withAbort(debuggerApi.sendCommand('Page.captureScreenshot', {
-        format: 'png',
-        fromSurface: true,
-        captureBeyondViewport: false
-      }), options.signal);
-      data = String(shot?.data || '');
-      width = Math.max(1, page.bounds.width);
-      height = Math.max(1, page.bounds.height);
+      try {
+        const image = await withTimeout(
+          withAbort(page.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true }), options.signal),
+          timeoutMs,
+          'Browser screenshot timed out.'
+        );
+        const size = image.getSize?.() || {};
+        data = image.toPNG().toString('base64');
+        width = Math.max(1, Math.ceil(Number(size.width || page.bounds.width || 1)));
+        height = Math.max(1, Math.ceil(Number(size.height || page.bounds.height || 1)));
+      } catch (error) {
+        if (!String(error?.message || error).includes('Current display surface not available for capture')) throw error;
+        const debuggerApi = await attachedDebugger(page.webContents);
+        const shot = await withTimeout(
+          withAbort(debuggerApi.sendCommand('Page.captureScreenshot', {
+            format: 'png',
+            fromSurface: true,
+            captureBeyondViewport: false
+          }), options.signal),
+          timeoutMs,
+          'Browser screenshot timed out.'
+        );
+        data = String(shot?.data || '');
+        width = Math.max(1, page.bounds.width);
+        height = Math.max(1, page.bounds.height);
+      }
     }
     const bytes = Buffer.byteLength(data, 'base64');
     if (bytes > MAX_SCREENSHOT_BYTES) {

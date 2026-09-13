@@ -36,13 +36,13 @@ child.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); });
 try {
   const result = await waitForChildClose(child, 60_000);
   const code = result[0];
+  const probeOutput = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '(probe output missing)';
   if (code === 'timeout') {
-    const probeOutput = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '(probe output missing)';
     child.kill('SIGKILL');
     assert.fail(`Embedded browser Electron probe timed out. probe=${probeOutput} stdout=${stdout} stderr=${stderr}`);
   }
-  assert.equal(code, 0, `Embedded browser Electron probe failed. stdout=${stdout} stderr=${stderr}`);
-  const probe = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+  assert.equal(code, 0, `Embedded browser Electron probe failed. probe=${probeOutput} stdout=${stdout} stderr=${stderr}`);
+  const probe = JSON.parse(probeOutput);
   assert.equal(probe.error, undefined, probe.error);
   assert.equal(probe.started.browserProduct, 'Rel.AI Embedded Chromium');
   assert.equal(probe.positioned.active, true);
@@ -63,7 +63,8 @@ try {
   assert.equal(probe.finalState.active, true);
   assert.equal(probe.finalState.visible, true);
   assert.equal(probe.windowVisible, true, 'The Electron probe window must be render-active for WebContentsView painting.');
-  assert.equal(probe.windowOpacity, 0, 'The real Electron browser probe must remain fully transparent so tests never flash a blank or black window on the user desktop.');
+  const expectedOpacity = process.platform === 'linux' && process.env.CI === 'true' ? 1 : 0;
+  assert.equal(probe.windowOpacity, expectedOpacity, 'The probe must stay transparent on developer desktops while Linux CI renders inside Xvfb for screenshot coverage.');
   assert.equal(probe.windowFocused, false, 'The invisible browser probe must never steal user focus.');
   assert.ok(probe.stateCount >= 4, 'Embedded surface must publish lifecycle and navigation state.');
   assert.equal(probe.events.length, 1);

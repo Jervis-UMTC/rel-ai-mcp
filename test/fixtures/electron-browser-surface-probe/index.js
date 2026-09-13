@@ -19,9 +19,10 @@ app.whenReady().then(async () => {
   });
   const address = server.address();
   const targetUrl = `http://127.0.0.1:${address.port}/fixture`;
+  const useRenderedCiSurface = process.platform === 'linux' && process.env.CI === 'true';
   const win = new BrowserWindow({
     show: false,
-    opacity: 0,
+    opacity: useRenderedCiSurface ? 1 : 0,
     focusable: false,
     skipTaskbar: true,
     width: 900,
