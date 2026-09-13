@@ -357,6 +357,12 @@ async function runProcess(command: string, args: readonly string[] = [], options
       30000,
       DEFAULT_TERMINATION_GRACE_MS
     );
+    const forceWaitMs = clampMilliseconds(
+      options.forceWaitMs ?? config.processForceWaitMs,
+      0,
+      30000,
+      DEFAULT_FORCE_WAIT_MS
+    );
     const isGit = command === 'git';
     if (isGit && options.shell) throw new Error('Rel.AI-owned Git commands must run without shell parsing.');
     const executable = isGit ? (resolveGitExecutable() || command) : command;
@@ -400,6 +406,9 @@ async function runProcess(command: string, args: readonly string[] = [], options
     });
 
     const result = await subprocess;
+    const terminationOutcome = (result.timedOut || result.isCanceled)
+      ? await terminateProcessTree(subprocess, { graceMs: 0, forceWaitMs })
+      : null;
     if (result.timedOut) {
       stderrBuffer.append(`\n[rel-ai-mcp timed out after ${timeoutMs}ms]\n`);
     } else if (result.isCanceled) {
@@ -431,8 +440,8 @@ async function runProcess(command: string, args: readonly string[] = [], options
       timedOut: result.timedOut === true,
       ...(spawnError ? { spawnError: true } : {}),
       ...((result.timedOut || result.isCanceled) ? {
-        terminationConfirmed: true,
-        forcedTermination: result.isForcefullyTerminated === true
+        terminationConfirmed: terminationOutcome?.exited === true,
+        forcedTermination: result.isForcefullyTerminated === true || terminationOutcome?.forced === true
       } : {}),
       queueWaitMs,
       durationMs: Number(result.durationMs || 0),
