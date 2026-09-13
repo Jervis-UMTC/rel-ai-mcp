@@ -11,6 +11,7 @@ import { resolvePackagedDirectory } from './packaged-directory.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const platform = normalizeElectronPlatform(valueAfter(argv, '--platform', process.platform));
+const allowHeadless = argv.includes('--allow-headless');
 assert.equal(platform, process.platform, 'Packaged computer runtime verification must run on the target platform.');
 const spec = electronPlatformSpec(platform);
 const packageDirectory = resolvePackagedDirectory(root, argv, { platform });
@@ -63,8 +64,14 @@ try {
   assert.equal(parsed.available, true, 'Packaged computer runtime must report available.');
   assert.equal(parsed.platform, platform, 'Packaged computer runtime reported the wrong platform.');
   assert.equal(parsed.engine, '@midscene/computer', 'Packaged computer runtime must use the Midscene engine.');
-  assert.ok(Number(parsed.displays) > 0, 'Packaged computer runtime must enumerate at least one display.');
-  console.log(`Packaged Midscene computer runtime verified on ${platform} with ${parsed.displays} display(s).`);
+  const displayCount = Number(parsed.displays);
+  assert.ok(Number.isInteger(displayCount) && displayCount >= 0, 'Packaged computer runtime must report a valid display count.');
+  if (!allowHeadless) {
+    assert.ok(displayCount > 0, 'Packaged computer runtime must enumerate at least one display.');
+  }
+  console.log(displayCount > 0
+    ? `Packaged Midscene computer runtime verified on ${platform} with ${displayCount} display(s).`
+    : `Packaged Midscene computer runtime verified on headless ${platform} runner.`);
 } finally {
   fs.rmSync(probe, { force: true });
 }

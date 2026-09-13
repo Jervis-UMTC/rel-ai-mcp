@@ -235,6 +235,8 @@ function verifyWorkflowContracts() {
     /verify-packaged-computer-runtime\.mjs --platform win32/,
     /verify-packaged-computer-runtime\.mjs --platform linux/,
     /verify-packaged-computer-runtime\.mjs --platform darwin/,
+    /computer_runtime_args: --allow-headless/,
+    /matrix\.computer_runtime_args/,
     /npm run verify:fuses -- --platform win32/,
     /npm run verify:fuses -- --platform linux/,
     /scripts\/smoke-linux-desktop\.sh/,

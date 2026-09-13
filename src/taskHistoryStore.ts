@@ -342,11 +342,14 @@ function findTaskReuseCandidates(config: TaskHistoryConfig, workspaceAlias: unkn
   const conversation = String(conversationId || '').trim();
   if (!workspace || !conversation) return [];
   try {
-    const sessions = findSessionsContaining(getTaskHistoryDir(config), [conversation], {
+    const directory = getTaskHistoryDir(config);
+    const sessions = findSessionsContaining(directory, [conversation], {
       workspace,
       limit: clamp(limit || 24, 1, 50)
     });
-    return (Array.isArray(sessions) ? sessions : []).filter(session => Boolean(session?.id)) as TaskRecord[];
+    return (Array.isArray(sessions) ? sessions : [])
+      .filter(session => Boolean(session?.id))
+      .map(session => readWorkingSession(directory, String(session.id)) || session) as TaskRecord[];
   } catch (error) {
     if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] task reuse candidate search:', error);
     return [];
