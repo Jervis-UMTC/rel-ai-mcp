@@ -21,7 +21,6 @@ assert.equal(fs.existsSync(electronBinary), true, `Electron binary not found at 
 const child = spawn(electronBinary, [
   '--no-sandbox',
   '--disable-gpu',
-  '--disable-software-rasterizer',
   `--user-data-dir=${path.join(temp, 'profile')}`,
   path.join(root, 'test', 'fixtures', 'electron-browser-surface-probe')
 ], {
@@ -37,7 +36,11 @@ child.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); });
 try {
   const result = await waitForChildClose(child, 60_000);
   const code = result[0];
-  if (code === 'timeout') child.kill('SIGKILL');
+  if (code === 'timeout') {
+    const probeOutput = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '(probe output missing)';
+    child.kill('SIGKILL');
+    assert.fail(`Embedded browser Electron probe timed out. probe=${probeOutput} stdout=${stdout} stderr=${stderr}`);
+  }
   assert.equal(code, 0, `Embedded browser Electron probe failed. stdout=${stdout} stderr=${stderr}`);
   const probe = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
   assert.equal(probe.error, undefined, probe.error);
