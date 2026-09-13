@@ -60,7 +60,6 @@ function createBrowserSurfaceHost(options = {}) {
     const nativeSessionId = `embedded_browser_${crypto.randomBytes(18).toString('base64url')}`;
     const profileDirectory = String(payload.profileDirectory || '').trim();
     const persistent = Boolean(profileDirectory);
-    const headless = payload.headless === true;
     const viewport = normalizeViewport(payload.viewport);
     const browserSession = persistent
       ? session.fromPath(path.resolve(profileDirectory))
@@ -70,7 +69,6 @@ function createBrowserSurfaceHost(options = {}) {
       nativeSessionId,
       electronSession: browserSession,
       persistent,
-      headless,
       viewport,
       pages: new Map(),
       activePageId: '',
@@ -85,13 +83,12 @@ function createBrowserSurfaceHost(options = {}) {
     activeSessionId = nativeSessionId;
     publishState();
     try {
-      if (!headless) await withAbort(openDashboard('#browser'), options.signal);
+      await withAbort(openDashboard('#browser'), options.signal);
       return {
         ok: true,
         nativeSessionId,
         browserProduct: 'Rel.AI Embedded Chromium',
         profile: persistent ? 'persistent' : 'ephemeral',
-        headless,
         viewport
       };
     } catch (error) {
@@ -416,9 +413,6 @@ function createBrowserSurfaceHost(options = {}) {
       ? sessions.get(pinnedSessionId) || activeRecord()
       : visibleRecord();
     if (!record) throw new Error('No embedded browser session is active.');
-    if (value === 'user' && record.headless) {
-      throw browserError('BROWSER_HEADLESS_SESSION', 'Headless browser sessions have no live surface to take over.');
-    }
     record.control = value;
     if (value === 'user') {
       pinnedSessionId = record.nativeSessionId;
@@ -450,7 +444,6 @@ function createBrowserSurfaceHost(options = {}) {
         nativeSessionId: candidate.nativeSessionId,
         active: candidate.nativeSessionId === record?.nativeSessionId,
         control: candidate.control,
-        headless: candidate.headless === true,
         viewport: { ...candidate.viewport },
         pageCount: candidate.pages.size,
         url: candidatePage ? publicPageUrl(candidatePage.webContents.getURL()) : '',
@@ -476,7 +469,6 @@ function createBrowserSurfaceHost(options = {}) {
       activeSessionCount: sessions.size,
       sessions: sessionSummaries,
       control: record?.control || 'ai',
-      headless: record?.headless === true,
       viewport: record ? { ...record.viewport } : null,
       nativeSessionId: record?.nativeSessionId || '',
       nativePageId: page?.nativePageId || '',
@@ -751,7 +743,7 @@ function createBrowserSurfaceHost(options = {}) {
     const record = visibleRecord();
     const page = record ? activePage(record) : null;
     const win = getDashboardWindow();
-    if (!surfaceBounds.visible || record?.headless === true || !page || !win || win.isDestroyed?.()) {
+    if (!surfaceBounds.visible || !page || !win || win.isDestroyed?.()) {
       detachAttached();
       return;
     }
@@ -772,7 +764,7 @@ function createBrowserSurfaceHost(options = {}) {
   function syncPageRuntime(record, page) {
     return enqueuePageRuntime(page, async () => {
       if (page.closing || page.webContents.isDestroyed?.()) return;
-      if (attached?.page !== page || !surfaceBounds.visible || record.headless) return;
+      if (attached?.page !== page || !surfaceBounds.visible) return;
       const url = publicPageUrl(page.webContents.getURL?.() || '');
       if (!url || url === 'about:blank') return;
       await nextTurn();

@@ -77,7 +77,7 @@ const COMPUTER_OMIT = Object.freeze({
 });
 
 const BROWSER_FIELDS = Object.freeze([
-  'sessionId', 'tabId', 'url', 'profile', 'headless', 'ignoreHTTPSErrors', 'width', 'height', 'timeoutMs', 'detail',
+  'sessionId', 'tabId', 'url', 'profile', 'ignoreHTTPSErrors', 'width', 'height', 'timeoutMs', 'detail',
   'interaction', 'target', 'input', 'key', 'selectValue', 'state', 'fullPage', 'path'
 ]);
 function browserOmit(...allowed) {
@@ -86,7 +86,7 @@ function browserOmit(...allowed) {
 }
 const BROWSER_OMIT = Object.freeze({
   status: browserOmit('sessionId'),
-  start: browserOmit('url', 'profile', 'headless', 'ignoreHTTPSErrors', 'width', 'height', 'timeoutMs'),
+  start: browserOmit('url', 'profile', 'ignoreHTTPSErrors', 'width', 'height', 'timeoutMs'),
   tabs: browserOmit('sessionId'),
   open_tab: browserOmit('sessionId', 'url', 'timeoutMs'),
   close_tab: browserOmit('sessionId', 'tabId'),

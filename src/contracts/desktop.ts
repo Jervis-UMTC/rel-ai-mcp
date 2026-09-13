@@ -35,7 +35,6 @@ export interface DesktopBrowserSessionDto {
   nativeSessionId: string;
   active: boolean;
   control: 'ai' | 'user';
-  headless: boolean;
   pageCount: number;
   url: string;
   title: string;
@@ -48,7 +47,6 @@ export interface DesktopBrowserStateDto {
   activeSessionCount?: number;
   sessions?: readonly DesktopBrowserSessionDto[];
   control?: 'ai' | 'user';
-  headless?: boolean;
   nativeSessionId?: string;
   nativePageId?: string;
   pageCount?: number;

@@ -82,7 +82,6 @@ async function launchBrowserDriver(options: LaunchBrowserDriverOptions): Promise
   const started = objectValue(await bridge({
     action: 'start',
     viewport: options.viewport,
-    headless: options.headlessExplicit === true ? options.headless : false,
     ignoreHTTPSErrors: options.ignoreHTTPSErrors === true,
     ...(options.profileDirectory ? { profileDirectory: options.profileDirectory } : {})
   }, options.signal ? { signal: options.signal } : undefined));

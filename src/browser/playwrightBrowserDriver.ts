@@ -18,8 +18,6 @@ type BrowserPageResult = Record<string, unknown> & Readonly<{ url: string }>;
 type BrowserSnapshotDetail = 'semantic' | 'layout';
 
 type LaunchBrowserDriverOptions = Readonly<{
-  headless: boolean;
-  headlessExplicit?: boolean;
   viewport: Viewport;
   ignoreHTTPSErrors?: boolean;
   profileDirectory?: string;
@@ -67,14 +65,14 @@ async function launchLocalBrowserDriver(options: LaunchBrowserDriverOptions): Pr
   try {
     if (persistent) {
       context = await chromium.launchPersistentContext(String(options.profileDirectory), {
-        headless: options.headless,
+        headless: false,
         executablePath: runtime.executablePath,
         viewport: options.viewport,
         ignoreHTTPSErrors: options.ignoreHTTPSErrors === true
       });
       browser = context.browser() || undefined;
     } else {
-      browser = await chromium.launch({ headless: options.headless, executablePath: runtime.executablePath });
+      browser = await chromium.launch({ headless: false, executablePath: runtime.executablePath });
       context = await browser.newContext({
         viewport: options.viewport,
         ignoreHTTPSErrors: options.ignoreHTTPSErrors === true

@@ -121,13 +121,12 @@ app.whenReady().then(async () => {
     pageContents.sendInputEvent({ type: 'mouseWheel', x: 100, y: 100, deltaX: 0, deltaY: 500, canScroll: true });
     await new Promise(resolve => setTimeout(resolve, 100));
     const aiScrollY = await pageContents.executeJavaScript('scrollY');
-    const headless = await host.run({ action: 'start', headless: true, viewport: { width: 800, height: 600 } });
-    await host.run({ action: 'open_page', nativeSessionId: headless.nativeSessionId });
-    const headlessState = await host.setBounds({ visible: true, x: 24, y: 80, width: 500, height: 500 });
-    let headlessTakeoverError = null;
-    try { await host.setControl('user'); }
-    catch (error) { headlessTakeoverError = { code: error?.code || '', message: error?.message || String(error) }; }
-    await host.run({ action: 'close_session', nativeSessionId: headless.nativeSessionId });
+    const legacyHeadless = await host.run({ action: 'start', headless: true, viewport: { width: 800, height: 600 } });
+    await host.run({ action: 'open_page', nativeSessionId: legacyHeadless.nativeSessionId });
+    const legacyHeadlessState = await host.setBounds({ visible: true, x: 24, y: 80, width: 500, height: 500 });
+    const legacyHeadlessUserState = await host.setControl('user');
+    await host.setControl('ai');
+    await host.run({ action: 'close_session', nativeSessionId: legacyHeadless.nativeSessionId });
     const finalState = host.getState();
     fs.writeFileSync(outputPath, JSON.stringify({
       started,
@@ -152,8 +151,9 @@ app.whenReady().then(async () => {
       userState,
       takeoverError,
       aiState,
-      headlessState,
-      headlessTakeoverError,
+      legacyHeadless,
+      legacyHeadlessState,
+      legacyHeadlessUserState,
       finalState,
       windowVisible: win.isVisible(),
       windowOpacity: win.getOpacity(),

@@ -114,13 +114,6 @@
   white-space: nowrap;
 }
 
-.browser-headless-badge {
-  flex: 0 0 auto;
-  min-height: 0;
-  padding: 1px 7px;
-  font-size: 10px;
-}
-
 .browser-tabbar {
   display: flex;
   min-width: 0;
@@ -494,10 +487,6 @@
   color: var(--ui-text-tertiary);
   font-size: 13px;
   text-align: center;
-}
-
-.browser-surface-slot[data-headless='true'] .browser-surface-placeholder {
-  color: var(--ui-text-secondary);
 }
 
 .browser-surface-icon { color: var(--ui-text-tertiary); opacity: .8; }

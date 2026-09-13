@@ -283,16 +283,16 @@ function createHarness({ failOpen = false } = {}) {
   const { host, childViews, routes } = createHarness();
   const started = await host.run({ action: 'start', headless: true, viewport: { width: 800, height: 600 } });
   await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
-  await host.setBounds({ visible: true, x: 10, y: 20, width: 700, height: 500 });
-  assert.deepEqual(routes, [], 'headless sessions must not open the Browser dashboard automatically');
-  assert.equal(host.getState().visible, false, 'headless sessions must never attach a live WebContentsView');
-  assert.deepEqual(host.getState().viewport, { width: 800, height: 600 });
-  assert.equal(childViews.size, 0);
-  await assert.rejects(
-    () => host.setControl('user'),
-    error => error?.code === 'BROWSER_HEADLESS_SESSION',
-    'headless sessions must not offer user takeover without a live surface'
-  );
+  const state = await host.setBounds({ visible: true, x: 10, y: 20, width: 700, height: 500 });
+  assert.deepEqual(routes, ['#browser'], 'all embedded browser sessions must open the visible Browser dashboard');
+  assert.equal(Object.hasOwn(started, 'headless'), false, 'the removed headless mode must not remain in the embedded browser contract');
+  assert.equal(Object.hasOwn(state, 'headless'), false, 'browser state must not expose a dead headless mode');
+  assert.equal(state.visible, true, 'legacy headless input must not suppress the live WebContentsView');
+  assert.deepEqual(state.viewport, { width: 800, height: 600 });
+  assert.equal(childViews.size, 1);
+  const userState = await host.setControl('user');
+  assert.equal(userState.control, 'user', 'every embedded browser session must support user takeover');
+  await host.setControl('ai');
   await host.closeAll();
 }
 

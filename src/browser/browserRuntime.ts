@@ -34,7 +34,6 @@ type BrowserArgs = Readonly<Record<string, unknown> & StructuredInteractionArgs 
   url?: unknown;
   width?: unknown;
   height?: unknown;
-  headless?: unknown;
   ignoreHTTPSErrors?: unknown;
   timeoutMs?: unknown;
   detail?: unknown;
@@ -163,8 +162,6 @@ function createBrowserRuntime(dependencies: BrowserRuntimeDependencies = {}): Br
     let record: BrowserSessionRecord | null = null;
     try {
       driver = await withAbortResource(launch({
-        headless: args.headless !== false,
-        headlessExplicit: args.headless != null,
         viewport,
         ignoreHTTPSErrors: args.ignoreHTTPSErrors === true,
         ...(options.signal ? { signal: options.signal } : {}),

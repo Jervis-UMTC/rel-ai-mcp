@@ -30,8 +30,6 @@ configureBrowserNativeBridge(bridge);
 try {
   const controller = new AbortController();
   const driver = await launchBrowserDriver({
-    headless: true,
-    headlessExplicit: true,
     viewport: { width: 1280, height: 720 },
     ignoreHTTPSErrors: true,
     profileDirectory: 'C:/profiles/test',
@@ -41,7 +39,6 @@ try {
   assert.deepEqual(calls[0], {
     action: 'start',
     viewport: { width: 1280, height: 720 },
-    headless: true,
     ignoreHTTPSErrors: true,
     profileDirectory: 'C:/profiles/test'
   });

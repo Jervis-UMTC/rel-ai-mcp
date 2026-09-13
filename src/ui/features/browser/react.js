@@ -19,7 +19,7 @@ function createBrowserRoute() {
       frameRef.current = requestAnimationFrame(() => {
         frameRef.current = 0;
         const element = surfaceRef.current;
-        if (!element || !state.active || state.headless === true) {
+        if (!element || !state.active) {
           void Promise.resolve(browser.setBounds({ visible: false })).catch(() => {});
           return;
         }
@@ -39,7 +39,7 @@ function createBrowserRoute() {
           height: Math.max(1, Math.round(rect.height))
         })).catch(nextError => setError(errorMessage(nextError)));
       });
-    }, [browser, state.active, state.headless]);
+    }, [browser, state.active]);
 
     useEffect(() => {
       if (!browser) return undefined;
@@ -59,7 +59,7 @@ function createBrowserRoute() {
     }, [browser]);
 
     useEffect(() => {
-      if (!browser || !state.active || state.headless === true) {
+      if (!browser || !state.active) {
         if (browser) void Promise.resolve(browser.setBounds({ visible: false })).catch(() => {});
         return undefined;
       }
@@ -77,7 +77,7 @@ function createBrowserRoute() {
         frameRef.current = 0;
         void Promise.resolve(browser.setBounds({ visible: false })).catch(() => {});
       };
-    }, [browser, state.active, state.headless, syncBounds]);
+    }, [browser, state.active, syncBounds]);
 
     const tabListRef = useRef(null);
     const activeTabRef = useRef(null);
@@ -164,7 +164,6 @@ function createBrowserRoute() {
     }
 
     const userControl = state.control === 'user';
-    const headless = state.headless === true;
     const sessions = Array.isArray(state.sessions) ? state.sessions : [];
     const tabs = Array.isArray(state.tabs) ? state.tabs : [];
     const activeIndex = Math.max(0, tabs.findIndex(tab => tab?.active === true || String(tab?.nativePageId || '') === state.nativePageId));
@@ -185,7 +184,7 @@ function createBrowserRoute() {
                   const label = sessionLabel(session, index);
                   const pending = busy === `session:${nativeSessionId}`;
                   return h('button', {
-                    className: `browser-session-select${activeSession ? ' active' : ''}${pending ? ' pending' : ''}${session?.headless ? ' headless' : ''}`,
+                    className: `browser-session-select${activeSession ? ' active' : ''}${pending ? ' pending' : ''}`,
                     type: 'button',
                     key: nativeSessionId || `${index}`,
                     disabled: pending || !nativeSessionId || (userControl && !activeSession),
@@ -195,8 +194,7 @@ function createBrowserRoute() {
                     onClick: () => { void run(`session:${nativeSessionId}`, () => browser.selectSession(nativeSessionId)); }
                   },
                     h('span', { className: 'browser-session-dot', 'aria-hidden': 'true' }),
-                    h('span', { className: 'browser-session-name' }, shortLabel(label)),
-                    session?.headless ? h('span', { className: 'badge browser-headless-badge' }, 'Headless') : null,
+                    h('span', { className: 'browser-session-name' }, label),
                     pending ? h('span', { className: 'browser-spinner', 'aria-hidden': 'true' }) : null
                   );
                 })
@@ -302,15 +300,15 @@ function createBrowserRoute() {
             h('span', { className: 'sr-only', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, copyStatus)
           ),
           state.loading ? h('div', { className: 'browser-loading-bar', 'aria-hidden': 'true' }, h('i', null)) : null,
-          h('span', { className: `status-pill ${userControl ? 'warn' : 'working'}` }, headless ? 'Headless · AI control' : (userControl ? 'Your control' : 'AI control · Read-only')),
+          h('span', { className: `status-pill ${userControl ? 'warn' : 'working'}` }, userControl ? 'Your control' : 'AI control · Read-only'),
           viewportLabel ? h('span', { className: 'browser-viewport-pill mono', title: 'AI browser viewport' }, viewportLabel) : null,
           h('div', { className: 'browser-toolbar-actions' },
-            headless ? null : h('button', {
-                className: userControl ? 'primary' : 'secondary',
-                type: 'button',
-                disabled: busy === 'control' || busy === 'stop',
-                onClick: () => { void run('control', () => browser.setControl(userControl ? 'ai' : 'user')); }
-              }, busy === 'control' ? 'Changing…' : (userControl ? 'Return to AI' : 'Take control')),
+            h('button', {
+              className: userControl ? 'primary' : 'secondary',
+              type: 'button',
+              disabled: busy === 'control' || busy === 'stop',
+              onClick: () => { void run('control', () => browser.setControl(userControl ? 'ai' : 'user')); }
+            }, busy === 'control' ? 'Changing…' : (userControl ? 'Return to AI' : 'Take control')),
             h('button', {
               className: 'danger',
               type: 'button',
@@ -327,19 +325,12 @@ function createBrowserRoute() {
         className: 'browser-surface-slot',
         ref: surfaceRef,
         role: 'region',
-        'data-headless': headless ? 'true' : 'false',
-        'aria-label': headless
-          ? `Headless local browser. Rel.AI controls this page${viewportLabel ? ` at ${viewportLabel}` : ''}.`
-          : (userControl ? 'Live local browser. You have control.' : 'Live local browser. Rel.AI has control. User input is read-only.')
+        'aria-label': userControl ? 'Live local browser. You have control.' : 'Live local browser. Rel.AI has control. User input is read-only.'
       },
         h('div', { className: 'browser-surface-placeholder', 'aria-hidden': 'true' },
           h(Icon, { name: userControl ? 'play' : 'browser', size: 20, className: 'browser-surface-icon' }),
-          h('span', null, headless
-            ? 'Running headless — no live browser surface is attached.'
-            : (userControl ? 'You control this page — interact directly.' : 'Watch live — take control to interact.')),
-          h('span', { className: 'browser-surface-sub' }, headless
-            ? `Rel.AI is operating this page${viewportLabel ? ` at ${viewportLabel}` : ''}.`
-            : (pageHost ? pageHost : 'Live view renders here'))
+          h('span', null, userControl ? 'You control this page — interact directly.' : 'Watch live — take control to interact.'),
+          h('span', { className: 'browser-surface-sub' }, pageHost ? pageHost : 'Live view renders here')
         )
       )
     );
@@ -353,7 +344,6 @@ function emptyState(available) {
     active: false,
     activeSessionCount: 0,
     control: 'ai',
-    headless: false,
     viewport: null,
     url: '',
     title: '',
@@ -379,11 +369,6 @@ function hostOf(url) {
 function displayUrl(url) {
   const value = String(url || '');
   return value.length > 120 ? `${value.slice(0, 117)}…` : value;
-}
-
-function shortLabel(label) {
-  const value = String(label || '');
-  return value.replace(/\s+·\s+Headless$/, '');
 }
 
 function faviconLetter(label) {
@@ -423,12 +408,12 @@ function fallbackCopy(text) {
 
 function sessionLabel(session, index) {
   const title = String(session?.title || '').trim();
-  if (title) return `${title}${session?.headless ? ' · Headless' : ''}`;
+  if (title) return title;
   const url = String(session?.url || '').trim();
   if (url) {
-    try { return `${new URL(url).hostname || url}${session?.headless ? ' · Headless' : ''}`; } catch { return url; }
+    try { return new URL(url).hostname || url; } catch { return url; }
   }
-  return `Session ${index + 1}${session?.headless ? ' · Headless' : ''}`;
+  return `Session ${index + 1}`;
 }
 
 function tabLabel(tab, index) {

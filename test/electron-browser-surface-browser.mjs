@@ -67,10 +67,11 @@ try {
   assert.equal(probe.takeoverError?.code, 'BROWSER_USER_CONTROL_ACTIVE');
   assert.equal(probe.aiState.control, 'ai');
   assert.equal(probe.aiScrollY, probe.userScrollY, 'returning control to AI must block further wheel scrolling');
-  assert.equal(probe.headlessState.headless, true);
-  assert.equal(probe.headlessState.visible, false, 'headless sessions must never attach a live WebContentsView');
-  assert.deepEqual(probe.headlessState.viewport, { width: 800, height: 600 });
-  assert.equal(probe.headlessTakeoverError?.code, 'BROWSER_HEADLESS_SESSION');
+  assert.equal(Object.hasOwn(probe.legacyHeadless, 'headless'), false, 'embedded browser start must not expose the removed headless mode');
+  assert.equal(Object.hasOwn(probe.legacyHeadlessState, 'headless'), false, 'desktop browser state must not expose the removed headless mode');
+  assert.equal(probe.legacyHeadlessState.visible, true, 'legacy headless input must still produce a visible live browser surface');
+  assert.deepEqual(probe.legacyHeadlessState.viewport, { width: 800, height: 600 });
+  assert.equal(probe.legacyHeadlessUserState.control, 'user', 'every embedded browser session must support user takeover');
   assert.equal(probe.finalState.active, true);
   assert.equal(probe.finalState.visible, true);
   assert.equal(probe.windowVisible, true, 'The Electron probe window must be render-active for WebContentsView painting.');
