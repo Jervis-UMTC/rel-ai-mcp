@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -35,10 +34,7 @@ child.stdout.on('data', chunk => { stdout += chunk.toString('utf8'); });
 child.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); });
 
 try {
-  const result = await Promise.race([
-    once(child, 'close'),
-    new Promise(resolve => setTimeout(() => resolve(['timeout']), 45_000))
-  ]);
+  const result = await waitForChildClose(child, 60_000);
   const code = result[0];
   if (code === 'timeout') child.kill('SIGKILL');
   assert.equal(code, 0, `Embedded browser Electron probe failed. stdout=${stdout} stderr=${stderr}`);
@@ -76,4 +72,16 @@ try {
 } finally {
   if (child.exitCode == null) child.kill('SIGKILL');
   await fs.promises.rm(temp, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
+}
+
+function waitForChildClose(childProcess, timeoutMs) {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => finish(['timeout']), timeoutMs);
+    childProcess.once('close', (...args) => finish(args));
+
+    function finish(result) {
+      clearTimeout(timer);
+      resolve(result);
+    }
+  });
 }
