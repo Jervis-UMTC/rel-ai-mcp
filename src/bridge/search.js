@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { resolveGitExecutable } from '../gitExecutable.js';
-import { appendLimited, killProcessTree } from '../process.js';
+import { appendLimited, terminateProcessTree } from '../process.js';
 import { makeProcessEnvironment } from '../processEnvironment.js';
 import { collectOptionsFromWorkspace, collectTextFiles, isSecretPath } from '../safety.js';
 import { clampNumber } from './limits.js';
@@ -292,9 +292,9 @@ function runGitGrep(workspace, gitArgs, maxResults, signal) {
     let pending = "";
     let stderr = "";
     let settled = false;
+    let terminating = false;
     const onAbort = () => {
-      killProcessTree(child);
-      fail(searchAbortError(signal));
+      void settleAfterTermination({ error: searchAbortError(signal) });
     };
     signal?.addEventListener?.('abort', onAbort, { once: true });
 
@@ -308,22 +308,23 @@ function runGitGrep(workspace, gitArgs, maxResults, signal) {
         matches.push(match);
         return;
       }
-      killProcessTree(child);
-      finish({
-        exitCode: 0,
-        signal: "SIGKILL",
-        matches,
-        matchCount,
-        truncated: true,
-        stderr: stderr.trim()
+      void settleAfterTermination({
+        payload: {
+          exitCode: 0,
+          signal: "SIGKILL",
+          matches,
+          matchCount,
+          truncated: true,
+          stderr: stderr.trim()
+        }
       });
     }
 
     function consumeChunk(text, flush = false) {
-      if (settled) return;
+      if (settled || terminating) return;
       pending += text;
       let newlineIndex = pending.indexOf("\n");
-      while (!settled && newlineIndex >= 0) {
+      while (!settled && !terminating && newlineIndex >= 0) {
         consumeLine(pending.slice(0, newlineIndex));
         pending = pending.slice(newlineIndex + 1);
         newlineIndex = pending.indexOf("\n");
@@ -335,17 +336,18 @@ function runGitGrep(workspace, gitArgs, maxResults, signal) {
     }
 
     let timer = setTimeout(() => {
-      killProcessTree(child);
       const hasPartialResults = matches.length > 0;
-      finish({
-        exitCode: hasPartialResults ? 0 : -1,
-        signal: "SIGKILL",
-        matches,
-        matchCount,
-        truncated: hasPartialResults,
-        timedOut: true,
-        stderr: appendLimited(stderr, `\n[rel-ai-mcp timed out after ${SEARCH_TIMEOUT_MS}ms]\n`, MAX_STDERR_BYTES).trim(),
-        error: `Timed out after ${SEARCH_TIMEOUT_MS}ms`
+      void settleAfterTermination({
+        payload: {
+          exitCode: hasPartialResults ? 0 : -1,
+          signal: "SIGKILL",
+          matches,
+          matchCount,
+          truncated: hasPartialResults,
+          timedOut: true,
+          stderr: appendLimited(stderr, `\n[rel-ai-mcp timed out after ${SEARCH_TIMEOUT_MS}ms]\n`, MAX_STDERR_BYTES).trim(),
+          error: `Timed out after ${SEARCH_TIMEOUT_MS}ms`
+        }
       });
     }, SEARCH_TIMEOUT_MS);
     if (typeof timer.unref === "function") timer.unref();
@@ -356,6 +358,18 @@ function runGitGrep(workspace, gitArgs, maxResults, signal) {
         timer = null;
       }
       signal?.removeEventListener?.('abort', onAbort);
+    }
+
+    async function settleAfterTermination({ payload, error } = {}) {
+      if (settled || terminating) return;
+      terminating = true;
+      cleanup();
+      try {
+        await terminateProcessTree(child, { graceMs: 0 });
+      } finally {
+        if (error) fail(error);
+        else finish(payload);
+      }
     }
 
     function finish(payload) {
@@ -377,10 +391,11 @@ function runGitGrep(workspace, gitArgs, maxResults, signal) {
       stderr = appendLimited(stderr, chunk.toString("utf8"), MAX_STDERR_BYTES);
     });
     child.on("error", (error) => {
+      if (terminating) return;
       finish({ exitCode: -1, matches, matchCount, stderr: stderr.trim(), error: error.message });
     });
     child.on("close", (code, signal) => {
-      if (settled) return;
+      if (settled || terminating) return;
       consumeChunk(decoder.end(), true);
       finish({
         exitCode: typeof code === "number" ? code : -1,
