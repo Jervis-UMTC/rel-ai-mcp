@@ -142,8 +142,9 @@ function recordLocalToolOutcome(config: AnalyticsConfig = {}, event: LocalToolOu
     const outcome = classifyAnalyticsOutcome(event);
     const performancePhases = sanitizePerformancePhases(event.timings?.phaseMs || event.performancePhases);
     const reliability = reliabilityCountersForOutcome(outcome);
-    migrateLegacyLocalAnalytics(config);
+    let migratedLegacy = false;
     withStateDatabase(config, (db: StateDatabase) => {
+      migratedLegacy = migrateLegacyLocalAnalyticsInDatabase(db, config);
       const document = readDocumentFromDatabase(db, month);
       incrementTotals(document.totals, success, failure, durationMs, reliability);
       incrementPerformancePhases(document.performancePhases, performancePhases);
@@ -188,6 +189,7 @@ function recordLocalToolOutcome(config: AnalyticsConfig = {}, event: LocalToolOu
       }
       upsertDocument(db, document);
     }, { transaction: true });
+    if (migratedLegacy) removeLegacyAnalyticsDirectory(config);
     scheduleRetentionPrune(config);
     return true;
   } catch {
@@ -202,8 +204,9 @@ function recordLocalTaskCompletion(config: AnalyticsConfig = {}, event: { worksp
     const hour = hourKey(at);
     const workspace = boundedLabel(event.workspace, 160);
     const intent = normalizeAnalyticsTaskIntent(event.taskIntent, 'auto');
-    migrateLegacyLocalAnalytics(config);
+    let migratedLegacy = false;
     withStateDatabase(config, (db: StateDatabase) => {
+      migratedLegacy = migrateLegacyLocalAnalyticsInDatabase(db, config);
       const document = readDocumentFromDatabase(db, month);
       incrementTaskIntent(document.taskIntents, intent);
       if (workspace) incrementWorkspaceTaskIntent(document.workspaceTaskIntents, workspace, intent);
@@ -225,6 +228,7 @@ function recordLocalTaskCompletion(config: AnalyticsConfig = {}, event: { worksp
       if (workspace) incrementWorkspaceTaskIntent(hourly.workspaceTaskIntents, workspace, intent);
       upsertDocument(db, document);
     }, { transaction: true });
+    if (migratedLegacy) removeLegacyAnalyticsDirectory(config);
     scheduleRetentionPrune(config);
     return true;
   } catch {
@@ -380,29 +384,33 @@ function parseDocument(text: string, month: string): AnalyticsDocument {
 function migrateLegacyLocalAnalytics(config: AnalyticsConfig = {}): void {
   let migrated = false;
   withStateDatabase(config, (db: StateDatabase) => {
-    if (stateMetaValue(db, LEGACY_MIGRATION_KEY, '') === '1') return;
-    const directory = statePath(config, 'analytics', 'local');
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(directory, { withFileTypes: true });
-    } catch (error) {
-      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
-    }
-    for (const entry of entries) {
-      if (!entry.isFile() || !/^\d{4}-\d{2}\.json$/.test(entry.name)) continue;
-      const month = entry.name.slice(0, 7);
-      const file = path.join(directory, entry.name);
-      try {
-        const stat = fs.statSync(file);
-        if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
-        upsertDocument(db, parseDocument(fs.readFileSync(file, 'utf8'), month), stat.mtimeMs);
-      } catch {}
-    }
-    setStateMeta(db, LEGACY_MIGRATION_KEY, '1');
-    migrated = true;
+    migrated = migrateLegacyLocalAnalyticsInDatabase(db, config);
   }, { transaction: true });
   if (migrated) removeLegacyAnalyticsDirectory(config);
+}
+
+function migrateLegacyLocalAnalyticsInDatabase(db: StateDatabase, config: AnalyticsConfig = {}): boolean {
+  if (stateMetaValue(db, LEGACY_MIGRATION_KEY, '') === '1') return false;
+  const directory = statePath(config, 'analytics', 'local');
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^\d{4}-\d{2}\.json$/.test(entry.name)) continue;
+    const month = entry.name.slice(0, 7);
+    const file = path.join(directory, entry.name);
+    try {
+      const stat = fs.statSync(file);
+      if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
+      upsertDocument(db, parseDocument(fs.readFileSync(file, 'utf8'), month), stat.mtimeMs);
+    } catch {}
+  }
+  setStateMeta(db, LEGACY_MIGRATION_KEY, '1');
+  return true;
 }
 
 async function flushLocalAnalytics(): Promise<{ ok: true; failed: 0; pending: 0 }> {
