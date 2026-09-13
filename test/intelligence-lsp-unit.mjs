@@ -119,7 +119,7 @@ try {
   console.log('Hybrid LSP intelligence and Rel.AI-controlled semantic rename passed.');
 } finally {
   await repositoryIntelligence.shutdown().catch(() => {});
-  fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.rmSync(secondary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.rmSync(stateRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 20 : 5, retryDelay: 100 });
+  fs.rmSync(secondary, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 20 : 5, retryDelay: 100 });
+  fs.rmSync(stateRoot, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 20 : 5, retryDelay: 100 });
 }
