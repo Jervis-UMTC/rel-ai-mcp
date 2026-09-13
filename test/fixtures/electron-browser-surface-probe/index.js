@@ -11,7 +11,12 @@ app.commandLine.appendSwitch('disable-gpu');
 app.whenReady().then(async () => {
   const server = http.createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(`<!doctype html><html><head><title>Embedded fixture</title></head><body><main><h1>Embedded browser fixture</h1><label for="name">Name</label><input id="name" placeholder="Your name"><button id="save" type="button">Save</button></main></body></html>`);
+    response.end(`<!doctype html><html><head><title>Embedded fixture</title><style>
+      body { margin: 0; }
+      #breakpoint::after { content: 'narrow'; }
+      @media (min-width: 1000px) { #breakpoint::after { content: 'wide'; } }
+      .spacer { height: 3000px; }
+    </style></head><body><main><h1>Embedded browser fixture</h1><div id="breakpoint"></div><label for="name">Name</label><input id="name" placeholder="Your name"><button id="save" type="button" onclick="window.probeClicks=(window.probeClicks||0)+1">Save</button><div class="spacer"></div></main></body></html>`);
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -46,11 +51,11 @@ app.whenReady().then(async () => {
   });
 
   try {
-    const started = await host.run({ action: 'start' });
+    const started = await host.run({ action: 'start', viewport: { width: 1200, height: 750 } });
     const opened = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
     const secondTab = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
-    const positioned = host.setBounds({ visible: true, x: 24, y: 80, width: 720, height: 480 });
-    const tabState = host.selectTab(opened.nativePageId);
+    const positioned = await host.setBounds({ visible: true, x: 24, y: 80, width: 720, height: 480 });
+    const tabState = await host.selectTab(opened.nativePageId);
     const navigated = await host.run({
       action: 'navigate',
       nativeSessionId: started.nativeSessionId,
@@ -58,6 +63,10 @@ app.whenReady().then(async () => {
       url: targetUrl,
       timeoutMs: 10_000
     });
+    const pageContents = win.contentView.children[0].webContents;
+    const initialViewport = await pageContents.executeJavaScript(`({ width: innerWidth, height: innerHeight, breakpoint: getComputedStyle(document.querySelector('#breakpoint'), '::after').content })`);
+    const resizedState = await host.setBounds({ visible: true, x: 24, y: 80, width: 500, height: 500 });
+    const resizedViewport = await pageContents.executeJavaScript(`({ width: innerWidth, height: innerHeight, breakpoint: getComputedStyle(document.querySelector('#breakpoint'), '::after').content })`);
     const snapshot = await host.run({
       action: 'snapshot',
       nativeSessionId: started.nativeSessionId,
@@ -85,7 +94,17 @@ app.whenReady().then(async () => {
       fullPage: false
     });
     const afterTabClose = await host.closeTab(secondTab.nativePageId);
-    const userState = host.setControl('user');
+    const button = await pageContents.executeJavaScript(`(() => { const r = document.querySelector('#save').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    pageContents.sendInputEvent({ type: 'mouseDown', x: button.x, y: button.y, button: 'left', clickCount: 1 });
+    pageContents.sendInputEvent({ type: 'mouseUp', x: button.x, y: button.y, button: 'left', clickCount: 1 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const aiClickCount = await pageContents.executeJavaScript('window.probeClicks || 0');
+    const userState = await host.setControl('user');
+    pageContents.sendInputEvent({ type: 'mouseDown', x: button.x, y: button.y, button: 'left', clickCount: 1 });
+    pageContents.sendInputEvent({ type: 'mouseUp', x: button.x, y: button.y, button: 'left', clickCount: 1 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const userClickCount = await pageContents.executeJavaScript('window.probeClicks || 0');
+    const userScrollY = await pageContents.executeJavaScript('scrollTo(0, 400); scrollY');
     let takeoverError = null;
     try {
       await host.run({
@@ -97,11 +116,23 @@ app.whenReady().then(async () => {
     } catch (error) {
       takeoverError = { code: error?.code || '', message: error?.message || String(error) };
     }
-    const aiState = host.setControl('ai');
+    const aiState = await host.setControl('ai');
+    const aiViewport = await pageContents.executeJavaScript(`({ width: innerWidth, height: innerHeight, breakpoint: getComputedStyle(document.querySelector('#breakpoint'), '::after').content })`);
+    pageContents.sendInputEvent({ type: 'mouseWheel', x: 100, y: 100, deltaX: 0, deltaY: 500, canScroll: true });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const aiScrollY = await pageContents.executeJavaScript('scrollY');
+    const headless = await host.run({ action: 'start', headless: true, viewport: { width: 800, height: 600 } });
+    await host.run({ action: 'open_page', nativeSessionId: headless.nativeSessionId });
+    const headlessState = await host.setBounds({ visible: true, x: 24, y: 80, width: 500, height: 500 });
+    let headlessTakeoverError = null;
+    try { await host.setControl('user'); }
+    catch (error) { headlessTakeoverError = { code: error?.code || '', message: error?.message || String(error) }; }
+    await host.run({ action: 'close_session', nativeSessionId: headless.nativeSessionId });
     const finalState = host.getState();
     fs.writeFileSync(outputPath, JSON.stringify({
       started,
       positioned,
+      resizedState,
       tabState,
       afterTabClose,
       navigated,
@@ -110,9 +141,19 @@ app.whenReady().then(async () => {
       screenshotBytes: screenshot.image.bytes,
       screenshotWidth: screenshot.image.width,
       screenshotHeight: screenshot.image.height,
+      screenshotViewport: screenshot.viewport,
+      initialViewport,
+      resizedViewport,
+      aiViewport,
+      aiClickCount,
+      userClickCount,
+      userScrollY,
+      aiScrollY,
       userState,
       takeoverError,
       aiState,
+      headlessState,
+      headlessTakeoverError,
       finalState,
       windowVisible: win.isVisible(),
       windowOpacity: win.getOpacity(),

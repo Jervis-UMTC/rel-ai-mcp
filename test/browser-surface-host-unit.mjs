@@ -31,6 +31,20 @@ class FakeWebContents extends EventEmitter {
     this.executeJavaScriptError = null;
     this.onExecuteJavaScript = null;
     this.capturePageHandler = null;
+    this.inputEvents = [];
+    this.debuggerCommands = [];
+    this.debuggerAttached = false;
+    this.debugger = {
+      isAttached: () => this.debuggerAttached,
+      attach: () => { this.debuggerAttached = true; },
+      sendCommand: async (method, params = {}) => {
+        this.debuggerCommands.push([method, params]);
+        if (method === 'Accessibility.getFullAXTree') return { nodes: [] };
+        if (method === 'Page.getLayoutMetrics') return { cssContentSize: { width: 1440, height: 900 } };
+        if (method === 'Page.captureScreenshot') return { data: Buffer.from('fake-png').toString('base64') };
+        return {};
+      }
+    };
   }
   setWindowOpenHandler(handler) { this.windowOpenHandler = handler; }
   getURL() { return this.url; }
@@ -56,6 +70,7 @@ class FakeWebContents extends EventEmitter {
       getSize: () => ({ width: 320, height: 240 })
     };
   }
+  sendInputEvent(event) { this.inputEvents.push(event); }
   focus() { this.focusCount += 1; }
   isDestroyed() { return this.destroyed; }
   close() {
@@ -175,15 +190,16 @@ function createHarness({ failOpen = false } = {}) {
     timeoutMs: 100
   });
   assert.ok(screenshot.image.bytes > 0, 'viewport screenshots must use Electron capturePage and return image bytes');
+  assert.deepEqual(screenshot.viewport, { width: 1440, height: 900 });
   assert.deepEqual(
     { width: screenshot.image.width, height: screenshot.image.height },
-    { width: 320, height: 240 }
+    { width: 1440, height: 900 }
   );
   await host.closeAll();
 }
 
 {
-  const { host, sessions, views, childViews, routes, events } = createHarness();
+  const { host, sessions, views, webContents, childViews, routes, events } = createHarness();
   const started = await host.run({ action: 'start' });
   assert.deepEqual(routes, ['#browser']);
   const opened = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
@@ -193,12 +209,14 @@ function createHarness({ failOpen = false } = {}) {
     'embedded browser views must not disable background throttling while the dashboard can still be hidden'
   );
   const secondTab = await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
-  host.setBounds({ visible: true, x: 12, y: 34, width: 900, height: 600 });
+  await host.setBounds({ visible: true, x: 12, y: 34, width: 900, height: 600 });
   assert.equal(host.getState().visible, true);
+  assert.deepEqual(host.getState().viewport, { width: 1440, height: 900 }, 'dashboard surface size must not replace the canonical AI viewport');
+  assert.deepEqual(views[1].bounds, { x: 12, y: 52, width: 900, height: 563 }, 'the browser surface should letterbox the canonical viewport inside the dashboard slot');
   assert.equal(childViews.size, 1, 'the active page must be attached to the dashboard native content view');
   assert.equal(host.getState().tabs.length, 2, 'browser state must expose every open tab in the visible session');
   assert.equal(host.getState().nativePageId, secondTab.nativePageId, 'the newest tab should be active after opening');
-  host.selectTab(opened.nativePageId);
+  await host.selectTab(opened.nativePageId);
   assert.equal(host.getState().nativePageId, opened.nativePageId, 'selecting a tab should swap the attached native view');
   assert.equal(host.getState().tabs.find(tab => tab.nativePageId === opened.nativePageId)?.active, true);
   await host.closeTab(secondTab.nativePageId);
@@ -206,7 +224,7 @@ function createHarness({ failOpen = false } = {}) {
   assert.equal(events.at(-1)?.type, 'page_closed', 'desktop tab close must emit the canonical native page lifecycle event');
   assert.equal(events.at(-1)?.nativePageId, secondTab.nativePageId);
 
-  host.setControl('user');
+  await host.setControl('user');
   assert.equal(host.getState().control, 'user');
   await assert.rejects(
     () => host.run({ action: 'navigate', nativeSessionId: started.nativeSessionId, nativePageId: opened.nativePageId, url: 'https://example.test/' }),
@@ -233,13 +251,23 @@ function createHarness({ failOpen = false } = {}) {
   assert.equal(host.getState().control, 'user');
   assert.equal(childViews.size, 1, 'only the user-controlled browser view should remain attached during takeover');
 
-  host.setControl('ai');
+  await host.setControl('ai');
   assert.equal(host.getState().nativeSessionId, concurrent.nativeSessionId, 'returning control should reveal the most recently active AI session');
-  host.selectSession(started.nativeSessionId);
+  await host.selectSession(started.nativeSessionId);
   assert.equal(host.getState().nativeSessionId, started.nativeSessionId, 'the user must be able to choose which concurrent browser session to inspect');
-  host.selectSession(concurrent.nativeSessionId);
+  await host.selectSession(concurrent.nativeSessionId);
   const navigated = await host.run({ action: 'navigate', nativeSessionId: started.nativeSessionId, nativePageId: opened.nativePageId, url: 'https://example.test/' });
   assert.equal(navigated.url, 'https://example.test/');
+  assert.deepEqual(
+    webContents[0].debuggerCommands.findLast(([method]) => method === 'Emulation.setVisibleSize')?.[1],
+    { width: 1440, height: 900 },
+    'Chromium must keep the requested viewport while scaling only presentation'
+  );
+  assert.equal(webContents[0].debuggerCommands.findLast(([method]) => method === 'Input.setIgnoreInputEvents')?.[1]?.ignore, true, 'AI ownership must lock native page input after navigation');
+  await host.setControl('user');
+  assert.equal(webContents[0].debuggerCommands.findLast(([method]) => method === 'Input.setIgnoreInputEvents')?.[1]?.ignore, false, 'user takeover must enable native page input');
+  await host.setControl('ai');
+  assert.equal(webContents[0].debuggerCommands.findLast(([method]) => method === 'Input.setIgnoreInputEvents')?.[1]?.ignore, true, 'returning control must lock native page input again');
 
   await host.closeAll();
   assert.equal(host.getState().active, false);
@@ -249,6 +277,23 @@ function createHarness({ failOpen = false } = {}) {
   assert.equal(sessions[0].cacheCleared, 1, 'ephemeral browser cache must be cleared on session close');
   assert.equal(sessions[1].storageCleared, 1, 'concurrent ephemeral browser storage must also be cleared');
   assert.equal(sessions[1].cacheCleared, 1, 'concurrent ephemeral browser cache must also be cleared');
+}
+
+{
+  const { host, childViews, routes } = createHarness();
+  const started = await host.run({ action: 'start', headless: true, viewport: { width: 800, height: 600 } });
+  await host.run({ action: 'open_page', nativeSessionId: started.nativeSessionId });
+  await host.setBounds({ visible: true, x: 10, y: 20, width: 700, height: 500 });
+  assert.deepEqual(routes, [], 'headless sessions must not open the Browser dashboard automatically');
+  assert.equal(host.getState().visible, false, 'headless sessions must never attach a live WebContentsView');
+  assert.deepEqual(host.getState().viewport, { width: 800, height: 600 });
+  assert.equal(childViews.size, 0);
+  await assert.rejects(
+    () => host.setControl('user'),
+    error => error?.code === 'BROWSER_HEADLESS_SESSION',
+    'headless sessions must not offer user takeover without a live surface'
+  );
+  await host.closeAll();
 }
 
 {
@@ -272,7 +317,7 @@ function createHarness({ failOpen = false } = {}) {
   assert.equal(events.at(-1).type, 'page_opened');
   assert.equal(events.at(-1).active, true);
 
-  host.selectTab(opened.nativePageId);
+  await host.selectTab(opened.nativePageId);
   const background = handler({ url: 'https://background-tab.example.test/', disposition: 'background-tab' });
   const backgroundContents = background.createWindow({ webPreferences: { nodeIntegration: true, contextIsolation: false, sandbox: false } });
   await new Promise(resolve => setImmediate(resolve));

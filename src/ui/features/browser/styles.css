@@ -449,6 +449,19 @@
   gap: 8px;
 }
 
+.browser-viewport-pill {
+  display: inline-flex;
+  min-height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 999px;
+  color: var(--ui-text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .browser-tabs-empty {
   display: inline-flex;
   min-width: 0;
@@ -481,6 +494,10 @@
   color: var(--ui-text-tertiary);
   font-size: 13px;
   text-align: center;
+}
+
+.browser-surface-slot[data-headless='true'] .browser-surface-placeholder {
+  color: var(--ui-text-secondary);
 }
 
 .browser-surface-icon { color: var(--ui-text-tertiary); opacity: .8; }

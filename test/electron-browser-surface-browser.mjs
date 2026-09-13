@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,35 +18,33 @@ const electronBinary = process.env.RELAI_ELECTRON_BINARY || path.resolve(
 );
 assert.equal(fs.existsSync(electronBinary), true, `Electron binary not found at ${electronBinary}`);
 
-const child = spawn(electronBinary, [
+const result = spawnSync(electronBinary, [
   '--no-sandbox',
   '--disable-gpu',
   `--user-data-dir=${path.join(temp, 'profile')}`,
   path.join(root, 'test', 'fixtures', 'electron-browser-surface-probe')
 ], {
   cwd: root,
-  stdio: ['ignore', 'pipe', 'pipe'],
+  encoding: 'utf8',
+  timeout: 60_000,
   env: { ...process.env, RELAI_PROBE_OUTPUT_PATH: outputPath, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
 });
-let stdout = '';
-let stderr = '';
-child.stdout.on('data', chunk => { stdout += chunk.toString('utf8'); });
-child.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); });
+const stdout = result.stdout || '';
+const stderr = result.stderr || '';
 
 try {
-  const result = await waitForChildClose(child, 60_000);
-  const code = result[0];
   const probeOutput = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '(probe output missing)';
-  if (code === 'timeout') {
-    child.kill('SIGKILL');
+  if (result.error?.code === 'ETIMEDOUT') {
     assert.fail(`Embedded browser Electron probe timed out. probe=${probeOutput} stdout=${stdout} stderr=${stderr}`);
   }
-  assert.equal(code, 0, `Embedded browser Electron probe failed. probe=${probeOutput} stdout=${stdout} stderr=${stderr}`);
+  assert.equal(result.status, 0, `Embedded browser Electron probe failed. probe=${probeOutput} stdout=${stdout} stderr=${stderr}`);
   const probe = JSON.parse(probeOutput);
   assert.equal(probe.error, undefined, probe.error);
   assert.equal(probe.started.browserProduct, 'Rel.AI Embedded Chromium');
   assert.equal(probe.positioned.active, true);
   assert.equal(probe.positioned.visible, true, 'A real WebContentsView must attach inside the dashboard BrowserWindow.');
+  assert.deepEqual(probe.positioned.viewport, { width: 1200, height: 750 });
+  assert.deepEqual(probe.resizedState.viewport, { width: 1200, height: 750 }, 'dashboard resizing must not change the canonical AI viewport');
   assert.equal(probe.positioned.tabs.length, 2, 'Real Electron browser state must expose both open tabs.');
   assert.equal(probe.tabState.nativePageId, probe.tabState.tabs[0].nativePageId, 'Selecting a tab must switch the attached WebContentsView.');
   assert.equal(probe.tabState.tabs[0].active, true);
@@ -55,11 +53,24 @@ try {
   assert.equal(probe.navigated.title, 'Embedded fixture');
   assert.match(probe.snapshot, /Embedded browser fixture/);
   assert.match(probe.afterFill, /Rel\.AI embedded/);
+  assert.deepEqual(probe.initialViewport, { width: 1200, height: 750, breakpoint: '"wide"' });
+  assert.deepEqual(probe.resizedViewport, probe.initialViewport, 'responsive layout must remain stable after the Rel.AI browser panel is resized');
+  assert.deepEqual(probe.aiViewport, probe.initialViewport, 'returning control to AI must preserve the canonical viewport');
   assert.ok(probe.screenshotBytes > 0, 'Embedded page screenshot must contain image data.');
-  assert.ok(probe.screenshotWidth > 0 && probe.screenshotHeight > 0, 'Embedded page screenshot dimensions must be positive.');
+  assert.equal(probe.screenshotWidth, 1200);
+  assert.equal(probe.screenshotHeight, 750);
+  assert.deepEqual(probe.screenshotViewport, { width: 1200, height: 750 }, 'AI screenshots must report the canonical viewport, not dashboard presentation bounds');
+  assert.equal(probe.aiClickCount, 0, 'AI-owned browser surfaces must ignore human-style pointer input');
   assert.equal(probe.userState.control, 'user');
+  assert.equal(probe.userClickCount, 1, 'user takeover must enable pointer input');
+  assert.equal(probe.userScrollY, 400, 'user takeover must preserve an independently scrollable page state');
   assert.equal(probe.takeoverError?.code, 'BROWSER_USER_CONTROL_ACTIVE');
   assert.equal(probe.aiState.control, 'ai');
+  assert.equal(probe.aiScrollY, probe.userScrollY, 'returning control to AI must block further wheel scrolling');
+  assert.equal(probe.headlessState.headless, true);
+  assert.equal(probe.headlessState.visible, false, 'headless sessions must never attach a live WebContentsView');
+  assert.deepEqual(probe.headlessState.viewport, { width: 800, height: 600 });
+  assert.equal(probe.headlessTakeoverError?.code, 'BROWSER_HEADLESS_SESSION');
   assert.equal(probe.finalState.active, true);
   assert.equal(probe.finalState.visible, true);
   assert.equal(probe.windowVisible, true, 'The Electron probe window must be render-active for WebContentsView painting.');
@@ -71,18 +82,5 @@ try {
   assert.equal(probe.events[0].type, 'page_closed');
   console.log('Real Electron WebContentsView browser surface renders, automates, screenshots, and hands control to the user.');
 } finally {
-  if (child.exitCode == null) child.kill('SIGKILL');
   await fs.promises.rm(temp, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
-}
-
-function waitForChildClose(childProcess, timeoutMs) {
-  return new Promise(resolve => {
-    const timer = setTimeout(() => finish(['timeout']), timeoutMs);
-    childProcess.once('close', (...args) => finish(args));
-
-    function finish(result) {
-      clearTimeout(timer);
-      resolve(result);
-    }
-  });
 }

@@ -105,6 +105,7 @@ function createBrowserSurfaceHost(options = {}) {
     const record = requireSession(payload.nativeSessionId);
     assertAiControl(record, 'open_page');
     const page = createPage(record, { active: true });
+    await syncPageRuntime(record, page);
     return { ok: true, nativeSessionId: record.nativeSessionId, nativePageId: page.nativePageId, ...describePage(record, page) };
   }
 
@@ -123,6 +124,7 @@ function createBrowserSurfaceHost(options = {}) {
       closing: false,
       loading: false,
       aiInputDepth: 0,
+      runtimePromise: Promise.resolve(),
       createdAt: new Date().toISOString()
     };
     record.pages.set(nativePageId, page);
@@ -156,7 +158,10 @@ function createBrowserSurfaceHost(options = {}) {
     const page = requirePage(record, payload.nativePageId);
     if (!READ_ONLY_ACTIONS.has(action)) assertAiControl(record, action);
     if (action !== 'describe') activate(record, page);
-    return operation(record, page, payload, options);
+    await syncPageRuntime(record, page);
+    const result = await operation(record, page, payload, options);
+    if (action === 'navigate') await syncPageRuntime(record, page);
+    return result;
   }
 
   function describePage(_record, page) {
@@ -218,7 +223,7 @@ function createBrowserSurfaceHost(options = {}) {
       await waitForTarget(page.webContents, payload.target, 'visible', timeoutMs, options.signal);
       await focusTarget(page.webContents, payload.target);
       throwIfAborted(options.signal);
-      await withAiInput(page, async () => sendKey(page.webContents, key));
+      await withAiInput(record, page, async () => sendKey(page.webContents, key));
     } else {
       if (interaction === 'select' && payload.selectValue == null) throw new Error('browser interact select requires selectValue.');
       await waitForTarget(page.webContents, payload.target, 'visible', timeoutMs, options.signal);
@@ -233,14 +238,14 @@ function createBrowserSurfaceHost(options = {}) {
     };
   }
 
-  async function screenshotPage(_record, page, payload, options = {}) {
+  async function screenshotPage(record, page, payload, options = {}) {
     throwIfAborted(options.signal);
     const timeoutMs = timeoutFor(payload.timeoutMs);
     let data;
     let width;
     let height;
+    const debuggerApi = await attachedDebugger(page.webContents);
     if (payload.fullPage === true) {
-      const debuggerApi = await attachedDebugger(page.webContents);
       const metrics = await withTimeout(
         withAbort(debuggerApi.sendCommand('Page.getLayoutMetrics'), options.signal),
         timeoutMs,
@@ -260,32 +265,18 @@ function createBrowserSurfaceHost(options = {}) {
       width = Math.max(1, Math.ceil(Number(size.width || page.bounds.width || 1)));
       height = Math.max(1, Math.ceil(Number(size.height || page.bounds.height || 1)));
     } else {
-      try {
-        const image = await withTimeout(
-          withAbort(page.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true }), options.signal),
-          timeoutMs,
-          'Browser screenshot timed out.'
-        );
-        const size = image.getSize?.() || {};
-        data = image.toPNG().toString('base64');
-        width = Math.max(1, Math.ceil(Number(size.width || page.bounds.width || 1)));
-        height = Math.max(1, Math.ceil(Number(size.height || page.bounds.height || 1)));
-      } catch (error) {
-        if (!String(error?.message || error).includes('Current display surface not available for capture')) throw error;
-        const debuggerApi = await attachedDebugger(page.webContents);
-        const shot = await withTimeout(
-          withAbort(debuggerApi.sendCommand('Page.captureScreenshot', {
-            format: 'png',
-            fromSurface: true,
-            captureBeyondViewport: false
-          }), options.signal),
-          timeoutMs,
-          'Browser screenshot timed out.'
-        );
-        data = String(shot?.data || '');
-        width = Math.max(1, page.bounds.width);
-        height = Math.max(1, page.bounds.height);
-      }
+      const shot = await withTimeout(
+        withAbort(debuggerApi.sendCommand('Page.captureScreenshot', {
+          format: 'png',
+          fromSurface: true,
+          captureBeyondViewport: false
+        }), options.signal),
+        timeoutMs,
+        'Browser screenshot timed out.'
+      );
+      data = String(shot?.data || '');
+      width = record.viewport.width;
+      height = record.viewport.height;
     }
     const bytes = Buffer.byteLength(data, 'base64');
     if (bytes > MAX_SCREENSHOT_BYTES) {
@@ -293,7 +284,7 @@ function createBrowserSurfaceHost(options = {}) {
     }
     return {
       ...describePage(null, page),
-      viewport: { width: Math.max(1, page.bounds.width), height: Math.max(1, page.bounds.height) },
+      viewport: { ...record.viewport },
       image: { mimeType: 'image/png', data, bytes, width, height, fullPage: payload.fullPage === true }
     };
   }
@@ -400,7 +391,7 @@ function createBrowserSurfaceHost(options = {}) {
     }
   }
 
-  function setBounds(payload = {}) {
+  async function setBounds(payload = {}) {
     const visible = payload.visible === true;
     surfaceBounds = visible
       ? {
@@ -412,23 +403,39 @@ function createBrowserSurfaceHost(options = {}) {
         }
       : { ...surfaceBounds, visible: false };
     attachActiveView();
+    const record = visibleRecord();
+    const page = record ? activePage(record) : null;
+    if (record && page) await syncPageRuntime(record, page);
     return getState();
   }
 
-  function setControl(owner) {
+  async function setControl(owner) {
     const value = String(owner || '').trim();
     if (!CONTROL_OWNERS.has(value)) throw new Error('Browser control owner must be ai or user.');
     const record = value === 'ai' && pinnedSessionId
       ? sessions.get(pinnedSessionId) || activeRecord()
       : visibleRecord();
     if (!record) throw new Error('No embedded browser session is active.');
+    if (value === 'user' && record.headless) {
+      throw browserError('BROWSER_HEADLESS_SESSION', 'Headless browser sessions have no live surface to take over.');
+    }
     record.control = value;
     if (value === 'user') {
       pinnedSessionId = record.nativeSessionId;
-      activePage(record)?.webContents.focus?.();
+      const page = activePage(record);
+      if (page) await syncPageRuntime(record, page);
+      page?.webContents.focus?.();
     } else if (pinnedSessionId === record.nativeSessionId) {
+      const page = activePage(record);
+      if (page) await syncPageRuntime(record, page);
       pinnedSessionId = '';
       attachActiveView();
+      const visible = visibleRecord();
+      const visiblePage = visible ? activePage(visible) : null;
+      if (visible && visiblePage) await syncPageRuntime(visible, visiblePage);
+    } else {
+      const page = activePage(record);
+      if (page) await syncPageRuntime(record, page);
     }
     publishState();
     return getState();
@@ -444,6 +451,7 @@ function createBrowserSurfaceHost(options = {}) {
         active: candidate.nativeSessionId === record?.nativeSessionId,
         control: candidate.control,
         headless: candidate.headless === true,
+        viewport: { ...candidate.viewport },
         pageCount: candidate.pages.size,
         url: candidatePage ? publicPageUrl(candidatePage.webContents.getURL()) : '',
         title: candidatePage ? String(candidatePage.webContents.getTitle?.() || '') : '',
@@ -469,6 +477,7 @@ function createBrowserSurfaceHost(options = {}) {
       sessions: sessionSummaries,
       control: record?.control || 'ai',
       headless: record?.headless === true,
+      viewport: record ? { ...record.viewport } : null,
       nativeSessionId: record?.nativeSessionId || '',
       nativePageId: page?.nativePageId || '',
       pageCount: tabs.length,
@@ -484,23 +493,26 @@ function createBrowserSurfaceHost(options = {}) {
     };
   }
 
-  function selectSession(value) {
+  async function selectSession(value) {
     if (pinnedSessionId && pinnedSessionId !== String(value || '')) {
       throw browserError('BROWSER_USER_CONTROL_ACTIVE', 'Return control to AI before switching browser sessions.');
     }
     const record = requireSession(value);
     activeSessionId = record.nativeSessionId;
     attachActiveView();
+    const page = activePage(record);
+    if (page) await syncPageRuntime(record, page);
     publishState();
     return getState();
   }
 
-  function selectTab(value) {
+  async function selectTab(value) {
     const record = visibleRecord();
     if (!record) throw new Error('No embedded browser session is active.');
     const page = requirePage(record, value);
     record.activePageId = page.nativePageId;
     attachActiveView();
+    await syncPageRuntime(record, page);
     if (record.control === 'user') page.webContents.focus?.();
     publishState();
     return getState();
@@ -555,7 +567,12 @@ function createBrowserSurfaceHost(options = {}) {
     wc.on('will-redirect', guardNavigation);
     wc.on('did-start-loading', () => { page.loading = true; page.loadFailed = false; publishState(); });
     wc.on('did-stop-loading', () => { page.loading = false; publishState(); });
-    wc.on('did-finish-load', () => { page.loading = false; page.loadFailed = false; publishState(); });
+    wc.on('did-finish-load', () => {
+      page.loading = false;
+      page.loadFailed = false;
+      void syncPageRuntime(record, page).catch(onError);
+      publishState();
+    });
     wc.on('did-fail-load', (_event, code, description, validatedUrl, isMainFrame) => {
       if (!isMainFrame || code === -3) return;
       page.loading = false;
@@ -738,17 +755,35 @@ function createBrowserSurfaceHost(options = {}) {
       detachAttached();
       return;
     }
+    const presentation = browserPresentation(record.viewport, surfaceBounds);
     if (attached?.page === page && attached.window === win) {
-      page.bounds = publicBounds(surfaceBounds);
+      page.bounds = presentation.bounds;
       page.view.setBounds(page.bounds);
       return;
     }
     detachAttached();
-    page.bounds = publicBounds(surfaceBounds);
+    page.bounds = presentation.bounds;
     page.view.setBounds(page.bounds);
     win.contentView.addChildView(page.view);
     attached = { page, window: win };
     if (record.control === 'user') page.webContents.focus?.();
+  }
+
+  function syncPageRuntime(record, page) {
+    return enqueuePageRuntime(page, async () => {
+      if (page.closing || page.webContents.isDestroyed?.()) return;
+      if (attached?.page !== page || !surfaceBounds.visible || record.headless) return;
+      const url = publicPageUrl(page.webContents.getURL?.() || '');
+      if (!url || url === 'about:blank') return;
+      await nextTurn();
+      if (page.closing || page.webContents.isDestroyed?.() || attached?.page !== page || !surfaceBounds.visible) return;
+      const debuggerApi = await attachedDebugger(page.webContents);
+      await debuggerApi.sendCommand('Emulation.setVisibleSize', {
+        width: record.viewport.width,
+        height: record.viewport.height
+      });
+      await debuggerApi.sendCommand('Input.setIgnoreInputEvents', { ignore: record.control !== 'user' });
+    });
   }
 
   function detachAttached() {
@@ -951,10 +986,28 @@ async function sendKey(webContents, key) {
   webContents.sendInputEvent({ type: 'keyUp', ...base });
 }
 
-async function withAiInput(page, action) {
-  page.aiInputDepth += 1;
-  try { return await action(); }
-  finally { page.aiInputDepth = Math.max(0, page.aiInputDepth - 1); }
+async function withAiInput(record, page, action) {
+  return enqueuePageRuntime(page, async () => {
+    const debuggerApi = await attachedDebugger(page.webContents);
+    await debuggerApi.sendCommand('Input.setIgnoreInputEvents', { ignore: false });
+    page.aiInputDepth += 1;
+    try { return await action(); }
+    finally {
+      page.aiInputDepth = Math.max(0, page.aiInputDepth - 1);
+      await debuggerApi.sendCommand('Input.setIgnoreInputEvents', { ignore: record.control !== 'user' });
+    }
+  });
+}
+
+function enqueuePageRuntime(page, action) {
+  const previous = page.runtimePromise || Promise.resolve();
+  const current = previous.catch(() => {}).then(action);
+  page.runtimePromise = current;
+  return current;
+}
+
+function nextTurn() {
+  return new Promise(resolve => setImmediate(resolve));
 }
 
 function serializeAccessibilityTree(nodes) {
@@ -1046,8 +1099,19 @@ function boundedInteger(value, min, max, fallback) {
   return Number.isFinite(parsed) ? Math.max(min, Math.min(max, Math.round(parsed))) : fallback;
 }
 
-function publicBounds(bounds) {
-  return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+function browserPresentation(viewport, bounds) {
+  const scale = Math.max(0.01, Math.min(1, bounds.width / viewport.width, bounds.height / viewport.height));
+  const width = Math.max(1, Math.round(viewport.width * scale));
+  const height = Math.max(1, Math.round(viewport.height * scale));
+  return {
+    scale,
+    bounds: {
+      x: bounds.x + Math.max(0, Math.floor((bounds.width - width) / 2)),
+      y: bounds.y + Math.max(0, Math.floor((bounds.height - height) / 2)),
+      width,
+      height
+    }
+  };
 }
 
 function boundText(value, limit) {
