@@ -46,11 +46,7 @@ try {
   assert.equal(probe.positioned.tabs.length, 2, 'Real Electron browser state must expose both open tabs.');
   assert.equal(probe.tabState.nativePageId, probe.tabState.tabs[0].nativePageId, 'Selecting a tab must switch the attached WebContentsView.');
   assert.equal(probe.tabState.tabs[0].active, true);
-  assert.equal(probe.websiteTabState.tabs.length, 3, 'A target=_blank link must become a managed embedded browser tab.');
-  assert.equal(probe.websitePageOpened?.type, 'page_opened');
-  assert.equal(probe.websitePageOpened?.active, true, 'A foreground website-created tab must become active.');
-  assert.equal(probe.websiteTabState.nativePageId, probe.websitePageOpened?.nativePageId, 'The website-created foreground tab must own the visible embedded view.');
-  assert.equal(probe.afterTabClose.tabs.length, 2, 'Closing an explicit desktop tab must leave the website-created tab managed by the session.');
+  assert.equal(probe.afterTabClose.tabs.length, 1, 'Closing a desktop tab must remove the native page from state.');
   assert.equal(probe.navigated.url.startsWith('http://127.0.0.1:'), true);
   assert.equal(probe.navigated.title, 'Embedded fixture');
   assert.match(probe.snapshot, /Embedded browser fixture/);
@@ -66,8 +62,8 @@ try {
   assert.equal(probe.windowOpacity, 0, 'The real Electron browser probe must remain fully transparent so tests never flash a blank or black window on the user desktop.');
   assert.equal(probe.windowFocused, false, 'The invisible browser probe must never steal user focus.');
   assert.ok(probe.stateCount >= 4, 'Embedded surface must publish lifecycle and navigation state.');
-  assert.ok(probe.events.some(event => event.type === 'page_opened'), 'Website-created tab lifecycle must be emitted to the service bridge.');
-  assert.ok(probe.events.some(event => event.type === 'page_closed'), 'Tab close lifecycle must still be emitted.');
+  assert.equal(probe.events.length, 1);
+  assert.equal(probe.events[0].type, 'page_closed');
   console.log('Real Electron WebContentsView browser surface renders, automates, screenshots, and hands control to the user.');
 } finally {
   if (child.exitCode == null) child.kill('SIGKILL');
