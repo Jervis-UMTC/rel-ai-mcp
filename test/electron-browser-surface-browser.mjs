@@ -21,6 +21,7 @@ assert.equal(fs.existsSync(electronBinary), true, `Electron binary not found at 
 const child = spawn(electronBinary, [
   '--no-sandbox',
   '--disable-gpu',
+  '--disable-software-rasterizer',
   `--user-data-dir=${path.join(temp, 'profile')}`,
   path.join(root, 'test', 'fixtures', 'electron-browser-surface-probe')
 ], {
