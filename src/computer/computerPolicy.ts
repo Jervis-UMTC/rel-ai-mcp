@@ -204,7 +204,7 @@ function assertComputerTierAllowed(value: unknown, action: string): void {
   if (tier === 'read' && action !== 'screenshot' && action !== 'status' && action !== 'displays') {
     throw new ComputerTierRestrictedError(String(value ?? ''), action);
   }
-  if (tier === 'click' && (action === 'type' || action === 'key' || action === 'hotkey')) {
+  if (tier === 'click' && (action === 'type' || action === 'key' || action === 'hotkey' || action === 'set_value')) {
     throw new ComputerTierRestrictedError(String(value ?? ''), action);
   }
 }

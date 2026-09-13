@@ -2,8 +2,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
 
+type SemanticSource = 'uia' | 'ocr';
+type SemanticPerception = 'auto' | 'semantic' | 'hybrid';
+
 type SemanticTarget = Readonly<{
   targetId: string;
+  source: SemanticSource;
   role: string;
   name: string;
   automationId: string;
@@ -16,6 +20,7 @@ type SemanticTarget = Readonly<{
   height: number;
   centerX: number;
   centerY: number;
+  patterns?: string[];
 }>;
 
 type SemanticWindow = Readonly<{
@@ -30,20 +35,62 @@ type SemanticObservation = Readonly<{
   supported: boolean;
   available: boolean;
   reason?: string;
+  perception?: SemanticPerception;
+  ocrAvailable?: boolean;
+  ocrReason?: string;
   window?: SemanticWindow;
   elements?: SemanticTarget[];
   count?: number;
   truncated?: boolean;
 }>;
 
+type SemanticWarmup = Readonly<{
+  supported: boolean;
+  available: boolean;
+  ocrAvailable: boolean;
+}>;
+
+type SemanticActivation = Readonly<{
+  supported: boolean;
+  available: boolean;
+  handled: boolean;
+  reason?: string;
+  method?: string;
+  target?: SemanticTarget;
+}>;
+
 interface ComputerSemanticAdapter {
   readonly engine: string;
   supported(): boolean;
-  observe(app: string, maxElements?: number, signal?: AbortSignal): Promise<SemanticObservation>;
+  warmup(signal?: AbortSignal): Promise<SemanticWarmup>;
+  observe(
+    app: string,
+    maxElements?: number,
+    perception?: SemanticPerception,
+    signal?: AbortSignal
+  ): Promise<SemanticObservation>;
+  activate(
+    app: string,
+    target: SemanticTarget,
+    maxElements?: number,
+    perception?: SemanticPerception,
+    signal?: AbortSignal
+  ): Promise<SemanticActivation>;
+  setValue(
+    app: string,
+    target: SemanticTarget,
+    text: string,
+    maxElements?: number,
+    signal?: AbortSignal
+  ): Promise<SemanticActivation>;
   shutdown(): Promise<void>;
 }
 
-type RequestPayload = Readonly<{ action: 'observe'; app: string; maxElements: number }>;
+type RequestPayload =
+  | Readonly<{ action: 'warmup' }>
+  | Readonly<{ action: 'observe'; app: string; maxElements: number; perception: SemanticPerception }>
+  | Readonly<{ action: 'activate'; app: string; maxElements: number; perception: SemanticPerception; target: SemanticTarget }>
+  | Readonly<{ action: 'set_value'; app: string; maxElements: number; target: SemanticTarget; text: string }>;
 type RequestOverride = (payload: RequestPayload, signal?: AbortSignal) => Promise<unknown>;
 type SpawnProcess = typeof spawn;
 
@@ -77,22 +124,93 @@ function createWindowsUiaAdapter(options: WindowsUiaAdapterOptions = {}): Comput
   let reader: readline.Interface | null = null;
   let nextRequestId = 1;
   let stderrTail = '';
+  let warmupPromise: Promise<SemanticWarmup> | null = null;
   const pending = new Map<string, PendingRequest>();
 
   function supported(): boolean {
     return platform === 'win32';
   }
 
-  async function observe(app: string, maxElements = DEFAULT_MAX_ELEMENTS, signal?: AbortSignal): Promise<SemanticObservation> {
+  async function warmup(signal?: AbortSignal): Promise<SemanticWarmup> {
+    signal?.throwIfAborted?.();
+    if (!supported()) return { supported: false, available: false, ocrAvailable: false };
+    if (!warmupPromise) {
+      warmupPromise = request({ action: 'warmup' })
+        .then(normalizeWarmup)
+        .catch(error => {
+          warmupPromise = null;
+          throw error;
+        });
+    }
+    const result = await warmupPromise;
+    signal?.throwIfAborted?.();
+    return result;
+  }
+
+  async function observe(
+    app: string,
+    maxElements = DEFAULT_MAX_ELEMENTS,
+    perception: SemanticPerception = 'auto',
+    signal?: AbortSignal
+  ): Promise<SemanticObservation> {
     if (!supported()) return { supported: false, available: false, reason: 'Windows UI Automation is available only on Windows.' };
-    const normalizedApp = String(app || '').trim();
-    if (!normalizedApp) throw new Error('Semantic desktop observation requires a non-empty app name.');
+    const normalizedApp = requiredApp(app);
+    const normalizedPerception = normalizePerception(perception);
+    await warmup(signal);
     const result = await request({
       action: 'observe',
       app: normalizedApp,
-      maxElements: boundedInteger(maxElements, 1, MAX_ELEMENTS, DEFAULT_MAX_ELEMENTS)
+      maxElements: boundedInteger(maxElements, 1, MAX_ELEMENTS, DEFAULT_MAX_ELEMENTS),
+      perception: normalizedPerception
     }, signal);
-    return normalizeObservation(result);
+    return normalizeObservation(result, normalizedPerception);
+  }
+
+  async function activate(
+    app: string,
+    target: SemanticTarget,
+    maxElements = DEFAULT_MAX_ELEMENTS,
+    perception: SemanticPerception = 'auto',
+    signal?: AbortSignal
+  ): Promise<SemanticActivation> {
+    if (!supported()) return { supported: false, available: false, handled: false, reason: 'Windows UI Automation is available only on Windows.' };
+    const normalizedApp = requiredApp(app);
+    const normalizedTarget = normalizeTarget(target);
+    if (!normalizedTarget) throw new Error('Semantic activation requires a valid target.');
+    await warmup(signal);
+    signal?.throwIfAborted?.();
+    const result = await request({
+      action: 'activate',
+      app: normalizedApp,
+      maxElements: boundedInteger(maxElements, 1, MAX_ELEMENTS, DEFAULT_MAX_ELEMENTS),
+      perception: normalizePerception(perception),
+      target: normalizedTarget
+    });
+    return normalizeActivation(result);
+  }
+
+  async function setValue(
+    app: string,
+    target: SemanticTarget,
+    text: string,
+    maxElements = DEFAULT_MAX_ELEMENTS,
+    signal?: AbortSignal
+  ): Promise<SemanticActivation> {
+    if (!supported()) return { supported: false, available: false, handled: false, reason: 'Windows UI Automation is available only on Windows.' };
+    const normalizedApp = requiredApp(app);
+    const normalizedTarget = normalizeTarget(target);
+    if (!normalizedTarget) throw new Error('Semantic value setting requires a valid target.');
+    const normalizedText = String(text ?? '');
+    await warmup(signal);
+    signal?.throwIfAborted?.();
+    const result = await request({
+      action: 'set_value',
+      app: normalizedApp,
+      maxElements: boundedInteger(maxElements, 1, MAX_ELEMENTS, DEFAULT_MAX_ELEMENTS),
+      target: normalizedTarget,
+      text: normalizedText
+    });
+    return normalizeActivation(result);
   }
 
   async function request(payload: RequestPayload, signal?: AbortSignal): Promise<unknown> {
@@ -176,6 +294,7 @@ function createWindowsUiaAdapter(options: WindowsUiaAdapterOptions = {}): Comput
     child = null;
     reader?.close();
     reader = null;
+    warmupPromise = null;
     for (const id of [...pending.keys()]) settlePending(id, false, error);
     if (active && active.exitCode === null && !active.killed) active.kill();
   }
@@ -185,6 +304,7 @@ function createWindowsUiaAdapter(options: WindowsUiaAdapterOptions = {}): Comput
     child = null;
     reader?.close();
     reader = null;
+    warmupPromise = null;
     for (const id of [...pending.keys()]) settlePending(id, false, new Error('Windows UI Automation helper stopped.'));
     if (!active || active.exitCode !== null || active.killed) return;
     active.stdin.end();
@@ -198,10 +318,20 @@ function createWindowsUiaAdapter(options: WindowsUiaAdapterOptions = {}): Comput
     });
   }
 
-  return Object.freeze({ engine: 'windows-uia', supported, observe, shutdown });
+  return Object.freeze({ engine: 'windows-uia', supported, warmup, observe, activate, setValue, shutdown });
 }
 
-function normalizeObservation(value: unknown): SemanticObservation {
+function normalizeWarmup(value: unknown): SemanticWarmup {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Windows UI Automation helper returned an invalid warmup result.');
+  const source = value as Record<string, unknown>;
+  return {
+    supported: source.supported !== false,
+    available: source.available === true,
+    ocrAvailable: source.ocrAvailable === true
+  };
+}
+
+function normalizeObservation(value: unknown, fallbackPerception: SemanticPerception): SemanticObservation {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Windows UI Automation helper returned an invalid observation.');
   const source = value as Record<string, unknown>;
   if (source.supported === false) return { supported: false, available: false, reason: boundedString(source.reason, 1000) };
@@ -213,10 +343,27 @@ function normalizeObservation(value: unknown): SemanticObservation {
   return {
     supported: true,
     available: true,
+    perception: normalizePerception(source.perception ?? fallbackPerception),
+    ocrAvailable: source.ocrAvailable === true,
+    ...(boundedString(source.ocrReason, 500) ? { ocrReason: boundedString(source.ocrReason, 500) } : {}),
     ...(window ? { window } : {}),
     elements,
     count: elements.length,
     truncated: source.truncated === true || (Array.isArray(source.elements) && source.elements.length > MAX_ELEMENTS)
+  };
+}
+
+function normalizeActivation(value: unknown): SemanticActivation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Windows UI Automation helper returned an invalid semantic action result.');
+  const source = value as Record<string, unknown>;
+  const target = normalizeTarget(source.target);
+  return {
+    supported: source.supported !== false,
+    available: source.available === true,
+    handled: source.handled === true,
+    ...(boundedString(source.reason, 1000) ? { reason: boundedString(source.reason, 1000) } : {}),
+    ...(boundedString(source.method, 100) ? { method: boundedString(source.method, 100) } : {}),
+    ...(target ? { target } : {})
   };
 }
 
@@ -230,8 +377,12 @@ function normalizeTarget(value: unknown): SemanticTarget | null {
   const centerX = safeInteger(source.centerX);
   const centerY = safeInteger(source.centerY);
   if (!targetId || !displayId || width <= 0 || height <= 0 || centerX < 0 || centerY < 0) return null;
+  const patterns = Array.isArray(source.patterns)
+    ? source.patterns.map(value => boundedString(value, 60)).filter(Boolean).slice(0, 12)
+    : [];
   return Object.freeze({
     targetId,
+    source: normalizeSource(source.source),
     role: boundedString(source.role, 100),
     name: boundedString(source.name, 500),
     automationId: boundedString(source.automationId, 300),
@@ -243,7 +394,8 @@ function normalizeTarget(value: unknown): SemanticTarget | null {
     width,
     height,
     centerX,
-    centerY
+    centerY,
+    ...(patterns.length ? { patterns } : {})
   });
 }
 
@@ -257,6 +409,22 @@ function normalizeWindow(value: unknown): SemanticWindow | null {
     className: boundedString(source.className, 300),
     ...(boundedString(source.displayId, 200) ? { displayId: boundedString(source.displayId, 200) } : {})
   });
+}
+
+function requiredApp(value: unknown): string {
+  const app = String(value || '').trim();
+  if (!app) throw new Error('Semantic desktop operation requires a non-empty app name.');
+  return app;
+}
+
+function normalizeSource(value: unknown): SemanticSource {
+  return String(value || '').trim().toLowerCase() === 'ocr' ? 'ocr' : 'uia';
+}
+
+function normalizePerception(value: unknown): SemanticPerception {
+  const perception = String(value || 'auto').trim().toLowerCase();
+  if (perception === 'auto' || perception === 'semantic' || perception === 'hybrid') return perception;
+  throw new Error('Semantic perception must be auto, semantic, or hybrid.');
 }
 
 function boundedString(value: unknown, maxLength: number): string {
@@ -277,4 +445,13 @@ function boundedInteger(value: unknown, min: number, max: number, fallback: numb
 }
 
 export { createWindowsUiaAdapter };
-export type { ComputerSemanticAdapter, SemanticObservation, SemanticTarget, SemanticWindow };
+export type {
+  ComputerSemanticAdapter,
+  SemanticActivation,
+  SemanticObservation,
+  SemanticPerception,
+  SemanticSource,
+  SemanticTarget,
+  SemanticWarmup,
+  SemanticWindow
+};

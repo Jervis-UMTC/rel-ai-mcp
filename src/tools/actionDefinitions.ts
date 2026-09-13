@@ -232,7 +232,7 @@ const PUBLIC_TOOL_VALUES = [
   },
   {
     name: 'relai_computer', title: 'Control Computer',
-    description: 'User-authorized final fallback for local desktop input after structured local and browser capabilities. Prefer observe for semantic Windows UI controls; activate revalidates a semantic target and clicks it through the existing input driver. Otherwise use adaptive screenshots, observation-scoped coordinates, wait_for_change, and batch to minimize visual/model round trips. Requires Computer control and per-app approval; browsers are view-only (relai_browser), terminals/IDEs click-only (relai_desktop for typing). One session drives input at a time.',
+    description: 'User-authorized final fallback for local desktop input after structured local and browser capabilities. Windows uses UI Automation first, optional built-in OCR hybrid targeting for custom text UI, and Midscene pixels only when semantics cannot perform the action. activate revalidates targets and prefers native UIA actions; set_value uses UIA ValuePattern. wait_for_change, wait_for_stable, observe, and batch support bounded verified action bursts. Requires Computer control and per-app approval; browsers are view-only (relai_browser), terminals/IDEs click-only (relai_desktop for typing). One session drives input at a time.',
     annotations: annotations(false, true, false, true), dashboard: { capabilities: ['execute'] }
   },
   {

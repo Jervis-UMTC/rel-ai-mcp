@@ -161,6 +161,7 @@ function sampleArgs(entry) {
     case 'relai_computer:key': args.key = 'enter'; break;
     case 'relai_computer:hotkey': args.keys = ['ctrl', 's']; break;
     case 'relai_computer:activate': Object.assign(args, { semanticObservationId: 'uia_fixture', targetId: 'e1' }); break;
+    case 'relai_computer:set_value': Object.assign(args, { semanticObservationId: 'uia_fixture', targetId: 'e1', value: '' }); break;
     case 'relai_computer:batch': args.actions = [{ action: 'move', x: 10, y: 20 }]; break;
     case 'relai_computer:stop': break;
     case 'relai_computer:approve_app':

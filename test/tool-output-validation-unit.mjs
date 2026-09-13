@@ -200,7 +200,9 @@ for (const [action, args, result] of [
   ['displays', {}, { ok: true, workspace: 'repo', action: 'displays', platform: 'win32', engine: '@midscene/computer', displays: [{ id: 'display-1', width: 1920, height: 1080 }], count: 1 }],
   ['observe', { app: 'example-app' }, { ok: true, workspace: 'repo', action: 'observe', platform: 'win32', engine: 'windows-uia', app: 'example-app', semanticAvailable: true, semanticObservationId: 'uia_fixture', elements: [{ targetId: 'e1', role: 'Button', name: 'Save' }], count: 1, truncated: false }],
   ['activate', { app: 'example-app', semanticObservationId: 'uia_fixture', targetId: 'e1' }, { ok: true, workspace: 'repo', action: 'activate', platform: 'win32', app: 'example-app', semanticObservationId: 'uia_fixture', targetId: 'e1', displayId: 'display-1', x: 10, y: 20, method: 'semantic-center-click', executed: true }],
+  ['set_value', { app: 'example-app', semanticObservationId: 'uia_fixture', targetId: 'e1', value: '' }, { ok: true, workspace: 'repo', action: 'set_value', platform: 'win32', app: 'example-app', semanticObservationId: 'uia_fixture', targetId: 'e1', displayId: 'display-1', x: 10, y: 20, method: 'uia-set-value', textLength: 0, executed: true }],
   ['screenshot', { app: 'example-app', displayId: 'display-1' }, { ok: true, workspace: 'repo', action: 'screenshot', platform: 'win32', engine: '@midscene/computer', displayId: 'display-1', image: { mimeType: 'image/png', data: 'fixture' } }],
+  ['wait_for_stable', { app: 'example-app' }, { ok: true, workspace: 'repo', action: 'wait_for_stable', platform: 'win32', app: 'example-app', stable: true, stableMs: 350, durationMs: 400 }],
   ['click', { app: 'example-app', x: 10, y: 20, displayId: 'display-1' }, { ok: true, workspace: 'repo', action: 'click', platform: 'win32', displayId: 'display-1', x: 10, y: 20, executed: true }]
 ]) {
   await assert.doesNotReject(() => validateToolOutput({}, 'relai_computer', { action, workspace: 'repo', ...args }, result));
@@ -333,6 +335,7 @@ function requiredArgs(entry) {
     case 'relai_computer:key': return { key: 'enter' };
     case 'relai_computer:hotkey': return { keys: ['ctrl', 's'] };
     case 'relai_computer:activate': return { semanticObservationId: 'uia_fixture', targetId: 'e1' };
+    case 'relai_computer:set_value': return { semanticObservationId: 'uia_fixture', targetId: 'e1', value: '' };
     case 'relai_computer:batch': return { actions: [{ action: 'move', x: 10, y: 20 }] };
     case 'relai_computer:stop': return {};
     case 'relai_computer:approve_app':

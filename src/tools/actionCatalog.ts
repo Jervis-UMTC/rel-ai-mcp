@@ -9,7 +9,7 @@ import {
 import type { ActionMapping, ActionRegistry, CatalogToolDefinition, PublicActionContract } from './actionDefinitions.ts';
 import { ACTION_REGISTRY as RAW_ACTION_REGISTRY } from './actionRegistry.js';
 
-const TOOL_SURFACE_VERSION = 79;
+const TOOL_SURFACE_VERSION = 80;
 const ACTION_REGISTRY = RAW_ACTION_REGISTRY as unknown as ActionRegistry;
 
 type ToolActionCatalogEntry = Readonly<{
@@ -154,7 +154,8 @@ function normalizeOperationArguments(
     throw new Error(`Unsupported field '${unsupported[0]}' for ${publicName} action ${action}.`);
   }
   for (const field of entry.required || []) {
-    if (args[field] === undefined || args[field] === null || args[field] === '') {
+    const allowsEmptyValue = publicName === 'relai_computer' && action === 'set_value' && field === 'value';
+    if (args[field] === undefined || args[field] === null || (!allowsEmptyValue && args[field] === '')) {
       throw new Error(`Missing required field '${field}' for ${publicName} action ${action}.`);
     }
   }

@@ -6,6 +6,7 @@ import { createMidsceneComputerAdapter } from '../src/computer/midsceneAdapter.j
 import { createWindowsUiaAdapter } from '../src/computer/windowsUiaAdapter.js';
 
 const live = process.argv.includes('--live');
+const enforceThresholds = process.argv.includes('--enforce-thresholds');
 const uiaApp = process.argv.find(arg => arg.startsWith('--uia-app='))?.slice('--uia-app='.length) || '';
 const requestedIterations = Number(process.argv.find(arg => arg.startsWith('--iterations='))?.split('=')[1] || 20);
 const iterations = Number.isInteger(requestedIterations) && requestedIterations > 0 ? Math.min(requestedIterations, 200) : 20;
@@ -118,12 +119,16 @@ const output = {
 
 if (live) output.live = await liveReadOnlyBenchmark();
 if (uiaApp) output.semantic = await liveSemanticBenchmark(uiaApp);
+if (enforceThresholds) enforceSyntheticThresholds(measurements);
 console.log(JSON.stringify(output, null, 2));
 
 async function liveSemanticBenchmark(appName) {
   const adapter = createWindowsUiaAdapter({ timeoutMs: 10_000 });
   try {
     if (!adapter.supported()) return { supported: false };
+    const warmupStarted = performance.now();
+    const warmup = await adapter.warmup();
+    const warmupMs = round(performance.now() - warmupStarted);
     const started = performance.now();
     const first = await adapter.observe(appName, 120);
     const firstMs = round(performance.now() - started);
@@ -134,18 +139,47 @@ async function liveSemanticBenchmark(appName) {
       warmSamples.push(performance.now() - warmStarted);
     }
     warmSamples.sort((a, b) => a - b);
+    const hybridStarted = performance.now();
+    const hybrid = await adapter.observe(appName, 120, 'hybrid');
+    const hybridMs = round(performance.now() - hybridStarted);
     return {
       supported: true,
+      warmup,
+      warmupMs,
       available: first.available,
       count: first.count || 0,
       firstMs,
+      firstAfterWarmupMs: firstMs,
       warmMedianMs: round(warmSamples[Math.floor(warmSamples.length / 2)]),
       warmMinMs: round(warmSamples[0]),
-      warmMaxMs: round(warmSamples.at(-1))
+      warmMaxMs: round(warmSamples.at(-1)),
+      hybridMs,
+      hybridAvailable: hybrid.available,
+      hybridCount: hybrid.count || 0,
+      ocrAvailable: hybrid.ocrAvailable === true,
+      sources: Array.isArray(hybrid.elements)
+        ? [...new Set(hybrid.elements.map(element => element.source || 'uia'))].sort()
+        : []
     };
   } finally {
     await adapter.shutdown();
   }
+}
+
+function enforceSyntheticThresholds(rows) {
+  const limits = new Map([
+    ['screenshot-balanced-force', 150],
+    ['screenshot-unchanged-dedup', 10],
+    ['click', 10],
+    ['batch-20', 10]
+  ]);
+  const failures = [];
+  for (const [label, maxP95Ms] of limits) {
+    const row = rows.find(entry => entry.label === label);
+    if (!row) failures.push(`${label}: missing measurement`);
+    else if (row.p95Ms > maxP95Ms) failures.push(`${label}: p95 ${row.p95Ms}ms exceeds ${maxP95Ms}ms`);
+  }
+  if (failures.length) throw new Error(`Computer-control performance budget failed: ${failures.join('; ')}`);
 }
 
 async function liveReadOnlyBenchmark() {

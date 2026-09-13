@@ -76,6 +76,7 @@ interface ComputerAdapter {
   listDisplays(): Promise<ComputerDisplay[]>;
   size(displayId?: string): Promise<{ width: number; height: number }>;
   screenshot(displayId?: string, options?: ComputerScreenshotOptions): Promise<ComputerImage>;
+  invalidateScreenshot?(displayId?: string): void;
   move(displayId: string | undefined, point: ComputerPoint): Promise<void>;
   click(displayId: string | undefined, point: ComputerPoint): Promise<void>;
   doubleClick(displayId: string | undefined, point: ComputerPoint): Promise<void>;
@@ -256,6 +257,7 @@ function createMidsceneComputerAdapter(options: MidsceneAdapterOptions = {}): Co
     listDisplays,
     size,
     screenshot,
+    invalidateScreenshot,
     move,
     click,
     doubleClick,

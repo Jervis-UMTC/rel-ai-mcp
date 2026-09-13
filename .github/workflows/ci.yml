@@ -38,6 +38,8 @@ jobs:
         run: xvfb-run --auto-servernum npm run test:frontend
       - name: Enforce dashboard observability performance budget
         run: xvfb-run --auto-servernum npm run benchmark:observability:strict
+      - name: Enforce computer-control processing budget
+        run: npm run benchmark:computer:strict
       - name: Test local browser capabilities
         run: xvfb-run --auto-servernum npm run test:web-automation
       - run: xvfb-run --auto-servernum npm run test:all

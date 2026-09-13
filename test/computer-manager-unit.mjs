@@ -104,17 +104,19 @@ assert.ok(forcedCapture.image, 'forceImage must re-emit an unchanged image when 
 
 let semanticObserveCalls = 0;
 const semanticTarget = {
-  targetId: 'e1', role: 'Button', name: 'Save', automationId: 'save', className: 'Button', enabled: true,
-  displayId: 'display-side', x: 250, y: 350, width: 100, height: 60, centerX: 300, centerY: 380
+  targetId: 'e1', source: 'uia', role: 'Button', name: 'Save', automationId: 'save', className: 'Button', enabled: true,
+  displayId: 'display-side', x: 250, y: 350, width: 100, height: 60, centerX: 300, centerY: 380, patterns: ['invoke']
 };
 const semanticAdapter = {
   engine: 'windows-uia',
   supported: () => true,
-  observe: async () => {
+  observe: async (_app, _maxElements, perception = 'auto') => {
     semanticObserveCalls += 1;
     return {
       supported: true,
       available: true,
+      perception,
+      ocrAvailable: true,
       window: { title: 'Notes', processName: 'notes', processId: 42, className: 'NotesWindow', displayId: 'display-side' },
       elements: [semanticTarget],
       count: 1,
@@ -141,6 +143,48 @@ assert.equal(semanticActivation.executed, true);
 assert.equal(semanticActivation.method, 'semantic-center-click');
 assert.deepEqual(calls, [['click', 'display-side', { x: 300, y: 380 }]], 'semantic activation must use the current revalidated target center through the existing input adapter');
 assert.equal(semanticObserveCalls, 3, 'activate must re-observe before clicking so stale semantic geometry is not trusted');
+
+const hybridSemanticObservation = await runComputerAction(workspace, enabledConfig, {
+  action: 'observe', app: APP, perception: 'hybrid'
+}, semanticContextA);
+assert.equal(hybridSemanticObservation.perception, 'hybrid');
+assert.equal(hybridSemanticObservation.ocrAvailable, true);
+assert.equal(hybridSemanticObservation.elements[0].source, 'uia');
+
+const nativeSemanticAdapter = {
+  ...semanticAdapter,
+  activate: async (_app, target, _maxElements, perception) => ({
+    supported: true,
+    available: true,
+    handled: true,
+    method: 'uia-invoke',
+    target: { ...target, centerX: 310, centerY: 390 },
+    perception
+  }),
+  setValue: async (_app, target, text) => ({
+    supported: true,
+    available: true,
+    handled: true,
+    method: 'uia-set-value',
+    target: { ...target, role: 'Edit', patterns: ['value'] },
+    text
+  })
+};
+const nativeSemanticContextA = { ...contextA, semanticAdapter: nativeSemanticAdapter };
+const nativeObservation = await runComputerAction(workspace, enabledConfig, { action: 'observe', app: APP }, nativeSemanticContextA);
+calls.length = 0;
+const nativeActivation = await runComputerAction(workspace, enabledConfig, {
+  action: 'activate', app: APP, semanticObservationId: nativeObservation.semanticObservationId, targetId: 'e1'
+}, nativeSemanticContextA);
+assert.equal(nativeActivation.method, 'uia-invoke');
+assert.equal(nativeActivation.x, 310);
+assert.equal(nativeActivation.y, 390);
+assert.deepEqual(calls, [], 'native UIA activation must not also emit a pixel click');
+const nativeSetValue = await runComputerAction(workspace, enabledConfig, {
+  action: 'set_value', app: APP, semanticObservationId: nativeObservation.semanticObservationId, targetId: 'e1', value: ''
+}, nativeSemanticContextA);
+assert.equal(nativeSetValue.method, 'uia-set-value');
+assert.equal(nativeSetValue.textLength, 0, 'native set_value must preserve an intentional empty value');
 
 const fallbackObservation = await runComputerAction(workspace, enabledConfig, { action: 'observe', app: APP }, {
   ...contextA,
@@ -272,6 +316,31 @@ assert.ok(stateBatch.results[1].image, 'the changed observation should be emitte
 assert.equal(stateBatch.results[2].changed, false);
 assert.equal(stateBatch.results[2].image, undefined, 'the trailing screenshot should reuse the changed observation without retransmitting it');
 
+let stableCapture = 0;
+const stableAdapter = {
+  ...adapter,
+  screenshot: async () => {
+    stableCapture += 1;
+    const state = stableCapture < 3 ? stableCapture : 3;
+    const data = Buffer.from(`stable-state:${state}`).toString('base64');
+    return { mimeType: 'image/png', data, bytes: Buffer.byteLength(data, 'base64'), width: 800, height: 600 };
+  }
+};
+const stableResult = await runComputerAction(workspace, enabledConfig, {
+  action: 'wait_for_stable', app: APP, timeoutMs: 1000, pollMs: 50, stableMs: 100
+}, { ...contextA, computerAdapter: stableAdapter });
+assert.equal(stableResult.stable, true);
+assert.equal(stableResult.stableMs, 100);
+assert.ok(stableResult.durationMs >= 100);
+
+const verifiedBatch = await runComputerAction(workspace, enabledConfig, {
+  action: 'batch', app: APP, perception: 'hybrid',
+  actions: [{ action: 'observe' }]
+}, semanticContextA);
+assert.equal(verifiedBatch.results[0].action, 'observe');
+assert.equal(verifiedBatch.results[0].semanticAvailable, true);
+assert.equal(verifiedBatch.results[0].perception, 'hybrid');
+
 calls.length = 0;
 const batch = await runComputerAction(workspace, enabledConfig, {
   action: 'batch', app: APP,
@@ -346,15 +415,19 @@ assert.equal(calls.length, 0, 'oversized typing must be rejected before Midscene
 const catalog = getToolActionCatalog().filter(entry => entry.publicTool === 'relai_computer');
 const typeAction = catalog.find(entry => entry.action === 'type');
 assert.equal(typeAction?.inputSchema?.properties?.text?.maxLength, 65536, 'the model-facing schema must advertise the bounded typing limit');
-for (const action of ['observe', 'activate', 'screenshot', 'wait_for_change', 'move', 'click', 'double_click', 'right_click', 'drag', 'scroll', 'type', 'key', 'hotkey', 'batch']) {
+for (const action of ['observe', 'activate', 'set_value', 'screenshot', 'wait_for_change', 'wait_for_stable', 'move', 'click', 'double_click', 'right_click', 'drag', 'scroll', 'type', 'key', 'hotkey', 'batch']) {
   const definition = catalog.find(entry => entry.action === action);
   assert.ok(definition?.required?.includes('app'), `${action} must advertise app as required`);
 }
 const observeAction = catalog.find(entry => entry.action === 'observe');
 assert.equal(observeAction?.inputSchema?.properties?.maxElements?.maximum, 300);
+assert.deepEqual(observeAction?.inputSchema?.properties?.perception?.enum, ['auto', 'semantic', 'hybrid']);
 const activateAction = catalog.find(entry => entry.action === 'activate');
 assert.ok(activateAction?.required?.includes('semanticObservationId'));
 assert.ok(activateAction?.required?.includes('targetId'));
+const setValueAction = catalog.find(entry => entry.action === 'set_value');
+assert.ok(setValueAction?.required?.includes('value'));
+assert.equal(setValueAction?.inputSchema?.properties?.value?.maxLength, 65536);
 const screenshotAction = catalog.find(entry => entry.action === 'screenshot');
 assert.deepEqual(screenshotAction?.inputSchema?.properties?.profile?.enum, ['fast', 'balanced', 'detail']);
 assert.equal(screenshotAction?.inputSchema?.properties?.forceImage?.type, 'boolean');
@@ -363,6 +436,8 @@ assert.equal(clickAction?.inputSchema?.properties?.observationId?.type, 'string'
 const waitAction = catalog.find(entry => entry.action === 'wait_for_change');
 assert.equal(waitAction?.inputSchema?.properties?.timeoutMs?.maximum, 30000);
 assert.equal(waitAction?.inputSchema?.properties?.pollMs?.minimum, 50);
+const stableAction = catalog.find(entry => entry.action === 'wait_for_stable');
+assert.equal(stableAction?.inputSchema?.properties?.stableMs?.maximum, 5000);
 
 await assert.rejects(
   () => runComputerAction(workspace, enabledConfig, { action: 'click', app: APP, displayId: 'display-side', x: 1280, y: 20 }, contextA),

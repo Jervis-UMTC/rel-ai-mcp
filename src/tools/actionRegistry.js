@@ -50,17 +50,19 @@ const DESKTOP_OMIT = Object.freeze({
 });
 
 const COMPUTER_FIELDS = Object.freeze([
-  'displayId', 'app', 'x', 'y', 'toX', 'toY', 'direction', 'distance', 'text', 'key', 'keys', 'actions',
+  'displayId', 'app', 'x', 'y', 'toX', 'toY', 'direction', 'distance', 'text', 'value', 'key', 'keys', 'actions',
   'observationId', 'previousObservationId', 'profile', 'forceImage', 'timeoutMs', 'pollMs',
-  'semanticObservationId', 'targetId', 'maxElements'
+  'semanticObservationId', 'targetId', 'maxElements', 'perception', 'stableMs'
 ]);
 const COMPUTER_OMIT = Object.freeze({
   status: COMPUTER_FIELDS,
   displays: COMPUTER_FIELDS,
-  observe: COMPUTER_FIELDS.filter(field => !['displayId', 'app', 'previousObservationId', 'profile', 'forceImage', 'maxElements'].includes(field)),
+  observe: COMPUTER_FIELDS.filter(field => !['displayId', 'app', 'previousObservationId', 'profile', 'forceImage', 'maxElements', 'perception'].includes(field)),
   activate: COMPUTER_FIELDS.filter(field => !['app', 'semanticObservationId', 'targetId'].includes(field)),
+  set_value: COMPUTER_FIELDS.filter(field => !['app', 'semanticObservationId', 'targetId', 'value'].includes(field)),
   screenshot: COMPUTER_FIELDS.filter(field => !['displayId', 'app', 'previousObservationId', 'profile', 'forceImage'].includes(field)),
   wait_for_change: COMPUTER_FIELDS.filter(field => !['displayId', 'app', 'previousObservationId', 'profile', 'forceImage', 'timeoutMs', 'pollMs'].includes(field)),
+  wait_for_stable: COMPUTER_FIELDS.filter(field => !['displayId', 'app', 'previousObservationId', 'profile', 'forceImage', 'timeoutMs', 'pollMs', 'stableMs'].includes(field)),
   move: COMPUTER_FIELDS.filter(field => !['displayId', 'app', 'x', 'y', 'observationId'].includes(field)),
   click: COMPUTER_FIELDS.filter(field => !['displayId', 'app', 'x', 'y', 'observationId'].includes(field)),
   double_click: COMPUTER_FIELDS.filter(field => !['displayId', 'app', 'x', 'y', 'observationId'].includes(field)),
@@ -70,7 +72,7 @@ const COMPUTER_OMIT = Object.freeze({
   type: COMPUTER_FIELDS.filter(field => !['app', 'text'].includes(field)),
   key: COMPUTER_FIELDS.filter(field => !['app', 'key'].includes(field)),
   hotkey: COMPUTER_FIELDS.filter(field => !['app', 'keys'].includes(field)),
-  batch: COMPUTER_FIELDS.filter(field => !['app', 'actions', 'observationId', 'profile', 'semanticObservationId'].includes(field)),
+  batch: COMPUTER_FIELDS.filter(field => !['app', 'actions', 'observationId', 'profile', 'semanticObservationId', 'perception'].includes(field)),
   stop: COMPUTER_FIELDS,
   approve_app: COMPUTER_FIELDS.filter(field => field !== 'app'),
   revoke_app: COMPUTER_FIELDS.filter(field => field !== 'app')
@@ -172,8 +174,10 @@ const PUBLIC_BINDINGS_BY_OPERATION = Object.freeze({
     expose('relai_computer', 'displays', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ omit: COMPUTER_OMIT.displays }) }),
     expose('relai_computer', 'observe', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['app'], omit: COMPUTER_OMIT.observe }) }),
     expose('relai_computer', 'activate', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['app', 'semanticObservationId', 'targetId'], omit: COMPUTER_OMIT.activate }) }),
+    expose('relai_computer', 'set_value', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['app', 'semanticObservationId', 'targetId', 'value'], omit: COMPUTER_OMIT.set_value }) }),
     expose('relai_computer', 'screenshot', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['app'], omit: COMPUTER_OMIT.screenshot }) }),
     expose('relai_computer', 'wait_for_change', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['app'], omit: COMPUTER_OMIT.wait_for_change }) }),
+    expose('relai_computer', 'wait_for_stable', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['app'], omit: COMPUTER_OMIT.wait_for_stable }) }),
     expose('relai_computer', 'move', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['app', 'x', 'y'], omit: COMPUTER_OMIT.move }) }),
     expose('relai_computer', 'click', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['app', 'x', 'y'], omit: COMPUTER_OMIT.click }) }),
     expose('relai_computer', 'double_click', { capability: COMPUTER, keepAction: true, behavior: { taskScope: 'optional' }, publicContract: contract({ required: ['app', 'x', 'y'], omit: COMPUTER_OMIT.double_click }) }),

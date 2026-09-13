@@ -209,8 +209,11 @@ await valid('relai_exec', { work_id: 'work', executable: 'node', argv: ['-v'] })
 await valid('relai_exec', { work_id: 'work', executable: 'node', argv: ['-'], input: 'process.stdout.write("ok")' });
 await valid('relai_computer', { action: 'status' });
 await valid('relai_computer', { action: 'observe', app: 'Notepad', maxElements: 120 });
+await valid('relai_computer', { action: 'observe', app: 'Notepad', perception: 'hybrid' });
 await valid('relai_computer', { action: 'activate', app: 'Notepad', semanticObservationId: 'uia_fixture', targetId: 'e1' });
+await valid('relai_computer', { action: 'set_value', app: 'Notepad', semanticObservationId: 'uia_fixture', targetId: 'e1', value: '' });
 await valid('relai_computer', { action: 'screenshot', app: 'Notepad', displayId: 'display-1' });
+await valid('relai_computer', { action: 'wait_for_stable', app: 'Notepad', timeoutMs: 1000, pollMs: 50, stableMs: 200 });
 await valid('relai_computer', { action: 'click', workspace: 'repo', app: 'Notepad', x: 10, y: 20 });
 await valid('relai_computer', { action: 'drag', workspace: 'repo', app: 'Notepad', x: 10, y: 20, toX: 30, toY: 40 });
 await valid('relai_computer', { action: 'scroll', workspace: 'repo', app: 'Notepad', direction: 'down', distance: 500 });
@@ -219,6 +222,8 @@ await valid('relai_computer', { action: 'key', workspace: 'repo', app: 'Notepad'
 await valid('relai_computer', { action: 'hotkey', workspace: 'repo', app: 'Notepad', keys: ['ctrl', 's'] });
 await invalid('relai_computer', { action: 'screenshot', displayId: 'display-1' });
 await invalid('relai_computer', { action: 'activate', app: 'Notepad', semanticObservationId: 'uia_fixture' });
+await invalid('relai_computer', { action: 'set_value', app: 'Notepad', semanticObservationId: 'uia_fixture', targetId: 'e1' });
+await invalid('relai_computer', { action: 'observe', app: 'Notepad', perception: 'visual-only' });
 await invalid('relai_computer', { action: 'click', work_id: 'work', x: 10 });
 await invalid('relai_computer', { action: 'status', text: 'unexpected' });
 await invalid('relai_exec', { work_id: 'work' });

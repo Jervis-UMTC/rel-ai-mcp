@@ -51,7 +51,7 @@ function compactComputerInputSchema(schema) {
       ...schema.properties,
       action: {
         ...schema.properties.action,
-        description: 'Fields: screenshot(app!,displayId); move/click/double_click/right_click(app!,x!,y!,displayId); drag(app!,x!,y!,toX!,toY!,displayId); scroll(app!,direction!,distance,x,y,displayId); type(app!,text!); key(app!,key!); hotkey(app!,keys!); batch(app!,actions!); approve_app/revoke_app(app!). Browsers view-only; terminals/IDEs click-only.'
+        description: 'Fields: observe(app!,perception,maxElements); activate(app!,semanticObservationId!,targetId!); set_value(app!,semanticObservationId!,targetId!,value!); screenshot(app!,displayId); wait_for_change/wait_for_stable(app!,timeoutMs,pollMs,stableMs); move/click/double_click/right_click(app!,x!,y!,displayId); drag(app!,x!,y!,toX!,toY!,displayId); scroll(app!,direction!,distance,x,y,displayId); type(app!,text!); key(app!,key!); hotkey(app!,keys!); batch(app!,actions!,perception); approve_app/revoke_app(app!). Browsers view-only; terminals/IDEs click-only.'
       }
     }
   };

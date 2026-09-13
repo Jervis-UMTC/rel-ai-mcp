@@ -32,7 +32,19 @@ app.whenReady().then(async () => {
   const { readComputerStatus } = await import(moduleUrl);
   const status = await readComputerStatus({ computerControl: { enabled: false } });
   if (!status.available) throw new Error(status.message || 'Packaged computer runtime is unavailable.');
-  console.log(JSON.stringify({ available: status.available, platform: status.platform, engine: status.engine, displays: status.displays }));
+  let semantic = null;
+  if (process.platform === 'win32') {
+    const semanticUrl = pathToFileURL(path.join(resourcesRoot, 'src', 'computer', 'windowsUiaAdapter.js')).href;
+    const { createWindowsUiaAdapter } = await import(semanticUrl);
+    const semanticAdapter = createWindowsUiaAdapter({ timeoutMs: 10_000 });
+    try {
+      semantic = await semanticAdapter.warmup();
+      if (!semantic.available) throw new Error('Packaged Windows UI Automation runtime did not warm successfully.');
+    } finally {
+      await semanticAdapter.shutdown();
+    }
+  }
+  console.log(JSON.stringify({ available: status.available, platform: status.platform, engine: status.engine, displays: status.displays, semantic }));
   app.quit();
 }).catch(error => {
   console.error(error && (error.stack || error.message) || error);
@@ -68,6 +80,9 @@ try {
   assert.ok(Number.isInteger(displayCount) && displayCount >= 0, 'Packaged computer runtime must report a valid display count.');
   if (!allowHeadless) {
     assert.ok(displayCount > 0, 'Packaged computer runtime must enumerate at least one display.');
+  }
+  if (platform === 'win32') {
+    assert.equal(parsed.semantic?.available, true, 'Packaged Windows UI Automation helper must warm successfully.');
   }
   console.log(displayCount > 0
     ? `Packaged Midscene computer runtime verified on ${platform} with ${displayCount} display(s).`
