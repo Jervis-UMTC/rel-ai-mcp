@@ -113,6 +113,7 @@ export function AnalyticsTimelineChart({
   ariaDescribedBy = '',
   valueLabel = 'Value',
   formatValue = value => String(value),
+  missingValueLabel = '',
   peakIndex = -1,
   activeIndex = 0,
   onActiveIndexChange = () => {}
@@ -125,6 +126,7 @@ export function AnalyticsTimelineChart({
   const hasLeadingGap = firstMeasuredIndex > 0;
   const accent = theme.action;
   const trailingData = trailingGapContinuation(data);
+  const missingRanges = missingValueLabel ? missingValueRanges(data) : [];
   const chartData = useMemo(() => ({
     labels,
     datasets: [{
@@ -167,6 +169,14 @@ export function AnalyticsTimelineChart({
       if (Number.isInteger(index)) onActiveIndexChange(index);
     },
     plugins: {
+      missingDataBands: {
+        ranges: missingRanges,
+        dataLength: data.length,
+        label: missingValueLabel,
+        backgroundColor: withAlpha(theme.textMuted, 0.06),
+        borderColor: withAlpha(theme.textMuted, 0.22),
+        textColor: theme.textMuted
+      },
       tooltip: {
         enabled: true,
         displayColors: false,
@@ -208,7 +218,7 @@ export function AnalyticsTimelineChart({
         }
       }
     }
-  }), [detailedLabels, formatValue, labels, onActiveIndexChange, theme, valueLabel]);
+  }), [data.length, detailedLabels, formatValue, labels, missingRanges, missingValueLabel, onActiveIndexChange, theme, valueLabel]);
 
   useEffect(() => {
     activateChartIndex(chartRef.current, activeIndex);
@@ -241,8 +251,14 @@ export function AnalyticsTimelineChart({
     onFocus: () => selectIndex(Number.isInteger(activeIndex) ? activeIndex : latestIndex),
     onKeyDown
   },
-  h(Line, { ref: chartRef, data: chartData, options, 'aria-hidden': 'true' }),
-  h(AccessibleChartTable, { labels: detailedLabels.length ? detailedLabels : labels, values: data, valueLabel, formatValue }));
+  h(Line, { ref: chartRef, data: chartData, options, plugins: [missingDataBandsPlugin], 'aria-hidden': 'true' }),
+  h(AccessibleChartTable, {
+    labels: detailedLabels.length ? detailedLabels : labels,
+    values: data,
+    valueLabel,
+    formatValue,
+    missingValueLabel
+  }));
 }
 
 export function AnalyticsBubbleMatrixChart({ cells = [], xLabels = [], yLabels = [], className = '', ariaLabel = 'Activity matrix' }) {
@@ -379,13 +395,13 @@ function formatMatrixShare(value) {
   return `${number.toFixed(number >= 10 ? 0 : 1)}%`;
 }
 
-function AccessibleChartTable({ labels, values, valueLabel, formatValue }) {
+function AccessibleChartTable({ labels, values, valueLabel, formatValue, missingValueLabel = '' }) {
   return h('table', { className: 'sr-only' },
     h('caption', null, 'Chart data'),
     h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Time'), h('th', { scope: 'col' }, valueLabel))),
     h('tbody', null, values.map((value, index) => h('tr', { key: `${index}-${labels[index] || ''}` },
       h('td', null, labels[index] || `Period ${index + 1}`),
-      h('td', null, formatValue(value))
+      h('td', null, value === null && missingValueLabel ? missingValueLabel : formatValue(value))
     )))
   );
 }
@@ -489,6 +505,73 @@ function trailingGapContinuation(values) {
   continuation[values.length - 1] = values[last];
   return continuation;
 }
+
+function missingValueRanges(values) {
+  const ranges = [];
+  let start = -1;
+  for (let index = 0; index <= values.length; index += 1) {
+    if (index < values.length && values[index] === null) {
+      if (start < 0) start = index;
+      continue;
+    }
+    if (start >= 0) {
+      ranges.push({ start, end: index - 1 });
+      start = -1;
+    }
+  }
+  return ranges;
+}
+
+const missingDataBandsPlugin = {
+  id: 'missingDataBands',
+  beforeDatasetsDraw(chart, _args, options) {
+    const ranges = Array.isArray(options?.ranges) ? options.ranges : [];
+    const dataLength = Math.max(0, Number(options?.dataLength) || 0);
+    const xScale = chart?.scales?.x;
+    const area = chart?.chartArea;
+    if (!ranges.length || !dataLength || !xScale || !area) return;
+
+    const pixel = index => xScale.getPixelForValue(index);
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(area.left, area.top, area.right - area.left, area.bottom - area.top);
+    ctx.clip();
+
+    for (const range of ranges) {
+      const left = range.start <= 0
+        ? area.left
+        : (pixel(range.start - 1) + pixel(range.start)) / 2;
+      const right = range.end >= dataLength - 1
+        ? area.right
+        : (pixel(range.end) + pixel(range.end + 1)) / 2;
+      const width = Math.max(0, right - left);
+      if (!width) continue;
+
+      ctx.fillStyle = options.backgroundColor;
+      ctx.fillRect(left, area.top, width, area.bottom - area.top);
+      ctx.strokeStyle = options.borderColor;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      for (const edge of [left, right]) {
+        ctx.beginPath();
+        ctx.moveTo(edge, area.top);
+        ctx.lineTo(edge, area.bottom);
+        ctx.stroke();
+      }
+
+      if (options.label && width >= 96) {
+        ctx.setLineDash([]);
+        ctx.fillStyle = options.textColor;
+        ctx.font = `600 11px ${ChartJS.defaults.font.family}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(options.label, left + width / 2, area.top + 8, width - 12);
+      }
+    }
+    ctx.restore();
+  }
+};
 
 function withAlpha(color, alpha) {
   const parsed = chartColor(color);

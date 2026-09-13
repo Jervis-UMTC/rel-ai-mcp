@@ -449,6 +449,9 @@ function Timeline({ bounds, points = [], metricKey, label }) {
     ? ` No completed-action samples exist before ${detailedLabels[firstMeasuredIndex]}; the solid line begins at the first measured sample.`
     : '';
   const formatValue = value => formatChartValue(value, label);
+  const gapHint = sparseMetric
+    ? ' Hourly data uses UTC buckets; shaded gaps mean no completed actions were recorded in those buckets.'
+    : ' Hourly data uses UTC buckets.';
 
   return h('div', { className: 'usage-timeline-plot' },
     h('div', { className: 'usage-chart-readout', id: readoutId },
@@ -467,12 +470,13 @@ function Timeline({ bounds, points = [], metricKey, label }) {
         ariaDescribedBy: readoutId,
         valueLabel: label,
         formatValue,
+        missingValueLabel: sparseMetric ? 'No completed actions' : '',
         peakIndex: model.peakIndex,
         activeIndex: safeIndex,
         onActiveIndexChange: setActiveIndex
         }))
     ),
-    h('div', { className: 'usage-chart-hint' }, `Hover the chart or focus it and use ← / → to inspect exact values. Hourly data uses UTC buckets; missing rate or duration samples are shown as gaps.${leadingGapNote}`)
+    h('div', { className: 'usage-chart-hint' }, `Hover the chart or focus it and use ← / → to inspect exact values.${gapHint}${leadingGapNote}`)
   );
 }
 

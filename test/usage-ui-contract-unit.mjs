@@ -134,6 +134,10 @@ assert.equal(sparseRateTimeline.latestIndex, 3);
 assert.equal(pointMetric({ successes: 0, failures: 0 }, 'operationSuccessRate'), null, 'empty success-rate buckets must remain missing rather than becoming 0%');
 assert.equal(pointMetric({ successes: 0, failures: 0, executionMs: 0 }, 'averageDuration'), null, 'empty duration buckets must remain missing rather than becoming 0 ms');
 assert.equal(formatChartValue(null, 'Successful actions'), '—');
+assert.match(charts, /missingDataBandsPlugin/, 'Sparse timeline charts must visually distinguish missing buckets from rendered failures.');
+assert.match(charts, /missingValueRanges\(data\)/, 'Sparse timeline charts must derive explicit missing-data regions from null buckets.');
+assert.match(usageReact, /missingValueLabel: sparseMetric \? 'No completed actions' : ''/, 'Only sparse rate and duration metrics should label missing buckets as no completed actions.');
+assert.match(usageReact, /shaded gaps mean no completed actions were recorded in those buckets/i, 'Analytics help text must explain the missing-data treatment.');
 
 for (const label of ['Actions', 'Retryable problems', 'Successful actions', 'Average time']) {
   assert.match(usageCombined, new RegExp(label), `Usage must render ${label}.`);
