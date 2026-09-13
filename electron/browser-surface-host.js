@@ -770,9 +770,11 @@ function createBrowserSurfaceHost(options = {}) {
       await nextTurn();
       if (page.closing || page.webContents.isDestroyed?.() || attached?.page !== page || !surfaceBounds.visible) return;
       const debuggerApi = await attachedDebugger(page.webContents);
-      await debuggerApi.sendCommand('Emulation.setVisibleSize', {
+      await debuggerApi.sendCommand('Emulation.setDeviceMetricsOverride', {
         width: record.viewport.width,
-        height: record.viewport.height
+        height: record.viewport.height,
+        deviceScaleFactor: 0,
+        mobile: false
       });
       await debuggerApi.sendCommand('Input.setIgnoreInputEvents', { ignore: record.control !== 'user' });
     });

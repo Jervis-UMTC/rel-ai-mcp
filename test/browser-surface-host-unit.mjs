@@ -259,8 +259,8 @@ function createHarness({ failOpen = false } = {}) {
   const navigated = await host.run({ action: 'navigate', nativeSessionId: started.nativeSessionId, nativePageId: opened.nativePageId, url: 'https://example.test/' });
   assert.equal(navigated.url, 'https://example.test/');
   assert.deepEqual(
-    webContents[0].debuggerCommands.findLast(([method]) => method === 'Emulation.setVisibleSize')?.[1],
-    { width: 1440, height: 900 },
+    webContents[0].debuggerCommands.findLast(([method]) => method === 'Emulation.setDeviceMetricsOverride')?.[1],
+    { width: 1440, height: 900, deviceScaleFactor: 0, mobile: false },
     'Chromium must keep the requested viewport while scaling only presentation'
   );
   assert.equal(webContents[0].debuggerCommands.findLast(([method]) => method === 'Input.setIgnoreInputEvents')?.[1]?.ignore, true, 'AI ownership must lock native page input after navigation');

@@ -131,8 +131,8 @@ function verifyPackageContracts() {
   assert.doesNotMatch(String(rootPackage.scripts['test:release'] || ''), /release:check/, 'finalized release metadata belongs to the dedicated preflight gate and must not be rerun by the source release parent');
   assert.deepEqual(
     electronPackage.build.extraResources.find(resource => resource.to === 'src')?.filter,
-    ['**/*.js', '**/*.ts'],
-    'Electron packaging must include both legacy JavaScript and migrated TypeScript backend modules'
+    ['**/*.js', '**/*.ts', '**/*.ps1'],
+    'Electron packaging must include JavaScript, TypeScript, and the Windows UI Automation PowerShell helper'
   );
   const packagedNodeModules = electronPackage.build.extraResources.find(resource => resource.to === 'node_modules')?.filter || [];
   assert.ok(packagedNodeModules.includes('yallist/**'), 'Electron packaging must include yallist because the bundled semver dependency resolves it through lru-cache at runtime');
