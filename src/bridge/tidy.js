@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { writeJsonAtomic } from "../durableState.js";
+import { writeJsonAtomic } from "../durableState.ts";
 import { runProcess } from "../process.js";
 import { resolveSafePath, fileSha256 } from "../safety.js";
 import { getStateDir } from '../statePaths.js';

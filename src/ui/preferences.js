@@ -35,6 +35,16 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = resolveTheme(normalized);
 }
 
+function isDesktopSurface() {
+  return document.documentElement.dataset.surface === 'desktop';
+}
+
+function syncDesktopTheme(theme) {
+  const setter = window.relaiDesktop?.setAppPreferences;
+  if (typeof setter !== 'function') return;
+  void Promise.resolve(setter({ themePreference: normalizeTheme(theme) })).catch(() => {});
+}
+
 function bindSystemTheme() {
   if (!window.matchMedia) return;
   if (mediaQuery && mediaListener) mediaQuery.removeEventListener?.('change', mediaListener);
@@ -46,15 +56,19 @@ function bindSystemTheme() {
 }
 
 export function getUiPreferences() {
+  const fallback = document.documentElement.dataset.themePreference || 'system';
   return {
-    theme: normalizeTheme(readStored(THEME_KEY, document.documentElement.dataset.themePreference || 'system'))
+    theme: isDesktopSurface()
+      ? normalizeTheme(fallback)
+      : normalizeTheme(readStored(THEME_KEY, fallback))
   };
 }
 
 export function setThemePreference(theme) {
   const normalized = normalizeTheme(theme);
-  writeStored(THEME_KEY, normalized);
+  if (!isDesktopSurface()) writeStored(THEME_KEY, normalized);
   applyTheme(normalized);
+  if (isDesktopSurface()) syncDesktopTheme(normalized);
 }
 
 function markPreferencesReady() {

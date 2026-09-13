@@ -121,8 +121,9 @@ try {
     body: JSON.stringify({ jsonrpc: '2.0', id: 21, method: 'tools/list', params: {} })
   });
   const legacyTools = await readMcpResponse(legacyToolsResponse);
-  assert.equal(legacyToolsResponse.status, 200, `${JSON.stringify(legacyTools)}\n${getStderr()}`);
-  assert.equal(legacyTools.result?.tools?.length, activeMcpToolCount);
+  assert.equal(legacyToolsResponse.status, 400, `${JSON.stringify(legacyTools)}\n${getStderr()}`);
+  assert.equal(legacyTools.error?.code, -32022);
+  assert.deepEqual(legacyTools.error?.data?.supported, ['2026-07-28']);
 
   const legacyStatusResponse = await fetch(`${base}/mcp`, {
     method: 'POST',
@@ -140,9 +141,9 @@ try {
     })
   });
   const legacyStatus = await readMcpResponse(legacyStatusResponse);
-  assert.equal(legacyStatusResponse.status, 200, `${JSON.stringify(legacyStatus)}\n${getStderr()}`);
-  assert.equal(legacyStatus.result?.isError, false, JSON.stringify(legacyStatus));
-  assert.equal(legacyStatus.result?.structuredContent?.ok, true);
+  assert.equal(legacyStatusResponse.status, 400, `${JSON.stringify(legacyStatus)}\n${getStderr()}`);
+  assert.equal(legacyStatus.error?.code, -32022);
+  assert.deepEqual(legacyStatus.error?.data?.supported, ['2026-07-28']);
 
   const legacyBatchResponse = await fetch(`${base}/mcp`, {
     method: 'POST',

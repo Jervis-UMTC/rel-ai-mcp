@@ -4,8 +4,8 @@ import { getPublicToolSchemas, getToolSurfaceManifest } from '../src/tools/schem
 
 const processTool = getPublicToolSchemas().find(tool => tool.name === 'relai_process');
 assert.ok(processTool, 'relai_process must be present in the public MCP contract');
-assert.match(processTool.description, /prefer executable \+ argv/i);
-assert.match(processTool.description, /relai_exec or relai_validate for one-shot work/i);
+assert.match(processTool.description, /direct executable \+ argv.*command string/i);
+assert.match(processTool.description, /one-shot work belongs in relai_exec or relai_validate/i);
 
 const properties = processTool.inputSchema?.properties || {};
 for (const field of ['command', 'executable', 'argv', 'input']) {
@@ -17,7 +17,7 @@ const processManifest = getToolSurfaceManifest().tools.find(tool => tool.name ==
 assert.ok(processManifest, 'relai_process execution metadata must be present');
 const startAction = processManifest.actions?.find(action => action.action === 'start');
 assert.ok(startAction, 'relai_process start execution metadata must be present');
-assert.deepEqual(startAction.required, ['kind', 'purpose', 'work_id']);
+assert.deepEqual(startAction.required, ['kind', 'purpose'], 'work_id is optional attribution for managed process startup');
 for (const field of ['command', 'executable', 'argv', 'input', 'reuseExisting']) {
   assert.ok(startAction.fields.includes(field), `relai_process start must expose ${field}`);
 }

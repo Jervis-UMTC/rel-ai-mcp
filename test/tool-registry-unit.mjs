@@ -15,8 +15,8 @@ import {
 
 const config = { workspaces: {} };
 const requiredTools = [
-  'relai_work', 'relai_snapshot', 'relai_read', 'relai_search', 'relai_inspect', 'relai_edit', 'relai_skill',
-  'relai_exec', 'relai_process', 'relai_ui', 'relai_computer', 'relai_validate', 'relai_changes', 'relai_publish'
+  'relai_work', 'relai_snapshot', 'relai_read', 'relai_search', 'relai_inspect', 'relai_edit',
+  'relai_exec', 'relai_process', 'relai_ui', 'relai_browser', 'relai_desktop', 'relai_computer', 'relai_validate', 'relai_changes', 'relai_publish'
 ];
 const removedDirectNames = [
   'relai_begin_work', 'relai_repo_snapshot', 'relai_code_inspect', 'relai_process_start',
@@ -56,9 +56,9 @@ assert.match(connectorInstructions(config), /omit it for workspace\/resource wor
 assert.match(connectorInstructions(config), /approval/i, 'global instructions retain approval safety where defined');
 assert.match(connectorInstructions(config), /authoritative evidence/i, 'global instructions retain truthful evidence semantics');
 assert.match(connectorInstructions(config), /validation is factual evidence, not execution permission/i, 'global instructions must describe validation as evidence rather than permission');
-assert.match(connectorInstructions(config), /brief normal assistant progress messages/i, 'global instructions must keep user-visible progress in normal assistant messages');
-assert.match(connectorInstructions(config), /Native tool invocation labels are supplemental status only/i, 'native status chrome must not suppress user-visible progress messages');
-assert.match(connectorInstructions(config), /Do not poll relai_work status merely to refresh UI/i, 'global instructions must avoid redundant UI-only status polling');
+assert.match(connectorInstructions(config), /work_id omission never selects another task/i, 'global instructions must preserve explicit task-attribution isolation');
+assert.doesNotMatch(connectorInstructions(config), /workspace-resolution error|filesystem path that Rel\.AI already knows|brief normal assistant progress|Native tool invocation labels|private chain-of-thought|poll relai_work status/i,
+  'conditional recovery and host presentation guidance must stay out of always-on MCP instructions');
 assert.doesNotMatch(connectorInstructions(config), /Inspect relevant files|Validate after changes|recovery guidance/i, 'discretionary workflow tactics belong to the workflow runtime/skills, not global MCP instructions');
 
 const manifest = getToolSurfaceManifest(config);
@@ -83,6 +83,7 @@ for (const schema of schemas) {
   assert.deepEqual(publicSchema.outputSchema.required, ['ok']);
 }
 const importUnsafeRootKeywords = ['oneOf', 'anyOf', 'allOf', 'if', 'then', 'else', 'not', 'propertyNames'];
+const capabilityRoutingDescriptions = new Set(['relai_read', 'relai_edit', 'relai_ui', 'relai_browser', 'relai_desktop', 'relai_computer']);
 for (const schema of publicSchemas) {
   for (const keyword of importUnsafeRootKeywords) {
     assert.equal(schema.inputSchema[keyword], undefined, `${schema.name} discovery must not use root ${keyword}`);
@@ -93,7 +94,9 @@ for (const schema of publicSchemas) {
   assert.equal(schema._meta?.ui, undefined, `${schema.name} must stay iframe-free`);
   assert.equal(schema._meta?.['openai/outputTemplate'], undefined, `${schema.name} must not attach a ChatGPT output template`);
   assert.ok(String(schema.description || '').trim().length > 0, `${schema.name} must have a concise connector description`);
-  assert.doesNotMatch(schema.description || '', /\b(?:use when|use for|use to|do not|prefer|should|must)\b/i, `${schema.name} connector description must stay declarative instead of prescribing model workflow`);
+  if (!capabilityRoutingDescriptions.has(schema.name)) {
+    assert.doesNotMatch(schema.description || '', /\b(?:use when|use for|use to|do not|prefer|should|must)\b/i, `${schema.name} connector description must stay declarative unless it owns host/local capability routing`);
+  }
 }
 const publicWorkSchema = publicSchemas.find(item => item.name === 'relai_work')?.inputSchema;
 for (const field of ['workspace', 'title', 'objective', 'bootstrap', 'instructionPath', 'summary', 'reason', 'work_id']) {
@@ -106,9 +109,9 @@ for (const field of ['queries', 'maxResults', 'maxFiles']) {
 }
 assert.equal(publicSearchInputSchema?.properties?.pattern?.description, undefined, 'flat discovery must not repeat action ownership on individual fields');
 assert.equal(publicSearchInputSchema?.properties?.query?.description, undefined, 'flat discovery must not repeat action ownership on individual fields');
-assert.match(publicSearchInputSchema?.properties?.action?.description || '', /Action-specific fields: text\([^)]*pattern[^)]*\).*semantic\([^)]*query[^)]*\)/, 'flat discovery must summarize action-specific fields once on the action selector');
+assert.match(publicSearchInputSchema?.properties?.action?.description || '', /Fields: text\([^)]*pattern[^)]*\).*semantic\([^)]*query[^)]*\)/, 'flat discovery must summarize action-specific fields once on the action selector');
 assert.match(publicSearchInputSchema?.properties?.action?.description || '', /text: pattern or queries.*semantic: queries or query|text: pattern or queries.*semantic: query or queries/, 'flat discovery must preserve canonical alternative input forms');
-assert.match(publicSearchInputSchema?.properties?.action?.description || '', /text\([^)]*maxFiles\[1-200\][^)]*maxResults\[1-1000\].*semantic\([^)]*maxFiles\[1-20000\][^)]*maxResults\[1-100\]/, 'flat discovery must preserve action-specific numeric bounds in the compact action grammar');
+assert.doesNotMatch(publicSearchInputSchema?.properties?.action?.description || '', /\[\d+-\d+\]/, 'validation-only numeric bounds must stay out of compact discovery; canonical runtime validation below remains authoritative');
 assert.match(publicWorkSchema?.properties?.action?.description || '', /status\([^)]*maxBytes[^)]*\)/, 'flat discovery must identify action-specific optional fields once on the action selector');
 const publicValidateInputSchema = publicSchemas.find(item => item.name === 'relai_validate')?.inputSchema;
 assert.equal(publicValidateInputSchema?.properties?.timeoutMs?.anyOf, undefined, 'relai_validate root timeoutMs schema must collapse bounded action variants instead of advertising a redundant union');
@@ -127,7 +130,7 @@ for (const field of ['command', 'executable', 'argv', 'input', 'cwd', 'env', 'ti
   assert.ok(publicExecSchema?.inputSchema?.properties?.[field], `relai_exec connector schema must expose ${field}`);
 }
 const publicEditSchema = publicSchemas.find(item => item.name === 'relai_edit');
-assert.match(publicEditSchema?.inputSchema?.properties?.content?.description || '', /Complete replacement content/i, 'public edit discovery must retain complete-file guidance');
+assert.equal(publicEditSchema?.inputSchema?.properties?.content?.description, undefined, 'public edit discovery must not repeat obvious complete-file field prose');
 assert.equal(publicEditSchema?.inputSchema?.properties?.content?.type, 'string', 'plain content must remain a text-only edit form');
 assert.deepEqual(publicEditSchema?._meta?.['openai/fileParams'], ['file'], 'ChatGPT discovery must advertise the dedicated native file parameter');
 assert.deepEqual(publicEditSchema?.inputSchema?.properties?.file?.required, ['download_url', 'file_id'], 'native file references require only the OpenAI download URL and opaque file ID');
@@ -140,12 +143,12 @@ const publicProcessSchema = publicSchemas.find(item => item.name === 'relai_proc
 assert.match(publicProcessSchema?.inputSchema?.properties?.command?.description || '', /shell syntax/i, 'public process discovery must retain shell guidance');
 assert.doesNotMatch(publicProcessSchema?.inputSchema?.properties?.command?.description || '', /Action usage:/i, 'public process fields must not repeat action-routing prose');
 assert.match(publicProcessSchema?.inputSchema?.properties?.action?.description || '', /start\([^)]*command[^)]*\).*read\([^)]*processId![^)]*\).*write\([^)]*processId![^)]*\).*stop\([^)]*processId![^)]*\)/, 'public process discovery must summarize action ownership and required fields once');
-assert.match(publicExecSchema?.description || '', /Direct executable \+ argv and command-string forms are supported/i, 'ChatGPT discovery must describe both execution forms declaratively');
+assert.match(publicExecSchema?.description || '', /direct executable \+ argv.*command string/i, 'ChatGPT discovery must describe both execution forms declaratively');
 assert.match(publicExecSchema?.inputSchema?.description || '', /direct executable \+ argv, and shell command/i);
 assert.match(publicExecSchema?.inputSchema?.description || '', /Input form: command or executable\./i, 'flat discovery must preserve canonical executable-mode alternatives');
 assert.match(publicExecSchema?.inputSchema?.properties?.command?.description || '', /Multiline scripts or structured text can be supplied through input/i);
 assert.match(publicExecSchema?.inputSchema?.properties?.executable?.description || '', /shell:false/i);
-assert.match(publicExecSchema?.inputSchema?.properties?.argv?.description || '', /without shell parsing/i);
+assert.equal(publicExecSchema?.inputSchema?.properties?.argv?.description, undefined, 'public discovery must not repeat argv semantics already expressed by the execution-form description');
 assert.match(publicExecSchema?.inputSchema?.properties?.input?.description || '', /multiline scripts or structured text/i);
 assert.equal(publicExecSchema?.inputSchema?.allOf, undefined, 'relai_exec discovery stays import-safe; execution-mode exclusivity is enforced at runtime');
 for (const removed of removedDirectNames) {
@@ -158,24 +161,21 @@ assert.deepEqual(schemaByName.get('relai_work').inputSchema.properties.action.en
 const processSchema = schemaByName.get('relai_process');
 assert.deepEqual(processSchema.inputSchema.properties.action.enum, ['start', 'read', 'write', 'stop', 'list']);
 assert.ok(processSchema.inputSchema.properties.kind.enum.includes('service'));
-assert.match(processSchema.description, /Direct executable \+ argv and command-string forms are supported/i);
+assert.match(processSchema.description, /direct executable \+ argv.*command string/i);
 assert.match(processSchema.inputSchema.properties.executable.description, /shell:false/i);
 assert.match(processSchema.inputSchema.properties.argv.description, /without shell parsing/i);
 assert.match(processSchema.inputSchema.properties.input.description, /without closing the persistent stdin stream/i);
 const editSchema = schemaByName.get('relai_edit');
 assert.equal(editSchema.inputSchema.oneOf?.length, 10, 'relai_edit executable schema must retain all canonical edit-form variants');
-assert.match(editSchema.description, /symbolEdit/i);
+assert.match(editSchema.description, /semantic rename.*structural symbol edits.*exact replacement.*full-file content/i);
 assert.deepEqual(editSchema.inputSchema.properties.symbolEdit.properties.action.enum, ['replace', 'insert_before', 'insert_after']);
-assert.match(editSchema.description, /oldText\/newText/i);
-assert.match(editSchema.description, /content complete-file replacement/i);
-assert.match(editSchema.description, /Large complete-file writes are staged internally/i);
 assert.doesNotMatch(editSchema.description, /transport-size fallback/i, 'normal edit guidance must not advertise the internal staged transport fallback');
 assert.match(editSchema.inputSchema.properties.content.description, /staged internally when needed/i);
 assert.match(editSchema.inputSchema.properties.updateText.description, /One logical patch can contain repository-wide changes/i);
 assert.deepEqual(editSchema.inputSchema.properties.stage.enum, ['start', 'append', 'commit', 'abort'], 'canonical executable schema must retain the internal staged transport lifecycle');
 
 await valid('relai_work', { action: 'begin', workspace: 'repo' });
-await invalid('relai_work', { action: 'begin' });
+await valid('relai_work', { action: 'begin' });
 await valid('relai_work', { action: 'finish', work_id: 'work', summary: 'Done.' });
 await invalid('relai_work', { action: 'finish', work_id: 'work' });
 await valid('relai_process', { action: 'start', workspace: 'repo', command: 'npm run dev', kind: 'service', purpose: 'Run the development server.', reuseExisting: true });
@@ -208,13 +208,17 @@ await valid('relai_exec', { workspace: 'repo', command: 'node -v' });
 await valid('relai_exec', { work_id: 'work', executable: 'node', argv: ['-v'] });
 await valid('relai_exec', { work_id: 'work', executable: 'node', argv: ['-'], input: 'process.stdout.write("ok")' });
 await valid('relai_computer', { action: 'status' });
-await valid('relai_computer', { action: 'screenshot', displayId: 'display-1' });
-await valid('relai_computer', { action: 'click', workspace: 'repo', x: 10, y: 20 });
-await valid('relai_computer', { action: 'drag', workspace: 'repo', x: 10, y: 20, toX: 30, toY: 40 });
-await valid('relai_computer', { action: 'scroll', workspace: 'repo', direction: 'down', distance: 500 });
-await valid('relai_computer', { action: 'type', workspace: 'repo', text: 'hello' });
-await valid('relai_computer', { action: 'key', workspace: 'repo', key: 'enter' });
-await valid('relai_computer', { action: 'hotkey', workspace: 'repo', keys: ['ctrl', 's'] });
+await valid('relai_computer', { action: 'observe', app: 'Notepad', maxElements: 120 });
+await valid('relai_computer', { action: 'activate', app: 'Notepad', semanticObservationId: 'uia_fixture', targetId: 'e1' });
+await valid('relai_computer', { action: 'screenshot', app: 'Notepad', displayId: 'display-1' });
+await valid('relai_computer', { action: 'click', workspace: 'repo', app: 'Notepad', x: 10, y: 20 });
+await valid('relai_computer', { action: 'drag', workspace: 'repo', app: 'Notepad', x: 10, y: 20, toX: 30, toY: 40 });
+await valid('relai_computer', { action: 'scroll', workspace: 'repo', app: 'Notepad', direction: 'down', distance: 500 });
+await valid('relai_computer', { action: 'type', workspace: 'repo', app: 'Notepad', text: 'hello' });
+await valid('relai_computer', { action: 'key', workspace: 'repo', app: 'Notepad', key: 'enter' });
+await valid('relai_computer', { action: 'hotkey', workspace: 'repo', app: 'Notepad', keys: ['ctrl', 's'] });
+await invalid('relai_computer', { action: 'screenshot', displayId: 'display-1' });
+await invalid('relai_computer', { action: 'activate', app: 'Notepad', semanticObservationId: 'uia_fixture' });
 await invalid('relai_computer', { action: 'click', work_id: 'work', x: 10 });
 await invalid('relai_computer', { action: 'status', text: 'unexpected' });
 await invalid('relai_exec', { work_id: 'work' });

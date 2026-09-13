@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
 import * as path from 'node:path';
-import { readJsonFile, writeJsonAtomic } from '../durableState.js';
+import { readJsonFile, writeJsonAtomic } from '../durableState.ts';
 import { getStateDir } from '../statePaths.js';
 import { requestStateKey } from './context.js';
 import { stableJson } from './toolManifest.js';

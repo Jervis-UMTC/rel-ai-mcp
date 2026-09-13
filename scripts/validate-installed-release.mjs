@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import semver from 'semver';
 
 import { createInstallerTestContext, removeOwnedTestRoot } from './installer-test-safety.mjs';
 import { releaseArtifactNames } from './release-artifacts.mjs';
@@ -11,7 +12,6 @@ import { releaseArtifactNames } from './release-artifacts.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const electronPackage = JSON.parse(fs.readFileSync(path.join(root, 'electron', 'package.json'), 'utf8'));
-const STABLE_VERSION = /^v?(\d+)\.(\d+)\.(\d+)$/;
 
 async function main() {
   assertDisposableReleaseRunner(process.env);
@@ -311,15 +311,14 @@ function githubHeaders(token) {
 }
 
 function parseStableVersion(value) {
-  const match = String(value || '').trim().match(STABLE_VERSION);
-  return match ? match.slice(1).map(Number) : null;
+  const version = String(value || '').trim().replace(/^v/, '');
+  const parsed = semver.parse(version);
+  if (!parsed || parsed.version !== version || parsed.prerelease.length > 0) return null;
+  return [parsed.major, parsed.minor, parsed.patch];
 }
 
 function compareStableVersions(left, right) {
-  for (let index = 0; index < 3; index += 1) {
-    if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
-  }
-  return 0;
+  return semver.compare(left.join('.'), right.join('.'));
 }
 
 function installerRunId(env) {

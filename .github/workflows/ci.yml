@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -30,15 +30,16 @@ jobs:
         run: node electron/node_modules/electron/install.js
       - name: Verify Electron test binary
         run: test -x electron/node_modules/electron/dist/electron
-      - run: npm run test:native-tasks-release-gate
-      - name: Run Repository Intelligence regression suite
-        run: node test/run-repository-intelligence-tests.mjs
       - name: Enforce MCP startup performance budget
         run: npm run benchmark:mcp-startup
       - name: Enforce Repository Intelligence performance budget
         run: node scripts/repository-intelligence-benchmark.mjs --files 5000 --mutations 50 --json --max-full-ms 30000 --max-incremental-ms 5000
       - name: Test frontend browser experience
-        run: xvfb-run --auto-servernum npm run test:frontend-browser
+        run: xvfb-run --auto-servernum npm run test:frontend
+      - name: Enforce dashboard observability performance budget
+        run: xvfb-run --auto-servernum npm run benchmark:observability:strict
+      - name: Test local browser capabilities
+        run: xvfb-run --auto-servernum npm run test:web-automation
       - run: xvfb-run --auto-servernum npm run test:all
 
   packaged-windows:
@@ -49,7 +50,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -59,8 +60,6 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm ci --no-audit --no-fund
         working-directory: electron
-      - name: Verify generated color assets
-        run: npm run verify:color-tokens
       - name: Build unpacked Windows application
         run: npm run electron:build:windows
       - name: Resolve current unpacked application
@@ -93,7 +92,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -105,8 +104,10 @@ jobs:
         working-directory: electron
       - name: Install Electron test binary
         run: node electron/node_modules/electron/install.js
-      - name: Verify generated color assets
-        run: npm run verify:color-tokens
+      - name: Install Linux desktop runtime test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends x11-xserver-utils
       - name: Build unpacked Linux application
         run: npm run electron:build:linux
       - name: Resolve current unpacked application

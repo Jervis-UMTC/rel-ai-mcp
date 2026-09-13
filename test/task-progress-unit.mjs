@@ -1,48 +1,61 @@
 import assert from 'node:assert/strict';
 
-import { taskProgressHtml } from '../src/ui/components/task-progress.js';
+import { taskProgressView } from '../src/ui/components/task-progress.js';
 
 const indeterminate = { mode: 'indeterminate', label: 'Running command' };
 
 for (const [status, className, state, fallback] of [
-  ['failed', 'static terminal failed', 'Failed', 'Work session failed'],
-  ['cancelled', 'static terminal cancelled', 'Cancelled', 'Work session cancelled'],
-  ['inactive', 'static terminal cancelled', 'Expired', 'Work session expired'],
-  ['expired', 'static terminal cancelled', 'Expired', 'Work session expired']
+  ['failed', 'static terminal failed', 'Failed', 'Task failed'],
+  ['cancelled', 'static terminal cancelled', 'Cancelled', 'Task cancelled'],
+  ['expired', 'static terminal cancelled', 'Expired', 'Task expired']
 ]) {
-  const html = taskProgressHtml(indeterminate, status);
-  assert.match(html, new RegExp(className.replaceAll(' ', '\\s+')));
-  assert.match(html, new RegExp(`>${state}<`));
-  assert.match(html, new RegExp(fallback));
-  assert.doesNotMatch(html, /indeterminate/);
-  assert.doesNotMatch(html, /task-progress-track/);
-  assert.doesNotMatch(html, /Running command/);
+  const view = taskProgressView(indeterminate, status);
+  assert.equal(view.kind, 'static');
+  assert.match(view.className, new RegExp(className.replaceAll(' ', '\\s+')));
+  assert.equal(view.state, state);
+  assert.equal(view.label, fallback);
+  assert.equal(view.value, null);
 }
 
-for (const [status, className, state] of [
-  ['validation_failed', 'static paused failed', 'Action required'],
-  ['blocked', 'static paused blocked', 'Action required'],
-  ['waiting_for_approval', 'static paused blocked', 'Action required']
+const inactive = taskProgressView({ mode: 'indeterminate', label: 'Waiting for the next task step' }, 'inactive');
+assert.equal(inactive.kind, 'static');
+assert.match(inactive.className, /static paused/);
+assert.equal(inactive.state, 'Inactive');
+assert.equal(inactive.label, 'Ready to resume');
+
+for (const [status, className] of [
+  ['validation_failed', 'static paused failed'],
+  ['blocked', 'static paused blocked'],
+  ['waiting_for_approval', 'static paused blocked']
 ]) {
-  const html = taskProgressHtml({ mode: 'indeterminate', label: 'Approval required' }, status, { compact: true });
-  assert.match(html, new RegExp(className.replaceAll(' ', '\\s+')));
-  assert.match(html, new RegExp(`>${state}<`));
-  assert.doesNotMatch(html, /indeterminate/);
-  assert.doesNotMatch(html, /task-progress-track/);
+  const view = taskProgressView({ mode: 'indeterminate', label: 'Approval required' }, status, { compact: true });
+  assert.equal(view.kind, 'static');
+  assert.match(view.className, new RegExp(className.replaceAll(' ', '\\s+')));
+  assert.equal(view.state, 'Action required');
+  assert.match(view.className, /compact/);
 }
 
-const running = taskProgressHtml(indeterminate, 'running');
-assert.match(running, /task-progress indeterminate/);
-assert.match(running, /task-progress-track/);
+const running = taskProgressView(indeterminate, 'running');
+assert.equal(running.kind, 'indeterminate');
+assert.match(running.className, /task-progress indeterminate/);
+assert.equal(running.role, 'status');
+assert.equal(running.label, 'Running command');
 
-const completed = taskProgressHtml({ mode: 'complete', label: 'Complete' }, 'completed');
-assert.match(completed, /task-progress complete/);
-assert.match(completed, /value="100"/);
+const determinate = taskProgressView({ mode: 'determinate', label: 'Checking files', percentage: 37 }, 'running');
+assert.equal(determinate.kind, 'determinate');
+assert.equal(determinate.value, 37);
+assert.equal(determinate.state, '37%');
+assert.equal(determinate.progressAriaLabel, 'Checking files');
 
-const completedWithoutProgress = taskProgressHtml({}, 'completed');
-assert.match(completedWithoutProgress, /task-progress complete/);
-assert.match(completedWithoutProgress, /role="status"/);
-assert.match(completedWithoutProgress, /Work session completed/);
-assert.doesNotMatch(completedWithoutProgress, /indeterminate/);
+const completed = taskProgressView({ mode: 'complete', label: 'Complete' }, 'completed');
+assert.equal(completed.kind, 'complete');
+assert.match(completed.className, /task-progress complete/);
+assert.equal(completed.value, 100);
+assert.equal(completed.role, 'status');
 
-console.log('Terminal and paused task progress renders static states without perpetual loading animation.');
+const completedWithoutProgress = taskProgressView({}, 'completed');
+assert.equal(completedWithoutProgress.kind, 'complete');
+assert.equal(completedWithoutProgress.label, 'Complete');
+assert.match(completedWithoutProgress.ariaLabel, /Task completed/);
+
+console.log('Task progress view models terminal, paused, determinate, and indeterminate states without HTML rendering.');

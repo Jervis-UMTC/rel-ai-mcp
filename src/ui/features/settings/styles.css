@@ -24,12 +24,13 @@
 .settings-panel-intro h2 { @apply text-lg; }
 .settings-panel-intro p { @apply mt-1 text-[12px]; color: var(--ui-text-secondary); }
 .settings-grid { @apply grid gap-3; grid-template-columns: repeat(2,minmax(0,1fr)); }
-.settings-save-row { @apply sticky bottom-3 z-10 flex items-center justify-between gap-3 rounded-lg px-3 py-2.5; background: var(--ui-surface-primary); border: 1px solid var(--ui-border-subtle); box-shadow: none; }
+.settings-save-row { @apply sticky bottom-3 flex items-center justify-between gap-3 rounded-lg px-3 py-2.5; z-index: var(--z-sticky); background: var(--ui-surface-primary); border: 1px solid var(--ui-border-subtle); box-shadow: none; }
 .settings-save-actions { @apply flex gap-2; }
 .setting-row { @apply flex min-h-12 items-center justify-between gap-4 border-b py-2.5 last:border-b-0; border-color: var(--ui-border-subtle); }
 .setting-row-copy { @apply min-w-0; }
 .setting-row-copy strong { @apply block text-[12px]; }
 .setting-row-copy span { @apply mt-1 block text-[12px]; color: var(--ui-text-secondary); }
+.settings-nowrap-action { @apply shrink-0 whitespace-nowrap; }
 .toggle { @apply relative h-6 w-11 shrink-0 cursor-pointer rounded-full; background: var(--ui-surface-raised); border: 1px solid var(--ui-border-default); }
 .toggle::after { content: ""; @apply absolute left-1 top-1 size-4 rounded-full transition-transform; background: var(--ui-text-secondary); }
 .toggle[aria-checked="true"] { background: var(--ui-selection-background); border-color: var(--ui-action-primary); }
@@ -85,24 +86,6 @@
 .settings-validation-row { @apply flex min-w-0 items-center justify-between gap-3 border-b px-3 py-3 last:border-b-0; border-color: var(--ui-border-subtle); }
 .settings-validation-row > div { @apply grid min-w-0 gap-0.5; }
 .settings-validation-row > div span { @apply text-[12px]; overflow-wrap: anywhere; color: var(--ui-text-secondary); }
-.settings-learning-section-head { @apply flex min-h-8 items-center justify-between gap-3; }
-.settings-learning-section-head > div { @apply flex items-center gap-2; }
-.settings-learning-section-head strong { @apply text-[13px]; }
-.settings-count { @apply inline-flex min-h-6 min-w-6 items-center justify-center rounded-md px-1.5 text-[11px] font-semibold; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); color: var(--ui-text-secondary); }
-.settings-list-count { @apply text-[12px]; color: var(--ui-text-secondary); }
-.settings-learning-list { @apply grid gap-2; }
-.settings-learning-row { @apply flex min-w-0 items-start justify-between gap-3 rounded-lg px-3 py-3; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
-.settings-learning-row > div:first-child { @apply grid min-w-0 gap-1; }
-.settings-learning-row span { @apply text-[13px] leading-5; overflow-wrap: anywhere; }
-.settings-learning-row small { @apply text-[12px] leading-5; color: var(--ui-text-secondary); overflow-wrap: anywhere; }
-.settings-learning-row > button { @apply min-h-11 shrink-0; }
-.settings-learning-empty { @apply rounded-lg px-3 py-3; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
-.settings-learning-explanation { @apply grid max-w-4xl gap-1 rounded-lg px-3 py-3; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
-.settings-learning-explanation strong { @apply text-[13px]; }
-.settings-learning-explanation span { @apply text-[12px] leading-5; color: var(--ui-text-secondary); }
-.settings-skill-title { @apply font-semibold; }
-.settings-learning-clear-row { @apply items-start; }
-.settings-learning-clear-row > button { @apply min-h-11 shrink-0; }
 .settings-advanced { @apply max-w-5xl; }
 
 .appearance-preview { @apply grid gap-3 rounded-xl p-3; grid-template-columns: repeat(2,minmax(0,1fr)); background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-default); }
@@ -152,7 +135,7 @@
 @media (max-width: 520px) {
   .appearance-preview, .settings-fact-grid, .desktop-lifecycle-facts { grid-template-columns: 1fr; }
   .settings-fact-grid > div, .desktop-lifecycle-facts > div { @apply border-b border-r-0 last:border-b-0; border-color: var(--ui-border-default); }
-  .settings-validation-row, .application-update-summary, .settings-learning-row, .settings-learning-clear-row, .local-data-summary { @apply flex-col items-start; }
+  .settings-validation-row, .application-update-summary, .local-data-summary { @apply flex-col items-start; }
   .local-data-summary small { @apply text-left; }
   .about-detail-value { @apply w-full text-left; }
   .settings-save-row { @apply flex-col items-stretch; }

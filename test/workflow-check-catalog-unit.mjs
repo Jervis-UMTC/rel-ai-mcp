@@ -11,7 +11,8 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-workflow-checks-'));
 try {
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({
     scripts: {
-      check: 'node --check index.js',
+      'check:quick': 'node --check index.js',
+      check: 'npm run check:quick && eslint .',
       test: 'npm run test:all',
       'test:all': 'node --test',
       'benchmark:observability': 'node benchmark.js',
@@ -41,7 +42,7 @@ try {
     assert.doesNotMatch(serialized, /benchmark:|\brelease\b|watch:|fetch:|electron:dist/, `${level} validation must not auto-select operational scripts`);
     assert.ok(units.length <= 8, `${level} validation should stay bounded, got ${units.length}: ${serialized}`);
   }
-  assert.deepEqual(detectVerifyCheckUnits(root, 'quick').map(item => item.command), ['npm run check', 'npm run lint']);
+  assert.deepEqual(detectVerifyCheckUnits(root, 'quick').map(item => item.command), ['npm run check:quick', 'npm run lint']);
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

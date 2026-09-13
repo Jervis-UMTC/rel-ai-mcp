@@ -35,7 +35,7 @@ process.env.REL_AI_MCP_CONFIG = configPath;
 process.env.REL_AI_MCP_STATE_DIR = stateDir;
 
 try {
-  const { handleWorkspaceChecks } = await import('../src/http/dashboardActions.js');
+  const { handleWorkspaceChecks } = await import('../src/http/dashboardActions.ts');
   const req = Readable.from([Buffer.from(JSON.stringify({ workspace: 'repo' }))]);
   req.headers = { 'content-type': 'application/json' };
   const response = responseRecorder();
@@ -53,11 +53,14 @@ try {
   assert.match(result.work_id || '', /^[0-9a-f-]{36}$/i);
   assert.match(result.summary || '', /Dashboard validation completed for repo/);
 
-  const source = fs.readFileSync(new URL('../src/http/dashboardActions.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /callTool\('relai_run_checks'/);
-  assert.match(source, /callTool\('relai_work'/);
-  assert.match(source, /callTool\('relai_validate'/);
-  console.log('Dashboard validation uses the consolidated begin and validate actions after the hard cutover.');
+  const adapterSource = fs.readFileSync(new URL('../src/http/dashboardActions.ts', import.meta.url), 'utf8');
+  const coreSource = fs.readFileSync(new URL('../src/core/dashboard-actions.ts', import.meta.url), 'utf8');
+  assert.match(adapterSource, /runWorkspaceValidation\(workspace\)/, 'HTTP must delegate validation to the Core operation');
+  assert.doesNotMatch(adapterSource, /callTool\(/, 'HTTP must not own tool orchestration after the Core cutover');
+  assert.doesNotMatch(coreSource, /callTool\('relai_run_checks'/);
+  assert.match(coreSource, /callTool\('relai_work'/);
+  assert.match(coreSource, /callTool\('relai_validate'/);
+  console.log('Dashboard validation delegates to the Core begin/validate workflow after the hard cutover.');
 } finally {
   if (previousConfig == null) delete process.env.REL_AI_MCP_CONFIG;
   else process.env.REL_AI_MCP_CONFIG = previousConfig;

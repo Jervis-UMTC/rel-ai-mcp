@@ -8,13 +8,16 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 const dashboard = read('public/dashboard.js');
 const api = read('src/ui/api.js');
-const connector = read('src/ui/features/settings/connector.js');
-const desktopConnection = read('src/ui/features/settings/desktop-connection.js');
+const settingsReact = read('src/ui/features/settings/react.js');
 const home = read('src/ui/features/home/index.js');
-const diagnostics = read('src/ui/features/settings/diagnostics.js');
-const usage = read('src/ui/features/usage/index.js');
-const workspaces = read('src/ui/features/workspaces/index.js');
-const drawer = read('src/ui/components/drawer.js');
+const homeReact = read('src/ui/features/home/react.js');
+const reactMain = read('src/ui/react/main.js');
+const diagnostics = read('src/ui/features/settings/diagnostics-react.js');
+const processesReact = read('src/ui/features/processes/react.js');
+const toolsReact = read('src/ui/features/tools/react.js');
+const usageReact = read('src/ui/features/usage/react.js');
+const workspacesReact = read('src/ui/features/workspaces/react.js');
+const workspaceModals = read('src/ui/features/workspaces/react-modals.js');
 
 function functionSource(source, name) {
   const asyncStart = source.indexOf(`async function ${name}`);
@@ -32,264 +35,230 @@ function functionSource(source, name) {
   throw new Error(`unterminated function ${name}`);
 }
 
-async function exerciseSyncLiveView(updateBehavior) {
-  const calls = [];
-  const context = {
-    updateLiveView: async data => {
-      calls.push(['update', data]);
-      if (updateBehavior instanceof Error) throw updateBehavior;
-      return updateBehavior;
-    },
-    renderViewIfChanged: async data => {
-      calls.push(['render', data]);
-      return 'rendered';
-    },
-    viewRevisionKey: data => `revision:${data.revision}`,
-    debugError: error => calls.push(['debug', error.message])
-  };
-  vm.runInNewContext(`
-    let _renderRevisionKey = 'original';
-    ${functionSource(dashboard, 'syncLiveView')}
-    globalThis.testApi = {
-      syncLiveView,
-      readFingerprint: () => _renderRevisionKey
-    };
-  `, context);
-  const data = { revision: 2 };
-  const result = await context.testApi.syncLiveView(data);
-  return { calls, result, revisionKey: context.testApi.readFingerprint() };
-}
-
-async function exerciseLiveViewScheduler() {
-  const frames = [];
-  const calls = [];
-  let state = { revision: 1 };
-  const context = {
-    window: {
-      requestAnimationFrame(callback) {
-        frames.push(callback);
-        return frames.length;
-      }
-    },
-    dashboardHidden: () => false,
-    getStore: () => state,
-    syncLiveView: async data => { calls.push(data); }
-  };
-  vm.runInNewContext(`
-    let _liveViewFrame = 0;
-    let _liveViewSyncing = false;
-    let _liveViewPending = false;
-    let _hiddenViewDirty = false;
-    ${functionSource(dashboard, 'scheduleLiveViewSync')}
-    globalThis.testApi = { scheduleLiveViewSync };
-  `, context);
-  context.testApi.scheduleLiveViewSync();
-  state = { revision: 2 };
-  context.testApi.scheduleLiveViewSync();
-  assert.equal(frames.length, 1, 'live events in one frame must share one UI synchronization');
-  await frames[0]();
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].revision, 2, 'the coalesced UI update must use the latest dashboard state');
-}
-
 function exerciseRuntimeLogDelta(runtime, change) {
-  const calls = [];
-  const context = {
-    currentReport: { logs: { runtime } },
-    currentContainer: {},
-    updateSourceOptions: () => calls.push('sources'),
-    renderDiagnosticLogs: () => calls.push('render'),
-    announceDiagnosticUpdate: () => calls.push('announce'),
-    scheduleLiveTailRefresh: () => calls.push('refresh')
-  };
+  const context = {};
   vm.runInNewContext(`
     ${functionSource(diagnostics, 'finiteRevision')}
     ${functionSource(diagnostics, 'applyRuntimeLogDelta')}
     globalThis.applyRuntimeLogDelta = applyRuntimeLogDelta;
   `, context);
-  context.applyRuntimeLogDelta(change);
-  return { calls, runtime: context.currentReport.logs.runtime };
+  return context.applyRuntimeLogDelta(runtime, change);
 }
 
-assert.match(dashboard, /module\.updateSystemLiveState\(root, currentSection\(\), data\)/);
-assert.match(dashboard, /settings: lazySection\(\(\) => import\('\.\/ui\/features\/settings\/index\.js'\)/, 'Connection settings must stay under the canonical Settings route');
-assert.doesNotMatch(dashboard, /\bconnection:\s*systemSection\(/, 'Connection must not return as a standalone system route');
-assert.match(dashboard, /import\('\.\/ui\/features\/settings\/connector\.js'\)/, 'Connection live updates must load through the Settings connector feature');
-assert.match(connector, /export function updateConnectorLiveState/);
-assert.match(connector, /replaceRegion\(page,\s*'\.connection-summary-card'/);
-assert.match(connector, /replaceRegion\(page,\s*'\.connection-layer-disclosure'/);
-assert.match(connector, /replaceRegion\(page,\s*'\.connection-guide-region'/);
-assert.match(home, /export function updateHomeLiveState/);
-assert.match(home, /syncHomeRegion/);
-assert.match(functionSource(home, 'updateHomeLiveState'), /createDesktopSetupChecklist/, 'Overview live updates must refresh onboarding completion state');
-assert.match(functionSource(home, 'updateHomeLiveState'), /data-home-live-workspaces/, 'Overview live updates must refresh project status summaries');
-assert.match(functionSource(home, 'updateHomeLiveState'), /overviewState\(data\)/, 'Home live updates must derive data without rebuilding the full overview tree');
-assert.doesNotMatch(functionSource(home, 'updateHomeLiveState'), /buildOverview\(/, 'Home live updates must not build a detached full overview tree');
-assert.match(home, /function syncHomeClockText/, 'Home live regions must neutralize clock-only text before structural comparison');
-assert.match(functionSource(home, 'syncHomeRegion'), /syncHomeClockText/, 'Home region equality must ignore clock-only text changes');
+function exerciseTunnelDoctorPresentation(result) {
+  const context = {};
+  vm.runInNewContext(`
+    ${functionSource(diagnostics, 'tunnelDoctorPresentation')}
+    globalThis.tunnelDoctorPresentation = tunnelDoctorPresentation;
+  `, context);
+  return context.tunnelDoctorPresentation(result);
+}
+
+function exerciseTunnelDoctorCheckPresentation(check) {
+  const context = {};
+  vm.runInNewContext(`
+    ${functionSource(diagnostics, 'tunnelDoctorCheckPresentation')}
+    globalThis.tunnelDoctorCheckPresentation = tunnelDoctorCheckPresentation;
+  `, context);
+  return context.tunnelDoctorCheckPresentation(check);
+}
+
+assert.doesNotMatch(dashboard, /syncLiveView|updateLiveView|renderViewIfChanged|viewRevisionKey|scheduleLiveViewSync|ensureRouteRoot/, 'dashboard bootstrap must not retain a second route rendering coordinator');
+assert.doesNotMatch(dashboard, /from ['"]\.\/ui\/store\.js['"]/, 'the production dashboard bootstrap must not load the Zustand-backed store outside the Vite bundle');
+assert.match(reactMain, /from ['"]\.\.\/store\.js['"]/, 'the Vite-built dashboard entry must own the canonical store dependency');
+assert.match(reactMain, /function RouteOutlet\(/, 'the React shell must own the active route outlet');
+assert.match(reactMain, /reactRouteComponents\.get\(route\.section\)/, 'the active React feature must be selected directly from the canonical route registry');
+assert.doesNotMatch(reactMain, /preloadRemainingReactRoutes/, 'the dashboard must not eagerly preload every inactive route in the background');
+const routerActivationSource = functionSource(dashboard, 'activateRouter');
+assert.match(routerActivationSource, /void preloadReactRoutes\(initialSection\)/, 'the dashboard must warm the initial lazy route after the router becomes usable');
+assert.match(routerActivationSource, /relai:route-change[\s\S]*preloadReactRoute\(section\)/, 'route changes must warm only the requested route');
+assert.doesNotMatch(routerActivationSource, /preloadRemainingReactRoutes/, 'router activation must not schedule every remaining route for background loading');
+assert.doesNotMatch(reactMain, /bridgeRouteSections|getReactSections|routeRoots|createReactSection|unmountReactSection|LegacyRouteOutlet/, 'React must not retain the migration bridge or per-route React roots');
+assert.doesNotMatch(dashboard, /features\/settings\/(?:index|connector|diagnostics)\.js|updateConnectorLiveState|updateSystemLiveState/, 'dashboard bootstrap must not load legacy Settings or Troubleshooting renderers');
+assert.match(settingsReact, /export function createSettingsRoute/, 'Settings must expose one React route factory');
+assert.match(reactMain, /registerReactSection\('settings'/, 'Settings must be registered as a canonical React route');
+assert.match(reactMain, /registerReactSection\('diagnostics'/, 'Troubleshooting must be registered as a canonical React route');
+assert.doesNotMatch(home, /mountHome|updateHomeLiveState|syncHomeRegion|innerHTML/, 'Overview model must not retain the legacy DOM renderer or patch machinery');
+assert.match(homeReact, /export function createHomeRoute/, 'Overview must expose one React route renderer');
+assert.match(homeReact, /data-home-react/, 'Overview React route must own the rendered feature root');
+assert.doesNotMatch(homeReact, /dangerouslySetInnerHTML|pillHtml|taskProgressHtml/, 'Overview React must render status and progress as React elements instead of legacy HTML strings');
+assert.match(homeReact, /loadAnalyticsData/, 'Overview React route must retain the analytics preview');
+assert.doesNotMatch(homeReact, /relai:clock-tick/, 'Overview must not duplicate the shared dashboard clock with per-second React state updates');
+assert.match(homeReact, /data-clock-elapsed-start/, 'Overview active elapsed time must remain owned by the shared dashboard clock');
+assert.match(homeReact, /data-clock-relative/, 'Overview relative time must remain owned by the shared dashboard clock');
+assert.match(reactMain, /registerReactSection\('home'/, 'Overview must be registered as a canonical React route');
 const sessions = read('src/ui/features/sessions/index.js');
+const sessionsModel = read('src/ui/features/sessions/model.js');
+const sessionsReact = read('src/ui/features/sessions/react.js');
 const processes = read('src/ui/features/processes/index.js');
-const activity = read('src/ui/features/activity/index.js');
+const activity = read('src/ui/features/activity/react.js');
 
-assert.match(dashboard, /async function updateLiveView/);
-assert.equal(dashboard.includes('await syncLiveView(refreshed);'), true);
-assert.doesNotMatch(
-  functionSource(dashboard, 'liveOnEvent'),
-  /renderViewIfChanged|rerender/,
-  'tool-call snapshots must not remount the active route directly'
-);
-assert.match(functionSource(dashboard, 'liveOnEvent'), /scheduleLiveViewSync\(\)/, 'live event bursts must defer route DOM synchronization to the frame scheduler');
-assert.doesNotMatch(functionSource(dashboard, 'liveOnEvent'), /await syncLiveView/, 'individual SSE events must not synchronously block on route DOM work');
-assert.equal(dashboard.includes('return updateHomeLiveState(root, data);'), true);
-assert.equal(dashboard.includes('module.updateTaskSessions(root, data)'), true);
-assert.equal(dashboard.includes('module.updateActivityLiveState(data)'), true, 'Activity live updates must receive the full dashboard snapshot for session correlation');
-assert.equal(dashboard.includes('module.updateWorkspacesLiveState(root, data)'), true, 'Projects must apply live operational state without a manual refresh');
-assert.equal(dashboard.includes('module.updateSystemLiveState(root, currentSection(), data)'), true);
-await exerciseLiveViewScheduler();
-{
-  const supported = await exerciseSyncLiveView(true);
-  assert.deepEqual(supported.calls.map(call => call[0]), ['update']);
-  assert.equal(supported.revisionKey, 'revision:2');
-  assert.equal(supported.result, true);
-}
-
-{
-  const unsupported = await exerciseSyncLiveView(false);
-  assert.deepEqual(unsupported.calls.map(call => call[0]), ['update'], 'unsupported passive updates must not remount the route');
-  assert.equal(unsupported.revisionKey, 'original');
-  assert.equal(unsupported.result, false);
-}
-
-{
-  const failed = await exerciseSyncLiveView(new Error('partial update failed'));
-  assert.deepEqual(failed.calls.map(call => call[0]), ['update', 'debug'], 'failed passive updates must leave the mounted route intact');
-  assert.equal(failed.revisionKey, 'original');
-  assert.equal(failed.result, false);
-}
+assert.doesNotMatch(functionSource(dashboard, 'liveOnEvent'), /rerender|innerHTML|replaceChildren/, 'SSE events must update canonical state without remounting or patching route DOM');
+assert.match(functionSource(dashboard, 'liveOnEvent'), /applyLiveEvent\(event\.type, event\.data\)/, 'SSE events must enter through the canonical dashboard store');
+assert.doesNotMatch(dashboard, /mountHome|updateHomeLiveState|features\/sessions\/index\.js|updateTaskSessions|mountTasks/, 'dashboard bootstrap must not load legacy feature renderers');
 
 const desktopStatusSource = functionSource(dashboard, 'applyDesktopStatus');
 assert.match(desktopStatusSource, /patchLocalConnection/, 'desktop status pushes must update only their owned store slice');
 assert.doesNotMatch(desktopStatusSource, /initStore/, 'desktop status pushes must not replace the whole dashboard store');
-assert.match(desktopStatusSource, /syncLiveView\(data\)/, 'desktop status pushes must use passive route synchronization');
-assert.doesNotMatch(desktopStatusSource, /renderViewIfChanged/, 'desktop status pushes must not structurally rerender the route');
-assert.match(home, /export function updateHomeLiveState/);
-assert.match(sessions, /export function updateTaskSessions/);
-assert.match(activity, /export function updateActivityLiveState/, 'Activity must expose session-aware live synchronization');
-assert.match(activity, /<th scope="col" class="activity-message-column">Activity<\/th>/, 'Activity must use one consolidated primary activity column');
+assert.doesNotMatch(desktopStatusSource, /syncLiveView|renderViewIfChanged|rerender/, 'desktop status pushes must rely on canonical store subscription instead of a second render path');
+assert.doesNotMatch(home, /updateHomeLiveState/, 'Overview must not expose a legacy live DOM updater after React ownership');
+assert.doesNotMatch(sessions, /mountTasks|updateTaskSessions|innerHTML|replaceChildren/, 'Sessions compatibility entrypoint must contain no legacy DOM renderer');
+assert.match(sessionsReact, /export function createSessionsRoute/, 'Tasks must expose one React route factory');
+assert.match(reactMain, /registerReactSection\('tasks'/, 'Tasks must be registered as a canonical React route');
+assert.match(sessionsReact, /data-sessions-react/, 'Tasks React route must own the rendered feature root');
+assert.match(activity, /export function createActivityRoute/, 'Activity must expose a React route factory');
+assert.doesNotMatch(activity, /dangerouslySetInnerHTML|pillHtml/, 'Activity React must render status pills as React elements instead of legacy HTML strings');
+assert.match(activity, /ACTIVITY_STORE_KEYS = Object\.freeze\(\['auditTail', 'tasks'\]\)/, 'Activity must subscribe only to the store slices it renders');
+assert.match(reactMain, /registerReactSection\('activity'/, 'Activity must be registered as a canonical React route');
+assert.match(activity, /h\('th', \{ scope: 'col', className: 'activity-message-column' \}, 'Activity'\)/, 'Activity must use one consolidated primary activity column');
 assert.doesNotMatch(activity, /activity-tool-column|activity-task-column|activity-status-column|activity-action-column/, 'Activity must not split scan context across redundant desktop columns');
-assert.match(activity, /activitySessionView\(entry, _sessionIndex\)/, 'Activity rows must resolve task titles from the current session index');
-assert.match(activity, /activity-row-task[\s\S]*activity-row-project/, 'Activity rows must retain task and project context as supporting metadata');
-assert.match(activity, /activity-row-trigger/, 'Activity rows must retain one native keyboard-focusable detail trigger');
-assert.match(activity, /routeHref\('tasks'/, 'Activity details must deep-link back to Sessions');
-assert.match(sessions, /data-session-fingerprint/, 'session rows must carry semantic fingerprints for keyed reconciliation');
-assert.match(functionSource(sessions, 'timingHtml'), /data-clock-relative/, 'ended and inactive task rows must show relative age instead of total duration');
-assert.match(functionSource(sessions, 'updateTaskSessions'), /syncSessionWorkspaceMenu\(current, data\.config\?\.workspaces \|\| \[\], workspace\)/, 'task live updates must keep the project filter synchronized with current configuration');
-assert.match(functionSource(sessions, 'updateTaskSessions'), /refreshOpenSession\(data\)/, 'live task updates must refresh an already-open task inspector');
-const refreshOpenSessionSource = functionSource(sessions, 'refreshOpenSession');
-assert.match(refreshOpenSessionSource, /renderOpenSessionDetail\(next, \{ preserveTab: true, fingerprint \}\)/, 'live task detail refreshes must use the shared in-place inspector renderer');
-const renderOpenSessionDetailSource = functionSource(sessions, 'renderOpenSessionDetail');
-assert.match(renderOpenSessionDetailSource, /data-session-inspector/, 'task detail rendering must target the persistent task inspector');
-assert.match(renderOpenSessionDetailSource, /activeTab/, 'task detail rendering must preserve the selected inspector tab when hydrating or refreshing');
-assert.match(renderOpenSessionDetailSource, /setSessionTab\(content, activeTab\)/, 'task detail rendering must restore the selected inspector tab');
-assert.match(renderOpenSessionDetailSource, /replaceChildren\(content\)/, 'open task details must update the inspector in place');
-const technicalDetailsSource = functionSource(sessions, 'technicalDetailsSection');
-assert.match(technicalDetailsSource, /<h3>Identifiers<\/h3>/, 'session diagnostics must group task identifiers separately from runtime state');
-assert.match(technicalDetailsSource, /<h3>Runtime<\/h3>/, 'session diagnostics must group runtime state separately from identifiers');
-assert.doesNotMatch(technicalDetailsSource, /Request ID/, 'session diagnostics must not present the client protocol request ID as a task identifier');
-assert.doesNotMatch(technicalDetailsSource, /Trace ID/, 'session diagnostics must not present per-call trace IDs as stable task identifiers');
-assert.match(drawer, /export function updateDrawer/, 'shared drawers must support in-place content refreshes');
-const sessionRowSource = functionSource(sessions, 'sessionRow');
-assert.match(sessionRowSource, /toolCallCount/, 'session rows must keep the tool-call count visible in the scan-first list');
-assert.match(sessionRowSource, /project file/, 'session rows must keep the project-file count visible in the scan-first list');
-assert.doesNotMatch(sessionRowSource, /support artifact|sessionFacts/, 'session rows must keep unrelated secondary counters out of the scan-first list');
-assert.match(functionSource(sessions, 'buildSessionDetail'), /detail\('Tool calls'/, 'task inspector must retain tool-call counts after list simplification');
-assert.match(functionSource(sessions, 'buildSessionDetail'), /detail\('Project files'/, 'task inspector must retain project-file counts after list simplification');
-assert.doesNotMatch(functionSource(sessions, 'workflowTechnicalHtml'), /risk/, 'session details must not surface workflow risk labels');
-assert.doesNotMatch(sessions, /taskProgressHtml/, 'Sessions must not present per-tool progress as whole-task completion');
-assert.doesNotMatch(sessions, /Key activity/, 'session details must not duplicate the task trace with a second activity summary');
-const taskTraceSource = functionSource(sessions, 'taskTraceSection');
-assert.match(taskTraceSource, /mergeSessionEvents\(traceEvents, fallbackEvents\)/, 'open task Activity must merge new live events with the persisted trace instead of pinning the first loaded trace');
-assert.match(taskTraceSource, /data-show-older-events/, 'older task events must expand from the existing trace instead of opening a second event list');
-assert.doesNotMatch(taskTraceSource, /task-detail-overflow/, 'older task events must not render in a disconnected nested list');
-const eventRowSource = functionSource(sessions, 'eventRow');
-assert.match(eventRowSource, /event\.command/, 'recorded commands must remain attached to their activity event for traceability');
-assert.match(eventRowSource, /task-event-command/, 'recorded commands must be visible in the activity trace');
-assert.match(functionSource(sessions, 'copyOlderEventsState'), /data-task-older-event/, 'live task refreshes must preserve expanded older-event state');
-assert.doesNotMatch(functionSource(sessions, 'updateTaskSessions'), /mountTasks\(detached|sessions-history-card[^\n]*replaceWith/, 'session live updates must not rebuild or replace the complete history card');
-assert.match(processes, /export function updateProcessesLiveState/);
-assert.match(functionSource(processes, 'updateProcessesLiveState'), /syncProcessClockText/, 'Process list equality must ignore live elapsed text changes');
-assert.match(functionSource(processes, 'updateProcessesLiveState'), /reconcileProcessList/, 'Process live updates must reconcile the existing list instead of replacing it wholesale');
-assert.match(processes, /function copyProcessDisclosureState/, 'Process live updates must preserve output disclosure state');
-assert.match(processes, /function captureProcessFocus/, 'Process live updates must preserve focused process controls');
-assert.doesNotMatch(functionSource(processes, 'updateProcessesLiveState'), /currentList\.replaceWith\(nextList\)/, 'Process live updates must not replace the whole process list');
-assert.match(diagnostics, /export function updateDiagnosticsLiveState/, 'Troubleshooting must refresh snapshot-backed findings and capability state on shared live events');
-assert.match(usage, /export function updateUsageLiveState/, 'Analytics must reload current local metrics when live activity changes');
-assert.match(workspaces, /export function updateWorkspacesLiveState/, 'Projects must expose a live updater for repository state changes');
-assert.match(workspaces, /hydrateWorkspaceAnalytics/, 'Projects live updates must refresh per-project analytics instead of leaving mount-time metrics');
-assert.match(diagnostics, /function syncDiagnosticRegions/, 'Diagnostics live updates must reconcile stable report regions');
-assert.match(diagnostics, /data-diagnostic-region="maintenance"/, 'Diagnostics maintenance controls must live in a stable region');
-assert.match(diagnostics, /function copyDiagnosticDisclosureState/, 'Diagnostics must preserve technical disclosure state when a changed region is replaced');
-assert.doesNotMatch(functionSource(diagnostics, 'renderCurrentReport'), /root\.innerHTML\s*=/, 'Diagnostics live updates must not remount the whole report');
+assert.match(activity, /activitySessionView\(entry, sessionIndex\)/, 'Activity rows must resolve task titles from the current session index');
+assert.match(activity, /className: 'activity-row-task'[\s\S]*className: 'activity-row-project'/, 'Activity rows must retain task and project context as supporting metadata');
+assert.match(activity, /className: 'activity-row-trigger'/, 'Activity rows must retain one native keyboard-focusable detail trigger');
+assert.match(activity, /routeHref\('tasks'/, 'Activity details must deep-link back to Tasks');
+assert.match(sessionsReact, /key: sessionIdentifier\(session\)/, 'task rows must reconcile by canonical work-session identity');
+assert.match(sessionsReact, /const TaskRow = memo\(/, 'unchanged task rows must retain their React instance and DOM identity');
+assert.match(sessionsReact, /data-clock-relative/, 'ended and inactive task rows must show relative age without second-level timers');
+assert.match(sessionsReact, /data-clock-elapsed-start/, 'active task rows and running operations must retain the shared live elapsed clock');
+assert.match(sessionsReact, /mergeSessionDetail\(hydrated\?\.id === selectedId[\s\S]*selectedSummary, data\)/, 'live snapshots must merge into the open inspector without clearing hydrated history');
+assert.match(sessionsReact, /const \[activeTab, setActiveTab\] = useState\('overview'\)/, 'inspector tab selection must be React-owned state');
+assert.match(sessionsReact, /if \(selectedIdRef\.current !== id\) \{[\s\S]*setActiveTab\('overview'\)/, 'inspector tab reset must be limited to selecting a different task, not passive live updates');
+assert.match(sessionsReact, /flushSync\(\(\) => onSelect\(id\)\)/, 'task selection must commit the immediate summary before asynchronous history hydration');
+assert.match(sessionsReact, /fetchJson\(`\$\{TASK_SESSION_URL\}\?task=/, 'task history must hydrate from the canonical task-session endpoint after immediate summary selection');
+assert.match(sessionsReact, /data-session-inspector/, 'task detail rendering must target the persistent task inspector');
+assert.match(sessionsReact, /h\('h3', null, 'Identifiers'\)/, 'session diagnostics must group task identifiers separately from runtime state');
+assert.match(sessionsReact, /h\('h3', null, 'Runtime'\)/, 'session diagnostics must group runtime state separately from identifiers');
+assert.doesNotMatch(sessionsReact, /Request ID|Trace ID/, 'session diagnostics must not present per-call protocol identifiers as stable task identifiers');
+assert.match(sessionsReact, /toolCallCount/, 'session rows must keep the tool-call count visible in the scan-first list');
+assert.match(sessionsReact, /project file/, 'session rows must keep the project-file count visible in the scan-first list');
+assert.match(sessionsReact, /label: 'Tool calls'/, 'task inspector must retain tool-call counts after list simplification');
+assert.match(sessionsReact, /label: 'Project files'/, 'task inspector must retain the Project files count');
+assert.match(sessionsReact, /title: 'Project files'/, 'task inspector must retain the primary Project files section');
+assert.match(sessionsReact, /const visible = expanded \? ordered : ordered\.slice\(0, DETAIL_FILE_PREVIEW\)/, 'Show more must append the remaining files into the same Project files list');
+assert.match(sessionsReact, /h\(FileList, \{ files: visible, session, moreControl \}\)/, 'the Show more control and expanded files must share one file-list render');
+assert.match(sessionsReact, /className: 'task-file-more-row'/, 'Show more must render as the final row of the same file list');
+assert.doesNotMatch(sessionsReact, /task-detail-overflow-content|More \$\{title\.toLowerCase\(\)\}/, 'expanded files must not render in a disconnected secondary block');
+assert.doesNotMatch(sessionsReact, /task-detail-current\$\{sessionNeedsAttention\(session\)/, 'task progress card must stay neutral when a separate attention callout is present');
+assert.doesNotMatch(sessionsReact, /taskProgressHtml|Key activity|workflowTechnicalHtml/, 'Tasks must not reintroduce misleading per-tool whole-task progress or obsolete workflow guidance');
+assert.match(sessionsReact, /const ordered = orderSessionEvents\(session\.events \|\| \[\]\)/, 'open task Activity must render canonical task events instead of raw audit trace rows');
+assert.doesNotMatch(sessionsReact, /mergeSessionEvents\(traceEvents/, 'raw audit trace rows must not inflate the user-facing task Activity timeline');
+assert.match(sessionsReact, /data-show-older-events/, 'older task events must expand in the existing trace');
+assert.match(sessionsReact, /event\.command/, 'recorded commands must remain attached to their activity event for traceability');
+assert.match(sessionsReact, /task-event-command/, 'recorded commands must be visible in the activity trace');
+assert.match(sessionsReact, /olderExpanded/, 'live task refreshes must preserve expanded older-event state');
+assert.match(sessionsModel, /workSessionStateView\(session\)/, 'status bucketing and open/terminal state must remain delegated to the canonical task-state model');
+assert.doesNotMatch(processes, /mountProcesses|updateProcessesLiveState|innerHTML|replaceWith/, 'Processes model must not retain the legacy DOM renderer or live patch machinery');
+assert.match(processesReact, /export function createProcessesRoute/, 'Processes must expose one React route factory');
+assert.match(processesReact, /key: row\.processId/, 'Process rows must reconcile by canonical process identity');
+assert.match(processesReact, /postJson\('\/api\/processes\/stop'/, 'Process stop must retain the existing backend lifecycle endpoint');
+assert.match(processesReact, /data-stop-process/, 'Process stop controls must remain discoverable');
+assert.match(reactMain, /registerReactSection\('processes'/, 'Processes must be registered as a canonical React route');
+assert.match(reactMain, /registerReactSection\('usage'/, 'Analytics must be registered as a canonical React route');
+assert.match(toolsReact, /export function createToolsRoute/, 'Tools must expose one React route factory');
+assert.match(toolsReact, /result\?\.ok === false \|\| payload == null/, 'Tool API failures must remain distinct from an empty catalog');
+assert.match(reactMain, /registerReactSection\('tools'/, 'Tools must be registered as a React route');
+assert.match(usageReact, /export function createUsageRoute/, 'Analytics must expose one React route factory');
+assert.match(usageReact, /loadAnalyticsData/, 'Analytics must retain the canonical local analytics loader');
+assert.match(usageReact, /taskRevision/, 'Analytics must refresh from canonical live task revisions');
+assert.match(reactMain, /registerReactSection\('usage'/, 'Analytics must remain registered as a canonical React route');
+assert.match(diagnostics, /export function createDiagnosticsRoute/, 'Troubleshooting must expose one React route factory');
+assert.match(workspacesReact, /export function createWorkspacesRoute/, 'Projects must expose one React route factory');
+assert.match(reactMain, /registerReactSection\('workspaces'/, 'Projects must be registered as a canonical React route');
+assert.match(workspacesReact, /data-workspaces-react/, 'Projects React route must own the rendered feature root');
+assert.match(workspacesReact, /useWorkspaceAnalytics/, 'Projects must retain per-project analytics in React ownership');
+assert.match(workspaceModals, /sourcePaths:\s*paths/, 'Project create and edit must preserve multi-source project folders');
+assert.match(workspaceModals, /markUnsaved\(formRef\.current, dirty\)/, 'Project forms must mark unsaved local React state for navigation protection');
+assert.match(workspaceModals, /Forget stored activity for this project/, 'Project deletion must expose an explicit stored-activity cleanup choice');
+assert.match(workspaceModals, /forgetLocalData/, 'Project deletion must pass the cleanup choice to the workspace API');
+assert.doesNotMatch(diagnostics, /DiagnosticMaintenance|data-diagnostic-region': 'maintenance'/, 'Troubleshooting must not duplicate local-data cleanup controls owned by App settings');
+assert.match(diagnostics, /runTunnelDoctor/, 'Troubleshooting must expose the bundled Secure MCP Tunnel doctor through the desktop bridge');
+assert.match(diagnostics, /data-diagnostic-region': 'tunnel-doctor'/, 'Troubleshooting must render structured tunnel doctor results');
+{
+  const skippedOnly = exerciseTunnelDoctorPresentation({
+    ok: false,
+    result: 'skip',
+    exitCode: 0,
+    failedChecks: [],
+    checks: [{ id: 'codex_plugin', status: 'SKIP' }]
+  });
+  assert.equal(skippedOnly.needsAttention, false, 'optional-only doctor skips must not look like a tunnel problem');
+  assert.equal(skippedOnly.label, 'Healthy');
+  assert.equal(skippedOnly.toastVariant, 'success');
+  const codexPlugin = exerciseTunnelDoctorCheckPresentation({
+    id: 'codex_plugin',
+    status: 'SKIP',
+    summary: 'Codex detected; Tunnel MCP plugin not installed',
+    next: ['tunnel-client codex plugin install']
+  });
+  assert.equal(codexPlugin.statusLabel, 'Optional');
+  assert.equal(codexPlugin.tone, 'optional');
+  assert.equal(codexPlugin.optionalSetup, true);
+  assert.match(codexPlugin.why, /work normally without this plugin/i);
+  const failedDoctor = exerciseTunnelDoctorPresentation({
+    ok: false,
+    result: 'fail',
+    exitCode: 2,
+    failedChecks: ['mcp_server_reachable'],
+    checks: [{ id: 'mcp_server_reachable', status: 'FAIL' }]
+  });
+  assert.equal(failedDoctor.needsAttention, true, 'real tunnel failures must remain visually actionable');
+  assert.equal(failedDoctor.label, 'Needs attention');
+}
+assert.match(diagnostics, /Optional setup/, 'Optional Codex installation guidance must stay collapsed behind calm optional copy');
+assert.match(diagnostics, /role: 'log'/, 'Diagnostic log regions must retain explicit log semantics without making the whole stream aria-live');
+assert.doesNotMatch(diagnostics, /aria-live[^\n]*diagnostic-log-list|window\.prompt/, 'Diagnostics must not turn the full live log into an aria-live region or regress to a native prompt');
 {
   const runtime = { revision: 4, count: 1, entries: [{ message: 'existing' }] };
   const duplicate = exerciseRuntimeLogDelta(runtime, { type: 'append', revision: 4, count: 1, entry: { message: 'duplicate', level: 'info' } });
-  assert.deepEqual(duplicate.runtime.entries.map(entry => entry.message), ['existing'], 'duplicate diagnostic revisions must not duplicate log rows');
-  assert.deepEqual(duplicate.calls, []);
+  assert.equal(duplicate.kind, 'duplicate');
+  assert.deepEqual(Array.from(duplicate.runtime.entries, entry => entry.message), ['existing'], 'duplicate diagnostic revisions must not duplicate log rows');
 
   const gap = exerciseRuntimeLogDelta(runtime, { type: 'append', revision: 6, count: 2, entry: { message: 'gap', level: 'warning' } });
-  assert.deepEqual(gap.runtime.entries.map(entry => entry.message), ['existing'], 'a missed diagnostic revision must not apply a partial live tail');
-  assert.deepEqual(gap.calls, ['refresh'], 'revision gaps must request an authoritative diagnostic refresh');
+  assert.equal(gap.kind, 'refresh', 'revision gaps must request an authoritative diagnostic refresh');
+  assert.deepEqual(Array.from(gap.runtime.entries, entry => entry.message), ['existing']);
 
   const next = exerciseRuntimeLogDelta(runtime, { type: 'append', revision: 5, count: 2, entry: { message: 'next', level: 'warning' } });
+  assert.equal(next.kind, 'applied');
   assert.equal(next.runtime.revision, 5);
   assert.deepEqual(Array.from(next.runtime.entries, entry => entry.message), ['existing', 'next']);
-  assert.deepEqual(next.calls, ['sources', 'render', 'announce']);
 }
-assert.match(sessions, /renderSessionRows\(body, \[\.\.\._sessionsById\.values\(\)\], scopeKey\)/, 'Show more must render the latest live session snapshot instead of the mount-time data object');
-const reconcileSessionsSource = functionSource(sessions, 'reconcileSessionRows');
-assert.match(reconcileSessionsSource, /body\.children\[index\]/, 'keyed reconciliation must compare against the current DOM child after a row replacement');
-assert.doesNotMatch(reconcileSessionsSource, /let cursor/, 'keyed reconciliation must not retain a cursor that can become detached by replaceWith');
-assert.match(connector, /export function updateConnectorLiveState/);
-assert.match(connector, /dashboardState\.mcpConnection\|\|payload\.mcpConnection/, 'Connection live state must prefer the canonical dashboard MCP snapshot over its mount-time payload');
-assert.match(connector, /getStore\(\)\.desktopStatus\?\.tunnelId\|\|payload\.tunnelId/, 'Connection guidance must prefer the current desktop Tunnel ID over its mount-time payload');
-assert.doesNotMatch(connector, /connector-technical-details|Execution mode|Native MCP Tasks/, 'Connection must not expose protocol execution internals in the normal UI.');
-for (const moduleSource of [home, processes, connector]) {
-  assert.match(moduleSource, /isEqualNode/, 'live region updaters must preserve unchanged DOM nodes');
-}
-assert.doesNotMatch(sessions, /currentHistory\.replaceWith\(nextHistory\)/, 'session history must reconcile rows instead of replacing the card');
-assert.equal(
-  functionSource(connector, 'updateConnectorLiveState').includes("replaceConnectorRegion(page, '.connector-details'"),
-  false,
-  'live connection updates must preserve the setup guide'
-);
+assert.match(sessionsReact, /const visibleSessions = sessions\.slice\(0, visibleCount\)/, 'Show more must derive rows from the latest canonical React snapshot');
+assert.doesNotMatch(sessionsReact, /data-session-fingerprint|reconcileSessionRows|replaceWith/, 'Tasks must not retain legacy fingerprint or imperative row reconciliation');
+assert.match(settingsReact, /const state = connectionStateFor\(data\)/, 'Connection must derive status directly from the canonical dashboard snapshot');
+assert.doesNotMatch(settingsReact, /fetchJson\('\/api\/connection'|payload\?\.mcpConnection/, 'Connection must not maintain a competing connection snapshot');
+assert.match(settingsReact, /data\.desktopStatus\?\.tunnelId \|\| data\.connection\?\.tunnelId/, 'Connection guidance must derive the Tunnel ID from canonical dashboard state');
+const connectionSource = settingsReact.match(/function ConnectionPage[\s\S]*?function DesktopConnectionSettings/)?.[0] || '';
+assert.doesNotMatch(connectionSource, /connector-technical-details|Execution mode|Native MCP Tasks/, 'Connection must not expose protocol execution internals in the normal UI.');
+assert.match(settingsReact, /guideMode \? h\(ConnectionGuide/, 'Connection setup guidance must remain mounted from current React state rather than an imperative live-region replacement');
+assert.doesNotMatch(sessionsReact, /replaceWith|replaceChildren|innerHTML/, 'React must own task history updates without imperative card replacement');
 
 const bootSource = functionSource(dashboard, 'boot');
-assert.match(bootSource, /relai:dashboard-refresh', event =>/, 'dashboard refresh events must carry explicit refresh intent');
-assert.match(bootSource, /event\.detail\?\.structural === true/, 'structural refreshes must be opt-in');
+assert.match(bootSource, /mountReactFoundation\(ensureDashboardRoot\(\)/, 'the dashboard must mount one canonical React root');
+assert.match(bootSource, /relai:dashboard-refresh', \(\) => doRefresh/, 'dashboard refresh events must refresh canonical state only');
 assert.doesNotMatch(bootSource, /visibilitychange[\s\S]*doRefresh/, 'visibility changes must rely on SSE revision catch-up instead of rebuilding the dashboard');
 assert.match(functionSource(dashboard, 'liveCatchUpRequired'), /remoteRevisions/, 'SSE reconnects must compare typed server revisions before refreshing');
 const liveStateSource = functionSource(dashboard, 'liveStateChange');
 assert.match(liveStateSource, /detail\.state === 'reconnecting'[\s\S]*_liveState !== 'reconnecting'/, 'a desktop SSE reconnect episode must be detected once instead of looping recovery on every backoff attempt');
-assert.match(liveStateSource, /sse-reconnect-probe[\s\S]*quietFailure:\s*true[\s\S]*render:\s*false/, 'desktop SSE reconnect must quietly probe dashboard authorization without remounting the active route');
-assert.match(functionSource(dashboard, 'lazySection'), /context\.isCurrent/, 'lazy route modules must verify the current router generation before mounting');
-assert.match(dashboard, /data-route-retry/, 'lazy route failures must render a visible retry action');
-assert.doesNotMatch(dashboard, /\.then\(module => module\.mount[^\n]*\.catch\(debugError\)/, 'lazy route failures must not be swallowed by debug-only handlers');
+assert.match(liveStateSource, /sse-reconnect-probe[\s\S]*quietFailure:\s*true/, 'desktop SSE reconnect must quietly probe dashboard authorization');
+assert.doesNotMatch(dashboard, /lazySection|routeSection|data-route-retry|bridgeRouteSections|getReactSections/, 'the bootstrap must not retain route migration adapters or imperative route failure UI');
+assert.equal(fs.existsSync(path.join(root, 'src/ui/components/table.js')), false, 'the unused imperative table virtualizer must be removed after the React cutover');
+assert.match(reactMain, /class RouteErrorBoundary extends React\.Component/, 'React must own route failure containment');
+assert.match(reactMain, /primaryLabel: 'Retry page'/, 'route failures must retain a visible retry action');
 
 const refreshSource = functionSource(dashboard, 'performRefresh');
 assert.match(refreshSource, /initStore\(hydrated\)[\s\S]*replayLiveEventsDuringRefresh\(\)[\s\S]*const refreshed = getStore\(\)/, 'aggregate refreshes must replay typed live events that arrived while the snapshot was in flight');
-assert.match(refreshSource, /options\.render === true[\s\S]*renderViewIfChanged\(refreshed,\s*\{\s*force:\s*true\s*\}\)/, 'explicit structural refreshes must force a rerender even when typed domain revisions are unchanged');
-assert.match(functionSource(dashboard, 'renderViewIfChanged'), /options\.force !== true/, 'forced structural refreshes must bypass the passive revision gate');
-assert.match(refreshSource, /options\.render !== false[\s\S]*syncLiveView\(refreshed\)/, 'ordinary refreshes must use passive synchronization');
+assert.match(refreshSource, /clearShellDashboardState\(\)/, 'a successful aggregate refresh must clear boot failure/loading state before showing the React route');
+assert.match(refreshSource, /clearRecoveryNotice\(\{ announce: options\.announceRecovery === true \}\)/, 'routine catch-up refreshes must not announce a false connection restoration');
+assert.match(functionSource(dashboard, 'recoverDashboard'), /announceRecovery:\s*true/, 'actual dashboard recovery must still announce restoration after a successful retry');
+assert.doesNotMatch(refreshSource, /rerender|syncLiveView|renderViewIfChanged/, 'aggregate refreshes must not invoke a duplicate rendering path');
 assert.match(functionSource(dashboard, 'liveOnEvent'), /bufferLiveEventDuringRefresh\(event\)/, 'live events must be retained while an aggregate refresh is in flight');
 const refreshCoordinatorSource = functionSource(dashboard, 'doRefresh');
 assert.match(refreshCoordinatorSource, /_refreshLiveEvents = \[\]/, 'each aggregate refresh must start a fresh bounded live-event buffer');
 assert.match(refreshCoordinatorSource, /needsCatchUp[\s\S]*live-refresh-overflow/, 'buffer overflow must schedule an authoritative catch-up refresh instead of silently dropping state');
 assert.match(functionSource(dashboard, 'bufferLiveEventDuringRefresh'), /MAX_REFRESH_LIVE_EVENTS[\s\S]*_refreshLiveEventOverflow = true/, 'refresh buffering must stay bounded and record overflow');
 
-assert.match(api, /export function requestDashboardRefresh\(options = \{\}\)/, 'dashboard refresh helper must accept refresh intent');
-assert.match(api, /structural: options\.structural === true/, 'dashboard refresh helper must default structural intent to false');
-assert.match(desktopConnection, /saveSettings\([\s\S]*requestDashboardRefresh\(\{ structural: true \}\)/, 'Secure tunnel configuration changes must structurally refresh the Connection route');
-assert.doesNotMatch(functionSource(dashboard, 'viewRevisionKey'), /JSON\.stringify/, 'route invalidation must use explicit revisions instead of serializing dashboard objects');
-assert.match(functionSource(dashboard, 'viewRevisionKey'), /data\.live\?\.revisions/, 'route invalidation must use typed domain revisions');
+assert.match(api, /export function requestDashboardRefresh\(\)/, 'dashboard refresh helper must expose one canonical refresh signal');
+assert.doesNotMatch(api, /structural/, 'dashboard refresh must not carry obsolete structural-render intent');
+assert.match(settingsReact, /saveSettings\(\{ port: form\.port, tunnelId: form\.tunnelId, tunnelApiKey: form\.tunnelApiKey \}\)[\s\S]*requestDashboardRefresh\(\)/, 'Secure tunnel configuration changes must refresh canonical dashboard state');
 
 console.log('Dashboard live rendering contracts passed.');

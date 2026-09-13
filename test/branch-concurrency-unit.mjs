@@ -7,8 +7,8 @@ import path from 'node:path';
 import { flushAuditWrites } from '../src/audit.js';
 import { flushLocalAnalytics } from '../src/localAnalytics.js';
 import { repositoryIntelligence } from '../src/repository/intelligence/service.js';
-import { flushTaskHistoryPersistence } from '../src/taskHistoryStore.js';
-import { resetTaskHistoryCaches } from '../src/taskHistoryStorage.js';
+import { flushTaskHistoryPersistence } from '../src/taskHistoryStore.ts';
+import { resetTaskHistoryCaches } from '../src/taskHistoryStorage.ts';
 import { resetToolActivity } from '../src/toolActivity.js';
 import { callTool as rawCallTool } from '../src/tools.js';
 
@@ -131,7 +131,7 @@ try {
   await flushAuditWrites();
   await flushTaskHistoryPersistence();
   await flushLocalAnalytics();
-  repositoryIntelligence.shutdown();
+  await repositoryIntelligence.shutdown();
   resetTaskHistoryCaches();
   resetToolActivity();
   if (previousConfig == null) delete process.env.REL_AI_MCP_CONFIG;

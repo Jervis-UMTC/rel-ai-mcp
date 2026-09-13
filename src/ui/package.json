@@ -1,4 +1,21 @@
 {
+  "name": "@rel-ai/ui",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": {
+    "./api": "./api.js",
+    "./events": "./events.js",
+    "./react": "./react/main.js",
+    "./store": "./store.js"
+  },
+  "dependencies": {
+    "@radix-ui/react-alert-dialog": "^1.1.23",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@tanstack/react-query": "^5.102.8",
+    "chart.js": "^4.5.1",
+    "lucide-react": "^1.43.0",
+    "react-chartjs-2": "^5.3.1",
+    "react-router-dom": "^7.18.3",
+    "zustand": "^5.0.15"
+  }
 }

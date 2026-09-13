@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getTaskHistoryDir, writeSession } from '../src/taskHistoryStorage.js';
+import { getTaskHistoryDir, writeSession } from '../src/taskHistoryStorage.ts';
 import { availablePort } from './helpers/available-port.mjs';
 import { createHttpMcpSession } from './helpers/http-mcp.mjs';
 
@@ -13,13 +13,16 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-browser-acceptance-'));
 const stateDir = path.join(temp, 'state');
 const workspace = path.join(temp, 'workspace');
+const projectCreateWorkspace = path.join(temp, 'workspace-created');
 const configPath = path.join(temp, 'config.json');
 const outputPath = path.join(temp, 'probe.json');
 const screenshotDir = path.join(temp, 'screenshots');
 const token = 'browser-acceptance-token';
 const port = await availablePort();
 fs.mkdirSync(workspace, { recursive: true });
+fs.mkdirSync(projectCreateWorkspace, { recursive: true });
 fs.writeFileSync(path.join(workspace, 'package.json'), JSON.stringify({ name: 'browser-fixture', version: '1.0.0', scripts: { test: 'node -e "process.exit(0)"' } }));
+fs.writeFileSync(path.join(projectCreateWorkspace, 'package.json'), JSON.stringify({ name: 'browser-created-fixture', version: '1.0.0' }));
 const config = {
   version: 3,
   stateDir,
@@ -45,7 +48,7 @@ try {
   const electronBinary = process.env.RELAI_ELECTRON_BINARY || path.resolve(root, 'electron', 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron');
   assert.equal(fs.existsSync(electronBinary), true, `Electron binary not found at ${electronBinary}`);
   const probe = path.join(root, 'test', 'fixtures', 'electron-dashboard-probe');
-  const target = `http://127.0.0.1:${port}/dashboard?token=${encodeURIComponent(token)}#tasks`;
+  const target = `http://127.0.0.1:${port}/dashboard?token=${encodeURIComponent(token)}#home`;
   child = spawn(electronBinary, [
     '--no-sandbox',
     '--disable-gpu',
@@ -58,7 +61,9 @@ try {
     env: electronEnvironment({
       RELAI_PROBE_TARGET_URL: target,
       RELAI_PROBE_OUTPUT_PATH: outputPath,
-      RELAI_PROBE_SCREENSHOT_DIR: screenshotDir
+      RELAI_PROBE_SCREENSHOT_DIR: screenshotDir,
+      RELAI_PROBE_CREATE_WORKSPACE_PATH: projectCreateWorkspace,
+      RELAI_PROBE_DASHBOARD_DELAY_MS: '900'
     })
   });
   let stdout = '';
@@ -79,6 +84,13 @@ try {
     throw new Error(`Electron probe did not complete (launcher code ${code ?? 'unknown'}). stdout=${stdout} stderr=${stderr}\n${error.message}`);
   });
   assert.equal(result.error, undefined, result.error);
+  assert.equal(result.initialHydration.delayedDashboardRequest, true, JSON.stringify(result.initialHydration));
+  assert.equal(result.initialHydration.before.falseEmpty, false, JSON.stringify(result.initialHydration));
+  assert.equal(result.initialHydration.during.falseEmpty, false, JSON.stringify(result.initialHydration));
+  assert.equal(result.initialHydration.during.loading, true, JSON.stringify(result.initialHydration));
+  assert.match(result.initialHydration.during.loadingText, /Loading Rel\.AI/i, JSON.stringify(result.initialHydration));
+  assert.ok(result.initialHydration.after.workspaceCount >= 1, JSON.stringify(result.initialHydration));
+  assert.equal(result.initialHydration.after.falseEmpty, false, JSON.stringify(result.initialHydration));
   assert.ok(result.initial.rowCount >= 9);
   for (const label of ['queued', 'planning', 'running', 'blocked', 'validating', 'completed', 'failed', 'cancelled']) {
     assert.ok(result.initial.rowText.some(text => text.toLowerCase().includes(label)), `Missing rendered state: ${label}`);
@@ -92,9 +104,16 @@ try {
   assert.equal(result.initial.unknownStatusCount, 0);
   assert.equal(result.initial.longTitleAccessible, true);
   assert.equal(result.initial.reducedMotion, true);
+  assert.equal(result.initial.reactFoundationReady, true, 'the production dashboard must mount the React migration root');
+  assert.ok(result.initial.reactRevisionKey.length > 0, 'the React migration root must subscribe to the canonical dashboard store');
   assert.equal(result.liveToolUpdate.received, true, JSON.stringify(result.liveToolUpdate));
+  assert.notEqual(result.liveToolUpdate.reactRevisionKey, result.initial.reactRevisionKey, 'accepted SSE revisions must reach React through the canonical store subscription');
   assert.equal(result.liveToolUpdate.sameRouteNode, true, 'an MCP tool request must not remount the active dashboard route');
-  assert.deepEqual(result.navigationInteractions.map(item => item.hash), ['#workspaces', '#settings/connection', '#settings', '#settings/application', '#settings/about']);
+  assert.deepEqual(result.navigationInteractions.map(item => item.hash), [
+    '#home', '#tasks', '#code', '#workspaces', '#activity',
+    '#processes', '#diagnostics', '#tools', '#usage',
+    '#settings/connection', '#settings', '#settings/application', '#settings/about'
+  ]);
   for (const interaction of result.navigationInteractions) {
     assert.equal(interaction.hitTarget.ownsControl, true, `${interaction.selector} is covered by another element`);
     assert.equal(interaction.opened, true, `${interaction.selector} did not open ${interaction.hash}`);
@@ -107,6 +126,13 @@ try {
   assert.equal(result.modalInteractions.routeChangeCancelPreserved, true, JSON.stringify(result.modalInteractions));
   assert.equal(result.modalInteractions.routeChangeConfirmNavigated, true, JSON.stringify(result.modalInteractions));
   assert.equal(result.modalInteractions.sharedCloseVisible, true, JSON.stringify(result.modalInteractions));
+  assert.deepEqual(result.projectPersistence, {
+    created: true,
+    edited: true,
+    oldAliasRemoved: true,
+    finalAlias: 'acceptance-created-edited',
+    recentProjectsAbsent: true
+  });
   assert.deepEqual(result.passiveRouteStability.map(item => item.route), ['settings', 'diagnostics', 'workspaces', 'tools']);
   for (const route of result.passiveRouteStability) {
     assert.equal(route.sameRouteNode, true, `MCP activity remounted #${route.route}: ${JSON.stringify(route)}`);
@@ -262,11 +288,12 @@ function seedSessions(directory) {
 }
 
 async function waitForHealth(url) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
     try { if ((await fetch(url)).ok) return; } catch {}
     await new Promise(resolve => setTimeout(resolve, 50));
   }
-  throw new Error(`HTTP server did not become healthy. ${serverError}`);
+  throw new Error(`HTTP server did not become healthy within 15s. ${serverError}`);
 }
 
 async function waitForProbeStage(file, expectedStage, timeoutMs) {

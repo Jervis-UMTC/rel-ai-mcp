@@ -34,7 +34,7 @@ let auditModule = null;
 let repositoryIntelligenceModule = null;
 try {
   const { callTool } = await import('../src/tools.js');
-  taskHistoryStore = await import('../src/taskHistoryStore.js');
+  taskHistoryStore = await import('../src/taskHistoryStore.ts');
   repositoryIntelligenceModule = await import('../src/repository/intelligence/service.js');
   auditModule = await import('../src/audit.js');
   const { readTaskHistorySession, readTaskHistorySessionRecord } = taskHistoryStore;

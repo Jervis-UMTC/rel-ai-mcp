@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startHttpServer } from '../src/httpServer.js';
+import { startHttpServer } from '../src/httpServer.ts';
 import { beginConnectorToolCall, requestCurrentTaskCancellation, resetToolActivity, runWithToolActivity } from '../src/toolActivity.js';
 import { runUiAction, stopAllUiSessions } from '../src/webAutomationManager.js';
 
@@ -58,6 +58,40 @@ try {
   });
   taskId = beginTask.taskId;
   beginTask({ ok: true });
+
+  const preCancelledTaskId = `${taskId}-pre-cancelled`;
+  const preCancelledController = new AbortController();
+  preCancelledController.abort();
+  await assert.rejects(
+    () => runUiAction(workspace, {}, {
+      action: 'start',
+      port: address.port,
+      route: '/',
+      work_id: preCancelledTaskId
+    }, { taskId: preCancelledTaskId, publicHttpOnly: true, signal: preCancelledController.signal }),
+    error => error?.code === 'UI_OPERATION_CANCELLED'
+  );
+
+  const raceTaskId = `${taskId}-race`;
+  const raceContext = { taskId: raceTaskId, publicHttpOnly: true };
+  const raceArgs = {
+    action: 'start',
+    port: address.port,
+    route: `/dashboard?token=${encodeURIComponent(dashboardToken)}`,
+    work_id: raceTaskId
+  };
+  const raceResults = await Promise.allSettled([
+    runUiAction(workspace, {}, raceArgs, raceContext),
+    runUiAction(workspace, {}, raceArgs, raceContext)
+  ]);
+  assert.equal(raceResults.filter(result => result.status === 'fulfilled').length, 1,
+    'concurrent starts for one work session must create exactly one UI session');
+  assert.equal(raceResults.filter(result => result.status === 'rejected' && result.reason?.code === 'UI_SESSION_ALREADY_ACTIVE').length, 1,
+    'the racing UI start must be rejected while the first session is still starting');
+  const racedSession = raceResults.find(result => result.status === 'fulfilled')?.value;
+  assert.ok(racedSession?.sessionId);
+  await runUiAction(workspace, {}, { action: 'stop', sessionId: racedSession.sessionId, work_id: raceTaskId }, raceContext);
+
   const context = { taskId, publicHttpOnly: true };
   const started = await runUiAction(workspace, {}, {
     action: 'start',

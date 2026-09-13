@@ -1,14 +1,15 @@
 @layer components {
 .tools-grid { @apply grid gap-2; grid-template-columns: repeat(auto-fit,minmax(340px,1fr)); }
 .tool-card { @apply flex min-h-0 flex-col gap-2 p-3; border-color: var(--ui-border-default); }
-.tool-card:hover { border-color: var(--ui-border-control); background: var(--ui-surface-secondary); }
+.tool-card:hover { border-color: var(--ui-border-subtle); background: var(--ui-surface-primary); }
+.tool-card:has(a:hover,button:hover) { border-color: var(--ui-border-control); }
 .tool-card-head { @apply flex items-center justify-between gap-3; }
-.tool-capability { @apply text-[11px] font-bold uppercase tracking-[.06em]; color: var(--ui-text-primary); }
-.tool-parameter-count { @apply text-[11px]; color: var(--ui-text-tertiary); }
-.tool-card-title { @apply grid gap-1; }
-.tool-card-title h3 { @apply text-[14px]; color: var(--ui-text-primary); }
-.tool-card-title code { @apply w-fit max-w-full break-words text-[11px]; color: var(--ui-text-secondary); }
-.tool-card p { @apply m-0 text-[12px] leading-5; color: var(--ui-text-secondary); }
+.tool-capability { @apply text-[12px] font-bold uppercase tracking-[.06em]; color: var(--ui-text-primary); }
+.tool-parameter-count { @apply text-[12px]; color: var(--ui-text-secondary); }
+.tool-card-title { @apply grid gap-1; max-width: 65ch; }
+.tool-card-title h3 { @apply text-[14px] leading-6; color: var(--ui-text-primary); }
+.tool-card-title code { @apply w-fit max-w-full break-words text-[12px]; color: var(--ui-text-secondary); }
+.tool-card p { @apply m-0 text-[13px] leading-6; color: var(--ui-text-secondary); max-width: 65ch; }
 .tool-parameters { @apply mt-auto border-t pt-3; border-color: var(--ui-border-default); }
 .tool-parameters summary { @apply flex min-h-11 cursor-pointer items-center text-[12px] font-semibold; color: var(--ui-text-primary); }
 .tool-parameter-list { @apply flex flex-wrap gap-1.5 pt-2; }

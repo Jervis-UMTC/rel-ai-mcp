@@ -8,6 +8,7 @@ import { getVersion } from './version.js';
 import { getToolSurfaceManifest } from './tools/schema.js';
 import { allWorkspaceAliases, resolveWorkspace } from './config.js';
 import { buildToolManifest } from './mcp/toolManifest.js';
+import semver from 'semver';
 
 const PROTOCOL_VERSION = MCP_PROTOCOL_VERSION;
 const MAX_REPOSITORY_METADATA_CACHE = 64;
@@ -220,17 +221,9 @@ function compareField(output, field, runtimeValue, repositoryValue) {
 }
 
 function compareVersions(left, right) {
-  const leftParts = versionParts(left);
-  const rightParts = versionParts(right);
-  for (let index = 0; index < 3; index += 1) {
-    if (leftParts[index] !== rightParts[index]) return leftParts[index] < rightParts[index] ? -1 : 1;
-  }
-  return 0;
-}
-
-function versionParts(value) {
-  const match = cleanVersion(value).match(/^(\d+)\.(\d+)\.(\d+)/);
-  return match ? match.slice(1).map(Number) : [0, 0, 0];
+  const leftVersion = semver.valid(cleanVersion(left)) || '0.0.0';
+  const rightVersion = semver.valid(cleanVersion(right)) || '0.0.0';
+  return semver.compare(leftVersion, rightVersion);
 }
 
 

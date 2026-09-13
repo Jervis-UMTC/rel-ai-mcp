@@ -15,16 +15,17 @@ import { relaiExec } from '../bridge/exec.js';
 import { startTask, taskBootstrapFromSnapshot } from './task.js';
 import { startManagedProcess, readManagedProcess, writeManagedProcess, stopManagedProcess, listManagedProcesses } from '../processManager.js';
 import { runUiAction } from '../webAutomationManager.js';
+import { runLocalBrowserAction } from '../browser/localBrowserManager.ts';
+import { runDesktopAction } from '../desktopManager.ts';
 import { runComputerAction } from '../computerManager.js';
 import { relaiSemanticSearch } from '../bridge/semanticSearch.js';
 import { repositoryIntelligence } from '../repository/intelligence/service.js';
 import { relaiDiagnosticsRun } from '../bridge/diagnosticsRunner.js';
-import { releaseTaskChangedFiles, taskCommitOwnership, taskOwnedChangedFiles } from '../taskIntegrity.js';
-import { readRecentWorkflowEvidence, readRelevantTaskEpisodes } from '../taskHistoryStore.js';
+import { releaseTaskChangedFiles, taskCommitOwnership, taskOwnedChangedFiles } from '../taskIntegrity.ts';
+import { readRecentWorkflowEvidence, readRelevantTaskEpisodes } from '../taskHistoryStore.ts';
 import { selectRelevantSkills } from '../skillDiscovery.js';
 import { buildTaskContinuity, rankBootstrapGroups } from '../context/taskContinuity.js';
 import { knowledgeSettings } from '../knowledgeStore.js';
-import { manageSkill } from '../skillManager.js';
 import { discoverRepositoryTopology, packageForPath } from '../workflow/topology.js';
 import { createReviewCheckpoint, replayReviewCheckpoint } from '../reviewCheckpoints.js';
 import { compactSessionSummary } from '../context/session-compactor.js';
@@ -46,8 +47,8 @@ const startTaskHandler = inWorkspace(async (workspace, config, args, context) =>
     includeFiles: bootstrapMode === 'full',
     instructionPath: args.instructionPath
   });
-  const taskQuery = [task.objective, task.title].filter(Boolean).join(' ');
   const hostContextSummary = String(args.contextSummary || '').trim().slice(0, 3000);
+  const taskQuery = [task.objective, task.title, hostContextSummary].filter(Boolean).join(' ');
   const recoveredSession = context?.requestTaskContext?.session;
   const recoveredTask = recoveredSession && String(recoveredSession.id || recoveredSession.taskId || '') === task.work_id
     ? compactSessionSummary(recoveredSession)
@@ -71,7 +72,9 @@ const startTaskHandler = inWorkspace(async (workspace, config, args, context) =>
     cachedIntelligence = bootstrapMode === 'full'
       ? await repositoryIntelligence.cachedContext(workspace, config, { maxResults: 10 })
       : await repositoryIntelligence.cachedSummary(workspace, config);
-  } catch {}
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] cached intelligence fallback:', error);
+  }
   const bootstrap = {
     ...baseBootstrap,
     ...supplemental,
@@ -118,6 +121,8 @@ const HANDLERS = Object.freeze({
   processStop: (config, args, context) => stopManagedProcess(config, args, context),
   processList: (config, args, context) => listManagedProcesses(config, args, context),
   ui: inWorkspace((workspace, config, args, context) => runUiAction(workspace, config, args, context)),
+  browser: inWorkspace((workspace, config, args, context) => runLocalBrowserAction(workspace, config, args, context)),
+  desktop: inWorkspace((workspace, config, args, context) => runDesktopAction(workspace, config, args, context)),
   computer: inWorkspace((workspace, config, args, context) => runComputerAction(workspace, config, args, context)),
   semanticSearch: inWorkspace((workspace, config, args, context) => relaiSemanticSearch(workspace, config, withWorkflowTaskContext(config, workspace, args, context), context)),
   diagnosticsRun: inWorkspace((workspace, config, args, context) => relaiDiagnosticsRun(workspace, config, args, context)),
@@ -151,7 +156,6 @@ const HANDLERS = Object.freeze({
   gitPush: inWorkspace((workspace, config, args) => relaiGitPush(workspace, config, args)),
   gitDraftPr: inWorkspace((workspace, config, args) => relaiGitDraftPr(workspace, config, args)),
   edit: inWorkspace((workspace, config, args, context) => planEdit(workspace, config, args, context)),
-  skillManage: inWorkspace((workspace, config, args, context) => manageSkill(workspace, config, args, context)),
   cancelTask,
   completeTask
 });
@@ -170,14 +174,18 @@ function withWorkflowTaskContext(config, workspace, args, context = {}) {
     const topology = requestState?.topology || discoverRepositoryTopology(workspace.path);
     if (requestState && !requestState.topology) requestState.topology = topology;
     packagePaths = [...new Set(owned.map(file => packageForPath(topology, file)?.path).filter(value => value && value !== '.'))];
-  } catch {}
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] workflow context ownership fallback:', error);
+  }
   try {
     const evidence = requestState?.workflowContextEvidence || readRecentWorkflowEvidence(config, taskId, 30);
     if (requestState && !requestState.workflowContextEvidence) requestState.workflowContextEvidence = evidence;
     readEvidence = evidence
       .flatMap(receipt => Array.isArray(receipt?.metadata?.reads) ? receipt.metadata.reads : [])
       .slice(-100);
-  } catch {}
+  } catch (error) {
+    if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] workflow evidence fallback:', error);
+  }
   return { ...args, _workflowContext: { taskOwnedPaths: owned, packagePaths, readEvidence } };
 }
 

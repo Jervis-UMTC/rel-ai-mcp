@@ -1,5 +1,9 @@
 const $ = id => document.getElementById(id);
-const recoveryMode = new URLSearchParams(location.search).get('recovery') === '1';
+const queryParams = new URLSearchParams(location.search);
+const recoveryMode = queryParams.get('recovery') === '1';
+const updateMode = queryParams.get('update') === '1';
+const updatePreviousVersion = (queryParams.get('previousVersion') || '').slice(0, 80);
+const updateCurrentVersion = (queryParams.get('currentVersion') || '').slice(0, 80);
 
 function setError(value = '') {
   $('setupError').textContent = String(value || '');
@@ -91,7 +95,7 @@ async function connect() {
   } catch (error) {
     setError(messageOf(error));
     button.disabled = false;
-    button.textContent = 'Connect this computer';
+    button.textContent = button.dataset.updateLabel || 'Connect this computer';
   }
 }
 
@@ -112,6 +116,30 @@ function messageOf(error) {
   return error instanceof Error ? error.message : String(error || 'Setup failed.');
 }
 
+function applyUpdateMode() {
+  if (!updateMode || recoveryMode) return;
+  document.title = 'Rel.AI MCP Update';
+  const banner = $('updateBanner');
+  if (banner) banner.hidden = false;
+  const detail = $('updateBannerDetail');
+  if (detail && (updatePreviousVersion || updateCurrentVersion)) {
+    const from = updatePreviousVersion ? ` from v${updatePreviousVersion}` : '';
+    const to = updateCurrentVersion ? ` to v${updateCurrentVersion}` : '';
+    detail.textContent = `This looks like an update${from}${to} installed from a full download instead of the in-app updater. Your previous connection was not found on this launch, so reconnect once and you will be back where you left off.`;
+  }
+  const eyebrow = $('wizardEyebrow');
+  if (eyebrow) eyebrow.textContent = 'Finish updating Rel.AI';
+  const title = $('wizardTitle');
+  if (title) title.textContent = 'Reconnect after the update';
+  const subtitle = $('wizardSubtitle');
+  if (subtitle) subtitle.textContent = 'Rel.AI was updated from a full download. Confirm your Secure MCP Tunnel below to finish updating — nothing else needs to change.';
+  const action = $('connectBtn');
+  if (action) action.textContent = 'Reconnect after update';
+  // Remember the pre-update button label so a failed reconnect restores the
+  // update copy instead of the fresh-install copy.
+  if (action) action.dataset.updateLabel = 'Reconnect after update';
+}
+
 $('connectBtn').addEventListener('click', connect);
 $('runtimeKeyToggle').addEventListener('click', () => {
   const input = $('tunnelApiKeyInput');
@@ -127,4 +155,5 @@ document.querySelectorAll('[data-open-openai]').forEach(button => button.addEven
 for (const [inputId, errorId] of [['tunnelIdInput', 'tunnelIdError'], ['tunnelApiKeyInput', 'runtimeKeyError'], ['portInput', 'portError']]) {
   $(inputId).addEventListener('input', () => clearFieldError(inputId, errorId));
 }
+applyUpdateMode();
 void loadExistingSettings();

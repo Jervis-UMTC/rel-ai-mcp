@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import semver from 'semver';
+import { normalizeTargetArch } from './platform-architecture.mjs';
 import { VERSION_JSON_FILES } from './release-surfaces.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,10 +35,6 @@ function expectEqual(actual, expected, label) {
   if (actual !== expected) fail(`${label}: expected ${expected}, got ${actual}`);
 }
 
-function validSemver(version) {
-  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(String(version || ''));
-}
-
 function firstChangelogEntry(changelog) {
   const match = changelog.match(/^##\s+\[([^\]]+)\]\s+[—-]\s+(\d{4}-\d{2}-\d{2})\s*$/m);
   if (!match) return null;
@@ -60,7 +58,7 @@ function assertTunnelClient() {
   // fetches and verifies the pinned build-time binary for the explicit target.
   const platform = String(process.env.REL_AI_TARGET_PLATFORM || '').trim();
   if (!platform) return;
-  const targetArch = normalizeArch(process.env.REL_AI_TARGET_ARCH || process.arch);
+  const targetArch = normalizeTargetArch(process.env.REL_AI_TARGET_ARCH || process.arch, { allowUnknown: true });
   const manifestPath = rel('vendor', 'tunnel-client', 'manifest.json');
   if (!fs.existsSync(manifestPath)) {
     fail(`OpenAI tunnel-client provenance manifest is missing: ${path.relative(root, manifestPath)}`);
@@ -84,16 +82,9 @@ function assertTunnelClient() {
   expectEqual(sha256, String(spec.sha256).toLowerCase(), `bundled OpenAI tunnel-client SHA-256 for ${platform}/${targetArch}`);
 }
 
-function normalizeArch(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (['x64', 'amd64', 'x86_64'].includes(normalized)) return 'x64';
-  if (['arm64', 'aarch64'].includes(normalized)) return 'arm64';
-  return normalized;
-}
-
 const packageJson = readJson('package.json');
 const version = packageJson.version;
-expect(validSemver(version), `package.json version must be semver-like x.y.z, got ${version}`);
+expect(semver.valid(version) === version, `package.json version must be semver-like x.y.z, got ${version}`);
 
 for (const relativePath of VERSION_JSON_FILES) assertJsonVersion(relativePath, version);
 assertTunnelClient();

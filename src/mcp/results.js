@@ -1,3 +1,5 @@
+import { MCP_CONTENT_TYPES } from '../contracts/mcp.ts';
+
 const DEFAULT_MAX_TOOL_RESULT_BYTES = 512 * 1024;
 const DEFAULT_MAX_TOOL_TEXT_BYTES = 8 * 1024;
 const MAX_TOOL_RESULT_BYTES = Number(
@@ -8,9 +10,8 @@ const MAX_TOOL_RESULT_BYTES = Number(
 const MAX_TOOL_TEXT_BYTES = Number(process.env.REL_AI_MCP_MAX_TOOL_TEXT_BYTES || DEFAULT_MAX_TOOL_TEXT_BYTES);
 
 function toolResult(payload, isError, meta) {
-  const imageContent = toolImageContent(payload);
+  const { imageContents, structuredPayload } = extractToolImages(payload);
   const resourceLinkContent = toolResourceLinkContent(payload);
-  const structuredPayload = imageContent ? withoutImageData(payload) : payload;
   const serialized = JSON.stringify(structuredPayload);
   const bytes = Buffer.byteLength(serialized, 'utf8');
   const structuredContent = bytes > MAX_TOOL_RESULT_BYTES
@@ -23,8 +24,8 @@ function toolResult(payload, isError, meta) {
   });
   return {
     content: [
-      { type: 'text', text: truncateUtf8Head(text, MAX_TOOL_TEXT_BYTES) },
-      ...(imageContent ? [imageContent] : []),
+      { type: MCP_CONTENT_TYPES.TEXT, text: truncateUtf8Head(text, MAX_TOOL_TEXT_BYTES) },
+      ...imageContents,
       ...(resourceLinkContent ? [resourceLinkContent] : [])
     ],
     structuredContent,
@@ -33,13 +34,44 @@ function toolResult(payload, isError, meta) {
   };
 }
 
-function toolImageContent(payload) {
-  const image = payload?.image;
+function extractToolImages(payload) {
+  const imageContents = [];
+  const seen = new WeakSet();
+
+  function visit(value) {
+    if (!value || typeof value !== 'object') return value;
+    if (seen.has(value)) return value;
+    seen.add(value);
+    if (Array.isArray(value)) return value.map(visit);
+
+    const entries = [];
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'image') {
+        const imageContent = imageContentOf(child);
+        if (imageContent) {
+          imageContents.push(imageContent);
+          entries.push([key, stripImageData(child)]);
+          continue;
+        }
+      }
+      entries.push([key, visit(child)]);
+    }
+    return Object.fromEntries(entries);
+  }
+
+  return { imageContents, structuredPayload: visit(payload) };
+}
+
+function imageContentOf(image) {
   if (!image || typeof image !== 'object' || Array.isArray(image)) return null;
   const data = typeof image.data === 'string' ? image.data : '';
   const mimeType = typeof image.mimeType === 'string' ? image.mimeType : '';
   if (!data || !/^image\/[A-Za-z0-9.+-]+$/.test(mimeType)) return null;
-  return { type: 'image', data, mimeType };
+  return { type: MCP_CONTENT_TYPES.IMAGE, data, mimeType };
+}
+
+function stripImageData(image) {
+  return Object.fromEntries(Object.entries(image).filter(([key]) => key !== 'data'));
 }
 
 function toolResourceLinkContent(payload) {
@@ -49,21 +81,13 @@ function toolResourceLinkContent(payload) {
   const name = typeof link.name === 'string' ? link.name : '';
   if (!uri || !name) return null;
   return {
-    type: 'resource_link',
+    type: MCP_CONTENT_TYPES.RESOURCE_LINK,
     uri,
     name,
     ...(typeof link.description === 'string' && link.description ? { description: link.description } : {}),
     ...(typeof link.mimeType === 'string' && link.mimeType ? { mimeType: link.mimeType } : {}),
     ...(Number.isSafeInteger(link.size) && link.size >= 0 ? { size: link.size } : {})
   };
-}
-
-function withoutImageData(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
-  const image = payload.image && typeof payload.image === 'object' && !Array.isArray(payload.image)
-    ? Object.fromEntries(Object.entries(payload.image).filter(([key]) => key !== 'data'))
-    : payload.image;
-  return { ...payload, image };
 }
 
 function conciseToolResultText(payload, options = {}) {

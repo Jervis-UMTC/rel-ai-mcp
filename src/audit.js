@@ -1,5 +1,5 @@
-import { clearTaskHistory, recordTaskHistoryEvent } from './taskHistoryStore.js';
-import { recordTaskIntegrityEvent } from './taskIntegrity.js';
+import { clearTaskHistory, recordTaskHistoryEvent } from './taskHistoryStore.ts';
+import { recordTaskIntegrityEvent } from './taskIntegrity.ts';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

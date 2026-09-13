@@ -4,9 +4,10 @@
   display: block;
   margin-bottom: 4px;
   color: var(--ui-action-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .1em;
+  line-height: 1.5;
   text-transform: uppercase;
 }
 .desktop-setup-checklist .card-head p { margin-top: 4px; color: var(--ui-text-secondary); font-size: 12px; line-height: 1.45; }
@@ -31,8 +32,9 @@
 }
 .desktop-setup-item:last-child { border-bottom: 0; }
 .desktop-setup-item.current { background: color-mix(in srgb, var(--ui-selection-background) 82%, transparent); }
-.desktop-setup-item.locked { opacity: .64; }
-.desktop-setup-item.done { opacity: .78; }
+.desktop-setup-item.locked { opacity: 1; }
+.desktop-setup-item.locked .desktop-setup-copy, .desktop-setup-item.locked .desktop-setup-state { color: var(--ui-text-secondary); }
+.desktop-setup-item.done { opacity: 1; }
 .desktop-setup-index {
   display: grid;
   width: 28px;

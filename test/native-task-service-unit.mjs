@@ -27,7 +27,7 @@ import {
   updateNativeTaskRecovery
 } from '../src/mcp/nativeTaskService.js';
 import { createNativeToolTask } from '../src/mcp/nativeToolTasks.js';
-import { openStateDatabase, stateDatabasePath, withStateDatabase } from '../src/stateDatabase.js';
+import { openStateDatabase, stateDatabasePath, withStateDatabase } from '../src/stateDatabase.ts';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-native-task-service-'));
 const config = { stateDir: root };
@@ -205,6 +205,32 @@ try {
     { principal: owner }
   );
   assert.equal(genericFailed.error.message, 'Task execution failed.');
+
+  const interruptedInput = createNativeTask(config, {
+    principal: owner,
+    method: 'tools/call',
+    name: 'interrupted-input-test',
+    status: 'input_required',
+    inputRequests: {
+      approval: {
+        responseSchema: {
+          type: 'object',
+          required: ['approved'],
+          additionalProperties: false,
+          properties: { approved: { type: 'boolean' } }
+        }
+      }
+    }
+  });
+  assert.equal(interruptedInput.status, 'input_required');
+  const interruptedInputState = getNativeTask(config, interruptedInput.taskId, { principal: owner });
+  assert.equal(interruptedInputState.status, 'failed', 'input_required tasks without their executor must fail before accepting client input');
+  assert.equal(interruptedInputState.error?.data?.reason, 'executor_interrupted');
+  assert.equal(interruptedInputState.inputRequests, undefined, 'failed tasks must stop advertising stale input requests');
+  assertRequestError(
+    () => updateNativeTaskInputs(config, interruptedInput.taskId, { approval: { approved: true } }, { principal: owner }),
+    'terminal_conflict'
+  );
 
   let resumeCount = 0;
   let receivedResponses = null;

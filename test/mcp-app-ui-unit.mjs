@@ -24,11 +24,12 @@ const invocationLabels = new Map([
   ['relai_search', ['Searching repository…', 'Repository searched']],
   ['relai_inspect', ['Inspecting code…', 'Code inspected']],
   ['relai_edit', ['Applying changes…', 'Changes applied']],
-  ['relai_skill', ['Saving learned skill…', 'Learned skill saved']],
   ['relai_exec', ['Running command…', 'Command finished']],
   ['relai_process', ['Managing process…', 'Process updated']],
   ['relai_ui', ['Testing local UI…', 'Local UI tested']],
-  ['relai_computer', ['Controlling computer…', 'Computer action finished']],
+  ['relai_browser', ['Using local browser…', 'Local browser updated']],
+  ['relai_desktop', ['Using local desktop…', 'Desktop action finished']],
+  ['relai_computer', ['Controlling computer… Press Esc to stop.', 'Computer action finished']],
   ['relai_validate', ['Validating changes…', 'Validation finished']],
   ['relai_changes', ['Reviewing changes…', 'Changes reviewed']],
   ['relai_publish', ['Publishing changes…', 'Changes published']]
@@ -53,9 +54,9 @@ for (const schema of publicSchemas) {
 
 assert.deepEqual(mcpByName.get('relai_publish')?.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
 
-assert.match(PUBLIC_MCP_SERVER_INSTRUCTIONS, /brief normal assistant progress messages/i, 'server instructions must preserve visible progress around tool use');
-assert.match(PUBLIC_MCP_SERVER_INSTRUCTIONS, /Native tool invocation labels are supplemental status only/i);
-assert.match(PUBLIC_MCP_SERVER_INSTRUCTIONS, /do not expose private chain-of-thought/i);
+assert.match(PUBLIC_MCP_SERVER_INSTRUCTIONS, /work_id omission never selects another task/i, 'server instructions must preserve explicit task-attribution isolation');
+assert.doesNotMatch(PUBLIC_MCP_SERVER_INSTRUCTIONS, /brief normal assistant progress|Native tool invocation labels|private chain-of-thought/i,
+  'host-owned presentation and reasoning policy must not be duplicated into MCP instructions');
 
 const openAiEnvelope = { 'openai/session': 'chat-session-regression' };
 assert.equal(openAiConversationId(openAiEnvelope), 'chat-session-regression');

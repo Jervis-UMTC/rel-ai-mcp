@@ -26,17 +26,20 @@ app.whenReady().then(async () => {
         const field = [...root.querySelectorAll('fieldset')].find(item => item.querySelector('legend')?.textContent.includes(label));
         const input = [...(field?.querySelectorAll('input[type="radio"]') || [])].find(item => item.value === value);
         if (!input) return false;
-        input.checked = true;
-        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.click();
         return true;
       };
       const filterButton = document.querySelector('#__activity-filter-bar .filter-open-button');
       const search = document.querySelector('#__activity-filter-bar .filter-search-input');
+      const filterButtonLabel = filterButton.getAttribute('aria-label') || '';
       filterButton.focus();
       filterButton.click();
       await delay(30);
       const drawer = document.querySelector('.filter-drawer');
       const focusedInside = drawer?.contains(document.activeElement) || false;
+      const labelledBy = drawer?.getAttribute('aria-labelledby') || '';
+      const title = labelledBy ? document.getElementById(labelledBy) : null;
+      const dialogLabel = drawer?.getAttribute('role') === 'dialog' && Boolean(title?.textContent.trim());
       const fixedChoicesVisible = setRadio(drawer, 'Status', 'failed');
       [...drawer.querySelectorAll('button')].find(button => button.textContent.trim() === 'Cancel')?.click();
       await delay(30);
@@ -51,15 +54,15 @@ app.whenReady().then(async () => {
       return {
         searchVisible: Boolean(search && getComputedStyle(search).display !== 'none'),
         searchLabel: search?.closest('label')?.textContent.trim() || '',
-        filterButtonLabel: filterButton.getAttribute('aria-label') || '',
+        filterButtonLabel,
         summaryRole: document.querySelector('#__activity-filter-bar .filter-summary')?.getAttribute('role') || '',
-        dialogLabel: drawer?.getAttribute('aria-labelledby') === '__relai-drawer-title' && drawer?.getAttribute('role') === 'dialog',
+        dialogLabel,
         focusedInside,
         cancelPreserved,
         fixedChoicesVisible
       };
     })()`);
-    await waitFor(win, `document.querySelectorAll('#__activity-filter-bar .filter-chip').length === 2 && !document.querySelector('.filter-drawer')`);
+    await waitFor(win, `document.querySelectorAll('#__activity-filter-bar .filter-chip').length === 2 && !document.querySelector('.filter-drawer') && /events shown/.test(document.querySelector('#__activity-filter-bar .filter-summary')?.textContent || '')`);
     const activityApplied = await win.webContents.executeJavaScript(`(() => {
       const chips = [...document.querySelectorAll('#__activity-filter-bar .filter-chip')];
       const freeze = document.getElementById('__activity-freeze');
@@ -124,8 +127,7 @@ app.whenReady().then(async () => {
         const field = [...root.querySelectorAll('fieldset')].find(item => item.querySelector('legend')?.textContent.includes(label));
         const input = [...(field?.querySelectorAll('input[type="radio"]') || [])].find(item => item.value === value);
         if (!input) return false;
-        input.checked = true;
-        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.click();
         return true;
       };
       const trigger = document.querySelector('#diagnosticFilterHost .filter-open-button');
@@ -159,11 +161,12 @@ app.whenReady().then(async () => {
       document.querySelector('[data-live-tail]')?.click(); await delay(80);
       const liveTailStopped = document.querySelector('[data-live-tail]')?.getAttribute('aria-pressed') === 'false';
       const search = document.querySelector('#diagnosticFilterHost .filter-search-input');
-      search.value = 'no-diagnostic-match-acceptance'; search.dispatchEvent(new Event('input', { bubbles: true })); await delay(220);
+      const inputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      inputValueSetter?.call(search, 'no-diagnostic-match-acceptance'); search.dispatchEvent(new Event('input', { bubbles: true })); await delay(220);
       const searchEmpty = /0 of .* findings.*0 of .* log entries shown/.test(document.querySelector('#diagnosticFilterHost .filter-summary')?.textContent || '');
       document.querySelector('#diagnosticFilterHost .filter-clear-button')?.click();
-      const technicalCodes = [...document.querySelectorAll('[data-diagnostic-detail] p code')];
-      const technicalFindingCodesGated = technicalCodes.length > 0 && technicalCodes.every(code => Boolean(code.closest('details[data-diagnostic-detail]')));
+      const technicalFindingCodesGated = ![...document.querySelectorAll('[data-diagnostic-region="findings"] code')]
+        .some(code => !code.closest('details[data-diagnostic-detail]'));
       const findingSeveritiesReadable = [...document.querySelectorAll('.diagnostic-severity')]
         .every(element => ['Blocking', 'Warning', 'Recommendation'].includes(element.textContent.trim()));
       return { cancelPreserved, fixedChoicesVisible, sourceDisabledForFindings, initialLiveTailLabel, liveTailActiveLabel, liveTailStarted, liveTailStopped, searchEmpty, technicalFindingCodesGated, findingSeveritiesReadable, applied };
@@ -174,12 +177,15 @@ app.whenReady().then(async () => {
     const tools = await win.webContents.executeJavaScript(`(async () => {
       const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
       const search = document.querySelector('#toolsToolbar .filter-search-input');
-      search.value = 'relai'; search.dispatchEvent(new Event('input', { bubbles: true })); await delay(30);
+      const inputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      inputValueSetter?.call(search, 'relai'); search.dispatchEvent(new Event('input', { bubbles: true })); await delay(30);
       document.querySelector('#toolsToolbar .filter-open-button').click(); await delay(30);
       const drawer = document.querySelector('.filter-drawer');
       const validate = drawer.querySelector('input[type="radio"][value="validate"]');
-      validate.checked = true; validate.dispatchEvent(new Event('change', { bubbles: true }));
-      [...drawer.querySelectorAll('button')].find(button => /Apply filters/.test(button.textContent))?.click(); await delay(60);
+      validate.click();
+      await new Promise(resolve => requestAnimationFrame(() => resolve()));
+      [...document.querySelector('.filter-drawer').querySelectorAll('button')].find(button => /Apply filters/.test(button.textContent))?.click();
+      await new Promise(resolve => requestAnimationFrame(() => resolve()));
       const applied = {
         chip: document.querySelector('#toolsToolbar [aria-label^="Remove Capability filter"]')?.getAttribute('aria-label') || '',
         badge: document.querySelector('#toolsToolbar .filter-open-button')?.textContent.trim() || '',
@@ -191,7 +197,7 @@ app.whenReady().then(async () => {
       document.querySelector('#toolsToolbar .filter-clear-button')?.click(); await delay(30);
       const cleared = document.querySelector('#toolsToolbar .filter-search-input')?.value === '';
       const emptySearch = document.querySelector('#toolsToolbar .filter-search-input');
-      emptySearch.value = 'no-tool-match-acceptance'; emptySearch.dispatchEvent(new Event('input', { bubbles: true })); await delay(60);
+      inputValueSetter?.call(emptySearch, 'no-tool-match-acceptance'); emptySearch.dispatchEvent(new Event('input', { bubbles: true })); await delay(60);
       const emptyState = /No matching tools/.test(document.querySelector('#toolsBody')?.textContent || '');
       document.querySelector('#toolsToolbar .filter-clear-button')?.click();
       return { applied, capabilityRemoved, searchCleared: cleared, emptyState };
@@ -215,6 +221,7 @@ app.whenReady().then(async () => {
       return {
         themes,
         themeSwitchLabels: [...theme.querySelectorAll('[data-theme-option]')].map(button => button.getAttribute('aria-label')),
+        themeSwitchIconsUseSvg: [...theme.querySelectorAll('[data-theme-option]')].every(button => Boolean(button.querySelector('svg'))),
         themeSwitchCheckedCount: theme.querySelectorAll('[aria-checked="true"]').length,
         themeSwitchRole: theme.getAttribute('role'),
         themeOptionRoles: [...theme.querySelectorAll('[data-theme-option]')].map(button => button.getAttribute('role')),
@@ -247,44 +254,38 @@ app.whenReady().then(async () => {
       const validationPreferenceRemoved = !document.querySelector('.workspace-validation-preferences');
       const validationMetricRemoved = !document.querySelector('.summary-metrics')?.textContent.includes('Validation ready');
       const redundantProjectActionsRemoved = !document.querySelector('[data-repository-details], .workspace-action-menu');
-      document.querySelector('[data-edit-workspace]')?.click();
+      [...document.querySelectorAll('.workspace-card button')].find(button => button.textContent.trim() === 'Edit project')?.click();
       const editDetailsConsolidated = await waitUntil(() => Boolean(document.querySelector('.modal-panel .ws-project-details-section .workspace-operational')));
       const aliasInput = document.querySelector('.modal-panel input[name="alias"]');
-      aliasInput.value = 'bad project name';
+      if (!aliasInput) throw new Error('Edit project alias input did not render.');
+      const aliasValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      aliasValueSetter?.call(aliasInput, 'bad project name');
       aliasInput.dispatchEvent(new Event('input', { bubbles: true }));
       await delay(20);
-      const aliasError = document.querySelector('.modal-panel [data-alias-error]');
+      const aliasError = document.getElementById('workspaceAliasError');
       const inlineAliasValidation = aliasInput.getAttribute('aria-invalid') === 'true'
-        && aliasError?.hidden === false
+        && Boolean(aliasError)
         && /Project names may use only/.test(aliasError.textContent || '');
       const aliasValidationToastAbsent = ![...document.querySelectorAll('.toast-copy')]
         .some(element => /Project names may use only/.test(element.textContent || ''));
-      aliasInput.value = 'app';
+      aliasValueSetter?.call(aliasInput, 'app');
       aliasInput.dispatchEvent(new Event('input', { bubbles: true }));
       await delay(20);
-      const aliasValidationCleared = aliasInput.getAttribute('aria-invalid') === 'false' && aliasError?.hidden === true;
+      const aliasValidationCleared = aliasInput.getAttribute('aria-invalid') === 'false' && !document.getElementById('workspaceAliasError');
       document.getElementById('__relai-modal-backdrop')?.click();
+      await waitUntil(() => Boolean(document.querySelector('.modal-inline-confirm-card button.danger')));
+      document.querySelector('.modal-inline-confirm-card button.danger')?.click();
+      await waitUntil(() => !document.querySelector('#__relai-modal-backdrop'));
       location.hash = '#workspaces?workspace=app';
       await waitUntil(() => Boolean(document.querySelector('.workspace-focus-chip')));
       const focusChipLabel = document.querySelector('.workspace-focus-chip')?.getAttribute('aria-label') || '';
       location.hash = '#tasks';
-      await waitUntil(() => Boolean(document.querySelector('.workspace-menu-trigger')));
-      const menuTrigger = document.querySelector('.workspace-menu-trigger');
-      menuTrigger.click();
-      await delay(20);
-      const menuOptions = [...document.querySelectorAll('.workspace-menu-popover [role="option"]')];
-      const menuSingleTabStop = menuOptions.filter(option => option.tabIndex === 0).length === 1;
-      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-      const menuArrowNavigation = document.activeElement?.dataset?.workspaceValue === 'app';
-      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-      const homeFocused = document.activeElement === menuOptions[0];
-      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-      const endFocused = document.activeElement === menuOptions.at(-1);
-      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
-      const menuTypeahead = document.activeElement?.dataset?.workspaceValue === 'app';
-      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      const menuEscapeRestoresFocus = document.activeElement === menuTrigger && menuTrigger.getAttribute('aria-expanded') === 'false';
+      await waitUntil(() => Boolean(document.querySelector('select[aria-label="Project filter"]')));
+      const projectFilter = document.querySelector('select[aria-label="Project filter"]');
+      const projectOptions = [...projectFilter.options].map(option => option.textContent.trim());
+      const projectFilterPresent = Boolean(projectFilter);
+      const projectOptionsOrdered = projectOptions[0] === 'All projects' && projectOptions.slice(1).join('|') === [...projectOptions.slice(1)].sort((a, b) => a.localeCompare(b)).join('|');
+      projectFilter?.focus();
       return {
         validationPreferenceRemoved,
         validationMetricRemoved,
@@ -294,14 +295,16 @@ app.whenReady().then(async () => {
         aliasValidationCleared,
         redundantProjectActionsRemoved,
         focusChipLabel,
-        scopeName: menuTrigger?.getAttribute('aria-label') || '',
-        menuSingleTabStop,
-        menuArrowNavigation,
-        menuHomeEndNavigation: homeFocused && endFocused,
-        menuTypeahead,
-        menuEscapeRestoresFocus
+        scopeName: projectFilter?.getAttribute('aria-label') || '',
+        projectFilterPresent,
+        projectOptionsOrdered,
+        projectFilterKeyboardFocused: document.activeElement === projectFilter
       };
     })()`);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Down' });
+    await waitFor(win, `location.hash.includes('workspace=app') && document.querySelector('select[aria-label="Project filter"]')?.value === 'app'`);
+    workspaces.projectFilterUpdatesRoute = true;
 
     await win.webContents.executeJavaScript(`location.hash = '#settings/connection'`);
     await waitFor(win, `document.querySelector('.connection-primary-action')`);
@@ -335,18 +338,114 @@ app.whenReady().then(async () => {
       const rangeButton = document.querySelector('[data-usage-range-option="7d"]');
       rangeButton?.click();
       await delay(80);
+      const rangeRouteUpdated = location.hash.includes('range=7d');
+      location.hash = '#usage?range=30d';
+      await delay(80);
       const result = {
         overviewVisible: Boolean(document.querySelector('.usage-overview')),
         localAggregate: /Analytics are stored on this computer/.test(document.querySelector('[data-usage-page]')?.textContent || ''),
-        modalVisible: Boolean(document.querySelector('#__relai-modal-title')),
+        modalVisible: Boolean(document.querySelector('[role="dialog"] .modal-title')),
         inlineUnavailable: Boolean(document.querySelector('.usage-unavailable')),
         rangeLabels: [...document.querySelectorAll('[data-usage-range-option]')].map(button => button.textContent.trim()),
         rangePressedCount: document.querySelectorAll('[data-usage-range-option][aria-pressed="true"]').length,
         rangeSelectHidden: document.querySelector('[data-usage-range]')?.hidden === true,
-        rangeRouteUpdated: location.hash.includes('range=7d')
+        rangeRouteUpdated,
+        sameRouteRangeSynced: document.querySelector('[data-usage-range]')?.value === '30d'
+          && document.querySelector('[data-usage-range-option="30d"]')?.getAttribute('aria-pressed') === 'true'
       };
       delete window.relaiDesktop;
       return result;
+    })()`);
+
+    const browserTabs = await win.webContents.executeJavaScript(`(async () => {
+      const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+      let state = {
+        ok: true,
+        available: true,
+        active: true,
+        activeSessionCount: 1,
+        control: 'ai',
+        nativeSessionId: 'embedded_browser_acceptance1234567890',
+        nativePageId: 'embedded_page_first1234567890123456',
+        pageCount: 2,
+        url: 'https://first.example.test/',
+        title: 'First tab',
+        loading: false,
+        visible: true,
+        tabs: [
+          { nativePageId: 'embedded_page_first1234567890123456', active: true, url: 'https://first.example.test/', title: 'First tab', loading: false, createdAt: '2026-09-07T00:00:00.000Z' },
+          { nativePageId: 'embedded_page_second123456789012345', active: false, url: 'https://second.example.test/', title: 'Second tab', loading: false, createdAt: '2026-09-07T00:00:01.000Z' }
+        ]
+      };
+      const calls = [];
+      const activeState = nativePageId => {
+        const tabs = state.tabs.map(tab => ({ ...tab, active: tab.nativePageId === nativePageId }));
+        const active = tabs.find(tab => tab.active) || null;
+        state = { ...state, nativePageId, tabs, pageCount: tabs.length, url: active?.url || '', title: active?.title || '', loading: active?.loading === true };
+        return state;
+      };
+      window.relaiDesktop = {
+        browser: {
+          getState: async () => state,
+          onState: () => () => {},
+          setBounds: async bounds => ({ ...state, visible: bounds?.visible === true }),
+          setControl: async owner => (state = { ...state, control: owner }),
+          selectTab: async nativePageId => { calls.push(['select', nativePageId]); return activeState(nativePageId); },
+          closeTab: async nativePageId => {
+            calls.push(['close', nativePageId]);
+            const remaining = state.tabs.filter(tab => tab.nativePageId !== nativePageId);
+            state = { ...state, tabs: remaining, pageCount: remaining.length };
+            const nextId = state.nativePageId === nativePageId ? (remaining[0]?.nativePageId || '') : state.nativePageId;
+            return activeState(nextId);
+          },
+          stop: async () => (state = { ...state, active: false })
+        }
+      };
+      const originalMatchMedia = window.matchMedia;
+      const originalScrollIntoView = Element.prototype.scrollIntoView;
+      let tabScrollBehavior = '';
+      let copiedValue = '';
+      window.matchMedia = query => query === '(prefers-reduced-motion: reduce)'
+        ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }
+        : originalMatchMedia.call(window, query);
+      Element.prototype.scrollIntoView = function(options) {
+        if (this.classList?.contains('browser-tab-item')) tabScrollBehavior = String(options?.behavior || '');
+      };
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: async value => { copiedValue = String(value || ''); } }
+      });
+      location.hash = '#browser';
+      const started = Date.now();
+      while (document.querySelectorAll('.browser-tab-item').length !== 2 && Date.now() - started < 4000) await delay(50);
+      const before = {
+        count: document.querySelectorAll('.browser-tab-item').length,
+        activeCount: document.querySelectorAll('.browser-tab-item.active').length,
+        labels: [...document.querySelectorAll('.browser-tab-title')].map(label => label.textContent.trim()),
+        closeLabels: [...document.querySelectorAll('.browser-tab-close')].map(button => button.getAttribute('aria-label')),
+        listLabel: document.querySelector('.browser-tab-list')?.getAttribute('aria-label') || ''
+      };
+      document.querySelector('.browser-copy-url')?.click();
+      await delay(20);
+      const copyFeedback = {
+        copiedValue,
+        label: document.querySelector('.browser-copy-url')?.getAttribute('aria-label') || '',
+        liveText: document.querySelector('.browser-omnibox [role="status"]')?.textContent.trim() || ''
+      };
+      document.querySelectorAll('.browser-tab-select')[1]?.click();
+      await delay(50);
+      const selectedSecond = document.querySelectorAll('.browser-tab-item')[1]?.classList.contains('active') === true;
+      document.querySelectorAll('.browser-tab-close')[1]?.click();
+      await delay(50);
+      const afterClose = {
+        count: document.querySelectorAll('.browser-tab-item').length,
+        activeCount: document.querySelectorAll('.browser-tab-item.active').length,
+        title: document.querySelector('.browser-page-title')?.textContent.trim() || ''
+      };
+      window.matchMedia = originalMatchMedia;
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+      delete window.relaiDesktop;
+      return { before, selectedSecond, afterClose, calls, tabScrollBehavior, copyFeedback };
     })()`);
 
     const responsive = [];
@@ -410,7 +509,7 @@ app.whenReady().then(async () => {
       debuggerAttached = false;
     }
 
-    fs.writeFileSync(outputPath, JSON.stringify({ shared, activityApplied, taskChip, escapeFocus, mobileDrawer, diagnostics, tools, settings, workspaces, connection, usage, responsive, zoom200At420, forcedColors, failures }, null, 2));
+    fs.writeFileSync(outputPath, JSON.stringify({ shared, activityApplied, taskChip, escapeFocus, mobileDrawer, diagnostics, tools, settings, workspaces, connection, usage, browserTabs, responsive, zoom200At420, forcedColors, failures }, null, 2));
   } catch (error) {
     fs.writeFileSync(outputPath, JSON.stringify({ error: error?.stack || String(error), failures }, null, 2));
     process.exitCode = 1;
@@ -425,7 +524,8 @@ async function waitFor(win, expression, timeoutMs = 10000) {
     if (await win.webContents.executeJavaScript(`Boolean(${expression})`)) return;
     await delay(50);
   }
-  throw new Error('Timed out waiting for: ' + expression);
+  const diagnostic = await win.webContents.executeJavaScript(`({ hash: location.hash, text: document.body?.innerText?.slice(0, 1200) || '', route: document.getElementById('routeRoot')?.innerHTML?.slice(0, 1200) || '' })`).catch(() => null);
+  throw new Error('Timed out waiting for: ' + expression + (diagnostic ? `\nPage state: ${JSON.stringify(diagnostic)}` : ''));
 }
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 

@@ -25,7 +25,7 @@ After enabling Rel.AI MCP in a chat, start with a read-only request:
 Use Rel.AI MCP with workspace "myapp". Start one work session, read the project, and explain how the relevant parts work before changing anything.
 ```
 
-Rel.AI creates a separate work session for each new goal. Internally, that session has a `work_id` so edits, checks, review, recovery, and completion stay attached to the same task even if the connection changes.
+For substantial or multi-step local project goals, ChatGPT should start one Rel.AI work session before meaningful mutation and keep its `work_id` across edits, checks, review, recovery, and completion. Isolated reads, inspection, and genuinely small one-shot actions may use the authorized workspace directly without creating a durable task.
 
 ## Why Rel.AI uses ChatGPT
 
@@ -47,15 +47,15 @@ The public Rel.AI runtime no longer exposes a local OAuth authorization server. 
 
 ## MCP protocol requirement
 
-Modern MCP behavior targets `2026-07-28`. HTTP also retains the SDK-supported stateless ChatGPT `2025-11-25` initialize flow. Rel.AI does not issue `MCP-Session-Id`; JSON-RPC batches, removed tool aliases, and initialize-based stdio are not supported.
+Modern MCP behavior targets `2026-07-28`. HTTP retains only the SDK-supported stateless ChatGPT `2025-11-25` startup lifecycle (`initialize` and `notifications/initialized`); all tool, resource, prompt, and task requests use `2026-07-28`. Rel.AI does not issue `MCP-Session-Id`; JSON-RPC batches, removed tool aliases, and initialize-based stdio are not supported.
 
-Native MCP Tasks are negotiated independently through `io.modelcontextprotocol/tasks`. Short bounded operations complete directly. When a client does not advertise Tasks, longer eligible operations can return a running result and continue under the same Rel.AI `work_id`; use `relai_work` with `action:"status"` to retrieve the eventual result.
+Native MCP Tasks are negotiated independently through `io.modelcontextprotocol/tasks`. Short bounded operations complete directly. When a client does not advertise Tasks, longer eligible operations can return a running result and continue under the same Rel.AI `work_id`; use `relai_work` with `action:"status"` to retrieve the eventual result. This continuation path is current capability fallback, not legacy MCP protocol compatibility.
 
 ## Reconnects and tool changes
 
 A tunnel reconnect restores the connection only. It does not choose a workspace, pick a work session, repeat an uncertain edit, or mark repository work complete.
 
-When the public tool schema changes, ChatGPT must review the updated action snapshot before it can reliably use the new Rel.AI surface. For **Enterprise/Edu**, open **Workspace settings → Apps**, find **Rel.AI MCP**, open its menu, choose **Action control**, then click **Refresh** and review the changed actions before publishing or applying the update. For **Business**, published custom apps currently cannot update tools or metadata in place; recreate and republish the app when the Rel.AI tool surface changes. Application updates, tunnel connectivity, and host-side action refresh are separate states.
+When the public tool schema changes, ChatGPT must review the updated action snapshot before it can reliably use the new Rel.AI surface. For **Go/Plus/Pro**, open **Plugins → +**, select **Rel.AI MCP**, and follow ChatGPT’s connector update prompt. For **Enterprise/Edu**, open **Workspace settings → Apps**, find **Rel.AI MCP**, open its menu, choose **Action control**, then click **Refresh** and review the changed actions before publishing or applying the update. For **Business**, published custom apps currently cannot update tools or metadata in place; recreate and republish the app when the Rel.AI tool surface changes. Application updates, tunnel connectivity, and host-side action refresh are separate states.
 
 ## Troubleshooting
 

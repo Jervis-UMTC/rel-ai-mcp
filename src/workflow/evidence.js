@@ -96,7 +96,7 @@ function evidenceKind(tool, args, result) {
   if (tool === OP.EXEC && looksLikeCheck(args?.command || result?.commandSummary || result?.command)) return 'check';
   if (tool === OP.VALIDATE_CHECKS) return 'check';
   if (tool === OP.READ) return 'read';
-  if (tool === OP.UI) return 'ui';
+  if (tool === OP.UI || tool === OP.BROWSER) return 'ui';
   if (tool === OP.INSPECT || tool === OP.SEARCH_TEXT || tool === OP.SEARCH_SEMANTIC) return 'inspection';
   if (tool === OP.CHANGES_DIFF || tool === OP.CHANGES_CHECKPOINT || tool === OP.CHANGES_REPLAY) return 'review';
   if (tool === OP.PROCESS_START || tool === OP.PROCESS_READ) return 'process';
@@ -117,7 +117,7 @@ function compactMetadata(result = {}, tool = '') {
   if (result.processId) output.processId = String(result.processId).slice(0, 200);
   if (result.reviewHash) output.reviewHash = String(result.reviewHash).slice(0, 128);
   if (result.reviewScope) output.reviewScope = String(result.reviewScope).slice(0, 40);
-  if (tool === OP.UI) {
+  if (tool === OP.UI || tool === OP.BROWSER) {
     if (result.action) output.uiAction = String(result.action).slice(0, 40);
     if (result.sessionId) output.sessionId = String(result.sessionId).slice(0, 200);
     if (result.route || result.url) output.route = String(result.route || result.url).slice(0, 500);

@@ -12,7 +12,7 @@ const rootEntries = config.workspaces['.'].entry;
 const electronEntries = config.workspaces.electron.entry;
 assert.ok(rootEntries.includes('scripts/knip-production-runtime.mjs!'), 'packaged runtime dependency model must be a production entry');
 assert.ok(rootEntries.includes('bin/**/*.js!'), 'CLI and stdio entry points must be modeled');
-assert.ok(rootEntries.includes('src/httpServer.js!'), 'Electron dynamic backend imports must be modeled explicitly');
+assert.ok(rootEntries.includes('src/httpServer.ts!'), 'Electron dynamic backend imports must be modeled explicitly');
 assert.ok(rootEntries.includes('src/config.js!'), 'Electron dynamic config imports must be modeled explicitly');
 assert.ok(rootEntries.includes('public/dashboard.js!'), 'packaged dashboard runtime must start from its real entry point');
 assert.equal(rootEntries.includes('src/**/*.js!'), false, 'production analysis must not mark every backend module as an entry');

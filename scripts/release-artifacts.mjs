@@ -49,9 +49,7 @@ function releaseArtifactNames(version, options = {}) {
       ext: 'dmg'
     }),
     checksums: 'SHA256SUMS.txt',
-    sbom: 'sbom.cdx.json',
-    sizeReport: 'electron-size-report.json',
-    linuxSizeReport: 'electron-size-report-linux.json'
+    sbom: 'sbom.cdx.json'
   };
 }
 
@@ -60,11 +58,11 @@ function platformReleaseArtifactNames(version, platform, architecture = 'x64', o
   const normalizedArch = normalizeElectronArch(architecture);
   const names = releaseArtifactNames(version, options);
   if (normalizedPlatform === 'win32') {
-    return [names.installer, names.portable, names.blockmap, names.metadata, names.sbom, names.sizeReport];
+    return [names.installer, names.portable, names.blockmap, names.metadata, names.sbom];
   }
   if (normalizedPlatform === 'linux') {
     if (normalizedArch !== 'x64') throw new Error(`Linux release artifacts are not configured for ${normalizedArch}.`);
-    return [names.linuxAppImage, names.linuxDeb, names.linuxMetadata, names.linuxSizeReport];
+    return [names.linuxAppImage, names.linuxDeb, names.linuxMetadata];
   }
   return [normalizedArch === 'arm64' ? names.macDmgArm64 : names.macDmgX64];
 }
@@ -101,7 +99,7 @@ function normalizeVersion(version) {
 function invalidateDerivedReleaseEvidence(directory, version) {
   const names = releaseArtifactNames(version);
   const removed = [];
-  for (const name of [names.checksums, names.sbom, names.sizeReport, names.linuxSizeReport, 'release-assets.txt']) {
+  for (const name of [names.checksums, names.sbom, 'release-assets.txt']) {
     const file = path.join(directory, name);
     if (!fs.existsSync(file)) continue;
     fs.rmSync(file, { force: true, maxRetries: 5, retryDelay: 200 });
@@ -243,7 +241,7 @@ function releaseArtifactByRole(names, role, architecture = 'x64') {
   if (normalizedRole === 'macDmg') {
     return normalizeElectronArch(architecture) === 'arm64' ? names.macDmgArm64 : names.macDmgX64;
   }
-  const allowed = new Set(['installer', 'portable', 'blockmap', 'metadata', 'linuxAppImage', 'linuxDeb', 'linuxMetadata', 'checksums', 'sbom', 'sizeReport', 'linuxSizeReport']);
+  const allowed = new Set(['installer', 'portable', 'blockmap', 'metadata', 'linuxAppImage', 'linuxDeb', 'linuxMetadata', 'checksums', 'sbom']);
   if (!allowed.has(normalizedRole)) throw new Error(`Unknown release artifact role: ${normalizedRole || '(empty)'}.`);
   return names[normalizedRole];
 }

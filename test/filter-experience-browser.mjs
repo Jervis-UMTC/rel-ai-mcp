@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getTaskHistoryDir, writeSession } from '../src/taskHistoryStorage.js';
+import { getTaskHistoryDir, writeSession } from '../src/taskHistoryStorage.ts';
 import { startHttpTestServer, stopHttpTestServer } from './helpers/http-test-server.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,7 +43,7 @@ try {
   if (code === 'timeout') child.kill('SIGKILL');
   assert.equal(code, 0, `Filter browser probe failed. stdout=${stdout} stderr=${stderr}`);
   const result = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
-  assert.equal(result.error, undefined, result.error);
+  assert.equal(result.error, undefined, result.error ? `${result.error}\n${(result.failures || []).join('\n')}` : undefined);
   assert.deepEqual(result.shared, {
     searchVisible: true,
     searchLabel: 'Search activity',
@@ -84,7 +84,7 @@ try {
   assert.equal(result.diagnostics.applied.badge, 'Filters (2)');
   assert.match(result.diagnostics.applied.summary, /findings.*log entries shown/);
   assert.equal(result.diagnostics.applied.liveTailPressed, 'false');
-  assert.deepEqual(result.diagnostics.applied.reportActions, ['Copy report', 'Export support information', 'Support folder — desktop app only']);
+  assert.deepEqual(result.diagnostics.applied.reportActions, ['Copy report', 'Export support information', 'Tunnel diagnostics — desktop app only', 'Support folder — desktop app only']);
   assert.match(result.tools.applied.chip, /Validate/);
   assert.equal(result.tools.applied.badge, 'Filters (1)');
   assert.match(result.tools.applied.summary, /tools shown/);
@@ -94,6 +94,7 @@ try {
   assert.equal(result.tools.emptyState, true);
   assert.deepEqual(result.settings.themes.map(item => item.preference), ['dark', 'light', 'system']);
   assert.deepEqual(result.settings.themeSwitchLabels, ['Follow system appearance', 'Dark theme', 'Light theme']);
+  assert.equal(result.settings.themeSwitchIconsUseSvg, true);
   assert.equal(result.settings.themeSwitchCheckedCount, 1);
   assert.equal(result.settings.themeSwitchRole, 'radiogroup');
   assert.deepEqual(result.settings.themeOptionRoles, ['radio', 'radio', 'radio']);
@@ -113,12 +114,11 @@ try {
     aliasValidationCleared: true,
     redundantProjectActionsRemoved: true,
     focusChipLabel: 'Clear selected project filter: app',
-    scopeName: 'Project filter: All projects',
-    menuSingleTabStop: true,
-    menuArrowNavigation: true,
-    menuHomeEndNavigation: true,
-    menuTypeahead: true,
-    menuEscapeRestoresFocus: true
+    scopeName: 'Project filter',
+    projectFilterPresent: true,
+    projectOptionsOrdered: true,
+    projectFilterKeyboardFocused: true,
+    projectFilterUpdatesRoute: true
   });
   assert.equal(result.connection.primaryCount, 1);
   assert.ok(result.connection.primaryLabel.length > 0);
@@ -135,6 +135,25 @@ try {
   assert.equal(result.usage.rangePressedCount, 1);
   assert.equal(result.usage.rangeSelectHidden, true);
   assert.equal(result.usage.rangeRouteUpdated, true);
+  assert.equal(result.usage.sameRouteRangeSynced, true, 'Usage controls must follow same-route hash changes and browser history.');
+  assert.deepEqual(result.browserTabs.before, {
+    count: 2,
+    activeCount: 1,
+    labels: ['First tab', 'Second tab'],
+    closeLabels: ['Close First tab', 'Close Second tab'],
+    listLabel: 'Open browser tabs'
+  });
+  assert.equal(result.browserTabs.tabScrollBehavior, 'auto', 'Browser tab scrolling must avoid smooth motion when reduced motion is requested.');
+  assert.deepEqual(result.browserTabs.copyFeedback, {
+    copiedValue: 'https://first.example.test/',
+    label: 'Page URL copied',
+    liveText: 'Page URL copied.'
+  });
+  assert.equal(result.browserTabs.selectedSecond, true, 'Selecting a browser tab must update the visible active-tab state.');
+  assert.deepEqual(result.browserTabs.afterClose, { count: 1, activeCount: 1, title: 'First tab' });
+  assert.equal(result.browserTabs.calls.length, 2);
+  assert.equal(result.browserTabs.calls[0][0], 'select');
+  assert.equal(result.browserTabs.calls[1][0], 'close');
   assert.deepEqual(result.responsive.map(item => item.requestedWidth), [980, 760, 520, 420]);
   for (const viewport of result.responsive) {
     assert.ok(Math.abs(viewport.width - viewport.requestedWidth) <= 2, `requested ${viewport.requestedWidth}px but rendered ${viewport.width}px`);

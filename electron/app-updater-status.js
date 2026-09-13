@@ -1,5 +1,9 @@
+import { normalizeUpdaterLifecycleStatus } from '../src/runtimeLifecycle.js';
+
 function normalizeStatus(value) {
-  const state = String(value.state || 'idle');
+  const requestedState = String(value.state || (value.supported === true ? 'idle' : 'unsupported'));
+  const state = normalizeUpdaterLifecycleStatus(requestedState);
+  if (!state) throw Object.assign(new Error(`Invalid updater lifecycle state: ${requestedState}`), { code: 'INVALID_UPDATER_STATE' });
   const supported = value.supported === true;
   const availableVersion = cleanVersion(value.availableVersion);
   const installMode = value.installMode === 'open_dmg' ? 'open_dmg' : 'restart';
@@ -122,4 +126,8 @@ function cleanText(value, limit) {
   return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
-export { assessUpdateSynchronization, cleanText, normalizeStatus, progressPayload, updateCompatibilityMetadata };
+function isoNow(now) {
+  return new Date(now()).toISOString();
+}
+
+export { assessUpdateSynchronization, cleanText, isoNow, normalizeStatus, progressPayload, updateCompatibilityMetadata };

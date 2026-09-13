@@ -42,6 +42,8 @@ assert.equal(firstStatus.launchAtLogin.supported, true);
 assert.equal(firstStatus.launchAtLogin.enabled, false);
 assert.equal(firstStatus.keepAwake, false);
 assert.equal(firstStatus.keepRunningOnClose, true, 'closing the dashboard must keep tray mode by default');
+assert.equal(firstStatus.pulseEnabled, true, 'ambient Pulse status must be enabled by default');
+assert.equal(firstStatus.themePreference, 'system', 'Pulse follows system appearance until the dashboard theme is explicitly selected');
 assert.equal(firstStatus.autoDownloadUpdates, false, 'updates must keep manual download as the safe default');
 assert.equal(firstStatus.reducedBackgroundWork, false, 'normal background preparation must remain the default');
 assert.equal(first.setLaunchAtLogin(true).ok, true);
@@ -56,14 +58,19 @@ assert.deepEqual(loginSettings, {
 assert.equal((await first.setKeepAwake(true)).status.keepAwake, true);
 const preferenceUpdate = await first.setPreferences({
   keepRunningOnClose: false,
+  pulseEnabled: false,
+  themePreference: 'dark',
   autoDownloadUpdates: true,
   reducedBackgroundWork: true
 });
 assert.equal(preferenceUpdate.ok, true);
 assert.equal(preferenceUpdate.status.keepRunningOnClose, false);
+assert.equal(preferenceUpdate.status.pulseEnabled, false);
+assert.equal(preferenceUpdate.status.themePreference, 'dark');
 assert.equal(preferenceUpdate.status.autoDownloadUpdates, true);
 assert.equal(preferenceUpdate.status.reducedBackgroundWork, true);
 assert.equal((await first.setPreferences({ autoDownloadUpdates: 'yes' })).ok, false, 'app preferences must reject non-boolean values');
+assert.equal((await first.setPreferences({ themePreference: 'sepia' })).ok, false, 'app preferences must reject unknown themes');
 const cleanStatus = await first.markCleanShutdown();
 assert.equal((await first.markCleanShutdown()).lastCleanExitAt, cleanStatus.lastCleanExitAt);
 
@@ -76,6 +83,8 @@ assert.equal(secondStatus.recoveredAfterUncleanShutdown, false);
 assert.equal(secondStatus.launchCount, 2);
 assert.equal(secondStatus.keepAwake, true, 'keep-awake preference must persist across desktop restarts');
 assert.equal(secondStatus.keepRunningOnClose, false, 'close behavior must persist across desktop restarts');
+assert.equal(secondStatus.pulseEnabled, false, 'Pulse preference must persist across desktop restarts');
+assert.equal(secondStatus.themePreference, 'dark', 'Pulse theme preference must persist across desktop restarts');
 assert.equal(secondStatus.autoDownloadUpdates, true, 'automatic download preference must persist across desktop restarts');
 assert.equal(secondStatus.reducedBackgroundWork, true, 'reduced background work must persist across desktop restarts');
 assert.equal((await second.setKeepAwake(false)).status.keepAwake, false);
@@ -84,12 +93,13 @@ await second.markCleanShutdown();
 const statePath = path.join(stateDir, 'desktop-lifecycle.json');
 const previousState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
 const { connectorRevision: _legacyConnectorRevision, ...legacyState } = previousState;
-fs.writeFileSync(statePath, `${JSON.stringify({ ...legacyState, version: '0.20.7', running: false }, null, 2)}\n`);
+fs.writeFileSync(statePath, `${JSON.stringify({ ...legacyState, version: '0.20.7', running: true }, null, 2)}\n`);
 const updated = createDesktopLifecycleManager({ app, platform: 'win32', env: {}, now, connectorRevision: 'surface-b', onLog: (message, options) => logs.push({ message, options }) });
 const updatedStatus = await updated.start();
 assert.equal(updatedStatus.updated, true);
 assert.equal(updatedStatus.previousVersion, '0.20.7');
 assert.equal(updatedStatus.connectorRefreshRequired, true, 'the first upgrade from lifecycle state without a connector revision must request a refresh');
+assert.equal(updatedStatus.recoveredAfterUncleanShutdown, false, 'a version-changing updater restart must not be reported as an unexpected crash');
 await updated.markCleanShutdown();
 
 const changedSurface = createDesktopLifecycleManager({ app, platform: 'win32', env: {}, now, connectorRevision: 'surface-c', onLog: (message, options) => logs.push({ message, options }) });

@@ -24,10 +24,13 @@ async function writeControllerRuntimeMarker(app) {
   };
   await fs.promises.mkdir(path.dirname(markerPath), { recursive: true, mode: 0o700 });
   const temporary = `${markerPath}.${process.pid}.tmp`;
-  await fs.promises.writeFile(temporary, `${JSON.stringify(marker, null, 2)}\n`, { mode: 0o600 });
-  await fs.promises.rm(markerPath, { force: true });
-  await fs.promises.rename(temporary, markerPath);
-  return marker;
+  try {
+    await fs.promises.writeFile(temporary, `${JSON.stringify(marker, null, 2)}\n`, { mode: 0o600 });
+    await fs.promises.rename(temporary, markerPath);
+    return marker;
+  } finally {
+    await fs.promises.rm(temporary, { force: true }).catch(() => {});
+  }
 }
 
 async function removeControllerRuntimeMarker() {

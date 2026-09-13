@@ -10,9 +10,9 @@ import { flushLocalAnalytics } from '../src/localAnalytics.js';
 import { classifyStatusOwnership } from '../src/repo/gitOps.js';
 import { gitStatusArgs } from '../src/repo/gitStatus.js';
 import { repositoryIntelligence } from '../src/repository/intelligence/service.js';
-import { flushTaskHistoryPersistence } from '../src/taskHistoryStore.js';
-import { resetTaskHistoryCaches } from '../src/taskHistoryStorage.js';
-import { taskCommitOwnership } from '../src/taskIntegrity.js';
+import { flushTaskHistoryPersistence } from '../src/taskHistoryStore.ts';
+import { resetTaskHistoryCaches } from '../src/taskHistoryStorage.ts';
+import { taskCommitOwnership } from '../src/taskIntegrity.ts';
 import { resetToolActivity } from '../src/toolActivity.js';
 import { callTool as rawCallTool } from '../src/tools.js';
 

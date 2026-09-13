@@ -4,6 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  openIndexDatabase,
+  repositoryIndexPath,
+  setIndexProducerVersion
+} from '../src/repository/intelligence/database.js';
+import {
   QUERY_WORKER_COUNT,
   QUERY_WORKER_GLOBAL_COUNT,
   QUERY_WORKER_TIMEOUT_MS,
@@ -40,8 +45,27 @@ try {
     'query workers must reject metadata from an older generation instead of mixing it with newer SQLite facts'
   );
 
+  await repositoryIntelligence.shutdown();
+  const producerDb = openIndexDatabase(repositoryIndexPath(config, workspace));
+  try {
+    setIndexProducerVersion(producerDb, 'stale-query-generation-producer');
+  } finally {
+    producerDb.close();
+  }
+  const recovered = await repositoryIntelligence.ensure(workspace, config, { watch: false });
+  assert.equal(recovered.recovered, true);
+  assert.equal(recovered.generation, 1, 'clean producer recovery may restart generation numbering');
+  await assert.rejects(
+    runRepositoryQuery('semanticSearch', workspace, config, {
+      args: { query: 'alpha', maxResults: 5 },
+      index: initial
+    }, { watch: false }),
+    error => error?.code === 'QUERY_INDEX_CHANGED',
+    'a clean index rebuild must reject stale metadata even when the generation number is reused'
+  );
+
   const current = await repositoryIntelligence.semanticSearch(workspace, config, { query: 'alpha', maxResults: 5 }, { watch: false });
-  assert.equal(current.fingerprint, rebuilt.fingerprint);
+  assert.equal(current.fingerprint, recovered.fingerprint);
   assert.ok(current.results.some(item => item.path === 'src/alpha.js'));
   assert.equal(repositoryQueryWorkerStats().liveWorkerCount, 1,
     'one semantic query must create only one query worker instead of eagerly warming the full pool');

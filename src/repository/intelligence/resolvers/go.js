@@ -1,4 +1,4 @@
-import { dedupeRelations, fieldNode, nodeText, nodesOfTypes, relation, simpleName, stripQuotes, symbolForNode } from './common.js';
+import { dedupeRelations, fieldNode, nodeText, nodesOfTypes, projectImports, relation, simpleName, stripQuotes, symbolForNode } from './common.js';
 import { frameworkRelations } from './frameworks.js';
 
 const PROVIDER = 'resolver-go-v2';
@@ -6,7 +6,7 @@ const CAPABILITIES = Object.freeze(['ast-import-bindings', 'ast-package-calls', 
 const goResolver = Object.freeze({ id: PROVIDER, capabilities: CAPABILITIES, enrich({ root, facts, language }) {
   const imports = parseImports(root); const aliases = new Map(); for (const item of imports) for (const binding of item.bindings || []) aliases.set(binding.local, { ...binding, specifier: item.specifier });
   const symbols = facts.symbols || [];
-  return { provider: PROVIDER, capabilities: CAPABILITIES, imports: enrichImports(imports), relations: dedupeRelations([
+  return { provider: PROVIDER, capabilities: CAPABILITIES, imports: projectImports(imports, PROVIDER, 0.98), relations: dedupeRelations([
     ...typeRelations(root, symbols, aliases), ...callRelations(root, symbols, aliases), ...frameworkRelations(language, { root, symbols, provider: PROVIDER })
   ]) };
 }});
@@ -36,5 +36,4 @@ function callRelations(root, symbols, aliases) {
   }
   return result;
 }
-function enrichImports(imports) { return imports.map(({ bindings: _bindings, ...item }) => ({ ...item, provider: PROVIDER, confidence: 0.98 })); }
 export { goResolver };

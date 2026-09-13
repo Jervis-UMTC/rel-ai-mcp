@@ -37,6 +37,7 @@ if (browserSpecificSnapshotEnabled) {
 }
 
 const tunnelClientRelativePath = resourcePath('bin', 'tunnel-client', spec.tunnelClientDirectory, spec.tunnelClientFile);
+const sourceTunnelManifest = JSON.parse(fs.readFileSync(path.join(root, 'vendor', 'tunnel-client', 'manifest.json'), 'utf8'));
 const sourceZoektManifest = JSON.parse(fs.readFileSync(path.join(root, 'vendor', 'zoekt', 'manifest.json'), 'utf8'));
 const sourceTreeSitterManifest = JSON.parse(fs.readFileSync(path.join(root, 'vendor', 'tree-sitter', 'manifest.json'), 'utf8'));
 const sourceZoektPlatformSpec = sourceZoektManifest.platforms?.[platform];
@@ -47,7 +48,7 @@ const zoektIndexRelativePath = resourcePath('bin', 'zoekt', platform, sourceZoek
 const requiredFiles = [
   spec.executableName,
   resourcePath('app.asar'),
-  resourcePath('src', 'httpServer.js'),
+  resourcePath('src', 'httpServer.ts'),
   resourcePath('src', 'computerManager.js'),
   resourcePath('src', 'computer', 'midsceneAdapter.js'),
   resourcePath('src', 'tools', 'actionCatalog.js'),
@@ -79,6 +80,8 @@ const requiredFiles = [
   resourcePath('vendor', 'tree-sitter', 'manifest.json'),
   resourcePath('bin', 'rel-ai-mcp-http.js'),
   resourcePath('public', 'dashboard.js'),
+  resourcePath('public', 'dashboard-app.js'),
+  resourcePath('public', 'dashboard-react.js'),
   resourcePath('public', 'dashboard.css'),
   resourcePath('package.json'),
   resourcePath('CHANGELOG.md'),
@@ -145,12 +148,21 @@ for (const grammar of Object.values(sourceTreeSitterManifest.grammars || {})) {
   assert.equal(crypto.createHash('sha256').update(packagedBytes).digest('hex'), grammar.sha256, `Packaged vendored Tree-sitter grammar checksum mismatch: ${grammar.file}`);
 }
 const tunnelManifest = JSON.parse(fs.readFileSync(path.join(resourcesRoot, 'bin', 'tunnel-client', 'manifest.json'), 'utf8'));
+assert.deepEqual(tunnelManifest, sourceTunnelManifest, 'Packaged OpenAI tunnel-client manifest must match the reviewed source manifest.');
+assert.equal(tunnelManifest.releaseTag, `v${tunnelManifest.version}`, 'Packaged OpenAI tunnel-client release tag must match its version.');
+assert.equal(tunnelManifest.distribution, 'full', 'Packaged OpenAI tunnel-client must use the reviewed full distribution.');
 const tunnelPlatformSpec = tunnelManifest.platforms[platform];
 const tunnelSpec = tunnelPlatformSpec?.architectures?.[targetArch] || tunnelPlatformSpec;
 assert.ok(tunnelSpec, `Packaged OpenAI tunnel-client manifest does not support ${platform}/${targetArch}.`);
-const packagedTunnelClient = fs.readFileSync(path.join(packageDirectory, tunnelClientRelativePath));
+const packagedTunnelClientPath = path.join(packageDirectory, tunnelClientRelativePath);
+const packagedTunnelClient = fs.readFileSync(packagedTunnelClientPath);
 assert.equal(packagedTunnelClient.length, tunnelSpec.size, 'Packaged OpenAI tunnel-client size does not match the provenance manifest.');
 assert.equal(crypto.createHash('sha256').update(packagedTunnelClient).digest('hex'), tunnelSpec.sha256, 'Packaged OpenAI tunnel-client SHA-256 does not match the provenance manifest.');
+if (platform === process.platform && targetArch === normalizeElectronArch(process.arch)) {
+  const versionCheck = spawnSync(packagedTunnelClientPath, ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 15_000 });
+  assert.equal(versionCheck.status, 0, `Packaged OpenAI tunnel-client --version must succeed: ${versionCheck.stderr || versionCheck.error?.message || ''}`);
+  assert.match(`${versionCheck.stdout || ''}${versionCheck.stderr || ''}`, new RegExp(`(?:^|\\D)${tunnelManifest.version.replaceAll('.', '\\.')}\\b`), 'Packaged OpenAI tunnel-client must report the reviewed version.');
+}
 const packagedZoektManifest = JSON.parse(fs.readFileSync(path.join(resourcesRoot, 'bin', 'zoekt', 'manifest.json'), 'utf8')); 
 assert.deepEqual(packagedZoektManifest, sourceZoektManifest, 'Packaged Zoekt provenance manifest must match the reviewed source manifest.');
 for (const [key, relativePath] of [['search', zoektSearchRelativePath], ['index', zoektIndexRelativePath]]) {
@@ -170,15 +182,22 @@ const packagedTypeScript = collectFiles(path.join(resourcesRoot, 'node_modules')
 });
 assert.deepEqual(packagedTypeScript, [], 'Packaged runtime dependencies must exclude TypeScript sources and non-runtime declarations.');
 
-const forbiddenLegacyTransportPaths = [
+const forbiddenPackagedPaths = [
   resourcePath('bin', 'ngrok'),
+  resourcePath('bin', 'tunnel-client', spec.tunnelClientDirectory, 'cloudflared'),
+  resourcePath('bin', 'tunnel-client', spec.tunnelClientDirectory, 'cloudflared.exe'),
   resourcePath('gateway'),
   resourcePath('node_modules', 'wrangler'),
   resourcePath('node_modules', '@cloudflare'),
-  resourcePath('node_modules', 'miniflare')
+  resourcePath('node_modules', 'miniflare'),
+  resourcePath('node_modules', '@computer-use', 'nut-js'),
+  resourcePath('node_modules', '@computer-use', 'shared'),
+  resourcePath('node_modules', '@jimp'),
+  resourcePath('node_modules', 'jimp'),
+  resourcePath('node_modules', 'file-type')
 ];
-for (const relativePath of forbiddenLegacyTransportPaths) {
-  assert.equal(fs.existsSync(path.join(packageDirectory, relativePath)), false, `Packaged desktop must exclude obsolete transport path: ${relativePath}`);
+for (const relativePath of forbiddenPackagedPaths) {
+  assert.equal(fs.existsSync(path.join(packageDirectory, relativePath)), false, `Packaged desktop must exclude obsolete or peer-only runtime path: ${relativePath}`);
 }
 const packagedFiles = collectFiles(packageDirectory);
 for (const sensitiveName of ['privateJwk', 'recoverySecret']) {

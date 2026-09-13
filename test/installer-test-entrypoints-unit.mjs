@@ -40,7 +40,12 @@ assert.doesNotMatch(packageWrapper, /Setup.*\.exe|quitAndInstall|uninstall/i,
   'build orchestration must never execute installer lifecycle behavior');
 
 assert.equal(packageJson.scripts.test, 'npm run test:all');
-assert.match(packageJson.scripts['test:all'], /test\/run-tests\.mjs/);
+assert.match(packageJson.scripts['test:all'], /npm run check/);
+assert.match(packageJson.scripts['test:all'], /npm run test:security/);
+assert.match(packageJson.scripts['test:all'], /npm run test:electron/);
+assert.match(packageJson.scripts['test:all'], /npm run test:integration/);
+assert.match(packageJson.scripts['test:all'], /npm run test:unit/);
+assert.match(packageJson.scripts['test:unit'], /test\/run-tests\.mjs/);
 assert.doesNotMatch(packageJson.scripts['test:all'], /release-check\.mjs/, 'normal development tests must not require finalized release metadata');
 assert.doesNotMatch(packageJson.scripts['test:all'], /electron:dist|electron-builder|installer|uninstall/i);
 assert.doesNotMatch(testRunner, /scripts\/installed-app-smoke|electron-builder|installer|uninstall/i);

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { readRecentWorkflowEvidence, readTaskHistorySession, recordTaskHistoryEvent, recordWorkflowEvidence } from '../src/taskHistoryStore.js';
+import { readRecentWorkflowEvidence, readTaskHistorySession, recordTaskHistoryEvent, recordWorkflowEvidence } from '../src/taskHistoryStore.ts';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-workflow-evidence-history-'));
 const config = { stateDir: path.join(root, 'state') };

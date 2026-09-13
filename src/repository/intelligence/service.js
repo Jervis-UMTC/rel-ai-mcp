@@ -11,6 +11,15 @@ import {
   shutdownRepositoryIndexes
 } from './indexer.js';
 import { disposeRepositoryQueryWorker, runRepositoryQuery, shutdownRepositoryQueryWorkers } from './queryWorkerClient.js';
+import { repositoryIndexChanged } from './state.js';
+import {
+  disposeLspWorkspace,
+  noteLspMutation,
+  planSemanticRename,
+  providerStatuses,
+  shutdownLspSessions
+} from '../../codeIntelligence/lspManager.js';
+import { inspectRepositoryCode } from './inspection.js';
 import {
   parseWorkspaceSourcePath,
   qualifyWorkspaceSourcePath,
@@ -33,6 +42,10 @@ const SUM_FIELDS = new Set(['matchCount', 'definitionCount', 'referenceCount', '
 
 function createRepositoryIntelligenceService() {
   const singleIndexedQuery = async (kind, workspace, config, args, options = {}) => {
+    if (kind === 'codeInspect' && String(args.action || '').toLowerCase() === 'audit' && args.refresh !== true && options.force !== true) {
+      const fast = await tryAuditFastQuery(workspace, config, args, options);
+      if (fast) return fast;
+    }
     for (let attempt = 0; attempt < MAX_INDEXED_QUERY_ATTEMPTS; attempt += 1) {
       const index = await ensureRepositoryIndex(workspace, config, {
         maxFiles: args.maxFiles,
@@ -49,11 +62,7 @@ function createRepositoryIntelligenceService() {
       }
 
       const status = repositoryIndexStatus(workspace, config);
-      const currentGeneration = Number(status.metadata?.generation || 0);
-      const expectedGeneration = Number(index.generation || 0);
-      const changedDuringQuery = status.dirty === true
-        || (currentGeneration > 0 && expectedGeneration > 0 && currentGeneration !== expectedGeneration);
-      if (!changedDuringQuery) return result;
+      if (!repositoryIndexChanged(status, index.generation)) return result;
       if (attempt + 1 < MAX_INDEXED_QUERY_ATTEMPTS) continue;
 
       const error = new Error('Repository changed while Repository Intelligence was answering the query. Retry against the refreshed index.');
@@ -73,28 +82,73 @@ function createRepositoryIntelligenceService() {
     return singleIndexedQuery(kind, workspace, config, args, options);
   };
 
+  const nativeCodeInspect = (workspace, config = {}, args = {}, options = {}) =>
+    indexedQuery('codeInspect', workspace, config, args, options);
+
   return Object.freeze({
     ensure: (workspace, config = {}, options = {}) => ensureRepositoryIndex(workspace, config, options),
-    codeInspect: (workspace, config = {}, args = {}, options = {}) => indexedQuery('codeInspect', workspace, config, args, options),
-    architecture: (workspace, config = {}, args = {}, options = {}) => indexedQuery('codeInspect', workspace, config, { ...args, action: 'architecture' }, options),
+    codeInspect: (workspace, config = {}, args = {}, options = {}) =>
+      inspectRepositoryCode(nativeCodeInspect, workspace, config, args, options),
+    architecture: (workspace, config = {}, args = {}, options = {}) =>
+      nativeCodeInspect(workspace, config, { ...args, action: 'architecture' }, options),
+    audit: (workspace, config = {}, args = {}, options = {}) =>
+      inspectRepositoryCode(nativeCodeInspect, workspace, config, { ...args, action: 'audit' }, options),
     cachedContext: (workspace, config = {}, options = {}) => runRepositoryQuery('cachedContext', workspace, config, {}, options),
     cachedSummary: (workspace, config = {}, options = {}) => runRepositoryQuery('cachedSummary', workspace, config, {}, options),
     searchGraphContext: (workspace, config = {}, matches = [], options = {}) => runRepositoryQuery('searchGraphContext', workspace, config, { matches }, options),
     semanticSearch: (workspace, config = {}, args = {}, options = {}) => indexedQuery('semanticSearch', workspace, config, args, options),
-    noteMutation: (workspace, config = {}, paths = []) => noteRepositoryMutation(workspace, config, paths),
+    semanticRename: (workspace, semantic, options = {}) => planSemanticRename(workspace, semantic, options),
+    noteMutation: (workspace, config = {}, paths = []) => {
+      noteRepositoryMutation(workspace, config, paths);
+      noteLspMutation(workspace, paths);
+    },
     status: (workspace, config = {}) => repositoryIndexStatus(workspace, config),
+    languageServers: workspace => providerStatuses(workspace),
     rebuild: (workspace, config = {}, options = {}) => rebuildRepositoryIndex(workspace, config, options),
     recover: (workspace, config = {}, options = {}) => recoverRepositoryIndex(workspace, config, options),
     cancel: (workspace, config = {}, reason) => cancelRepositoryIndex(workspace, config, reason),
     dispose: (workspace, config = {}, options = {}) => disposeWorkspaceIntelligence(workspace, config, options),
     shutdown: () => Promise.all([
+      shutdownLspSessions(),
       shutdownRepositoryQueryWorkers(),
       shutdownRepositoryIndexes()
     ])
   });
 }
 
+async function tryAuditFastQuery(workspace, config, args, options = {}) {
+  let status;
+  try {
+    status = repositoryIndexStatus(workspace, config);
+  } catch {
+    return null;
+  }
+  const cached = status?.metadata;
+  if (!cached) return null;
+  const staleIndex = {
+    ...cached,
+    stale: status.dirty === true,
+    backgroundRefresh: status.dirty === true,
+    cacheHit: true
+  };
+  try {
+    const result = await runRepositoryQuery('codeInspect', workspace, config, { args, index: staleIndex }, options);
+    if (status.dirty === true) {
+      const timer = setTimeout(() => {
+        void ensureRepositoryIndex(workspace, config, { maxFiles: args.maxFiles, watch: false }).catch(() => {});
+      }, 0);
+      timer.unref?.();
+    }
+    return result;
+  } catch (error) {
+    const message = String(error?.message || '');
+    if (error?.code === 'QUERY_INDEX_CHANGED' || /no such table|not a database|malformed|INDEX_NOT_READY/i.test(message)) return null;
+    throw error;
+  }
+}
+
 async function disposeWorkspaceIntelligence(workspace, config = {}, options = {}) {
+  await disposeLspWorkspace(workspace);
   const results = [];
   for (const source of workspaceSourceEntries(workspace)) {
     const scopedWorkspace = sourceWorkspace(workspace, source);
@@ -173,7 +227,7 @@ async function multiSourceCodeInspect(singleIndexedQuery, workspace, config, arg
     const scopedArgs = argsForSource(workspace, args, source);
     if (action === 'impact' && !scopedArgs.symbol && Array.isArray(args.paths) && !scopedArgs.paths.length) continue;
     const result = await singleIndexedQuery('codeInspect', sourceWorkspace(workspace, source), config, scopedArgs, options);
-    results.push({ source, result: qualifyInspectResult(result, source, action) });
+    results.push({ source, result: qualifyInspectResult(result, source, action === 'audit' ? 'architecture' : action) });
   }
   if (!results.length) {
     const error = new Error('No requested path belongs to an attached source folder.');
@@ -181,6 +235,17 @@ async function multiSourceCodeInspect(singleIndexedQuery, workspace, config, arg
     throw error;
   }
   if (action === 'architecture') return mergeArchitecture(workspace, results);
+  if (action === 'audit') {
+    const merged = mergeArchitecture(workspace, results);
+    const readiness = results.find(item => item.result.readiness)?.result.readiness || null;
+    return {
+      ...merged,
+      action: 'audit',
+      architecture: { ...merged.architecture, strategy: 'multi-source-audit-fast' },
+      ...(readiness ? { readiness } : {}),
+      next: 'Audit fast path: review modules/entryPoints/hotspots/cycles, then read recommended entry points and run relai_validate checks.'
+    };
+  }
   return mergeInspect(workspace, args, results);
 }
 
@@ -222,7 +287,7 @@ function argsForSource(workspace, args, source) {
 
 function qualifyInspectResult(result, source, action) {
   const qualified = qualifyResultPaths(result, source);
-  if (action !== 'architecture' || source.primary) return qualified;
+  if ((action !== 'architecture' && action !== 'audit') || source.primary) return qualified;
   return {
     ...qualified,
     modules: (qualified.modules || []).map(item => ({ ...item, name: qualifyModuleName(source, item.name) })),

@@ -1,15 +1,15 @@
 function registerCodeWorkspaceIpc({
-  ipcMain,
-  dashboardOnly,
+  ipc,
+  channels,
   getTaskCodeWorkspace,
   readTaskCodeDiff,
   listCodeEditors,
   openTaskCodeIde
 }) {
-  ipcMain.handle('desktop:code:get', (event, payload) => dashboardOnly(event, () => getTaskCodeWorkspace(normalizeTaskPayload(payload))));
-  ipcMain.handle('desktop:code:diff', (event, payload) => dashboardOnly(event, () => readTaskCodeDiff(normalizeFilePayload(payload))));
-  ipcMain.handle('desktop:code:editors', event => dashboardOnly(event, listCodeEditors));
-  ipcMain.handle('desktop:code:open-ide', (event, payload) => dashboardOnly(event, () => openTaskCodeIde(normalizeIdePayload(payload))));
+  ipc.handle(channels.DESKTOP_CODE_GET, 'Code workspace', (_event, payload) => getTaskCodeWorkspace(normalizeTaskPayload(payload)));
+  ipc.handle(channels.DESKTOP_CODE_DIFF, 'Code diff', (_event, payload) => readTaskCodeDiff(normalizeFilePayload(payload)));
+  ipc.handle(channels.DESKTOP_CODE_EDITORS, 'Code editors', () => listCodeEditors());
+  ipc.handle(channels.DESKTOP_CODE_OPEN_IDE, 'Code editor launch', (_event, payload) => openTaskCodeIde(normalizeIdePayload(payload)));
 }
 
 function normalizeTaskPayload(payload = {}) {

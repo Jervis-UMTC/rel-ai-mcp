@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "tsBuildInfoFile": "../../node_modules/.cache/rel-ai-ts/ui.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../contracts" }
+  ],
+  "include": ["./**/*.js"]
+}

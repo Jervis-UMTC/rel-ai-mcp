@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {
+  TASK_RUNTIME_EVENT_PHASES,
+  TASK_RUNTIME_TERMINAL_PHASES,
   eventIdentityKey,
   eventTimestampMs,
   eventTimestampValue,
@@ -8,6 +10,11 @@ import {
   terminalTaskTimestampValue,
   timestampMs
 } from '../src/taskEvents.js';
+
+assert.deepEqual(TASK_RUNTIME_EVENT_PHASES, [
+  'started', 'progress', 'completion_requested', 'finished', 'cancelled', 'inactive', 'completed'
+]);
+assert.deepEqual([...TASK_RUNTIME_TERMINAL_PHASES], ['completed', 'cancelled', 'inactive']);
 
 assert.equal(timestampMs('2026-08-05T10:00:00.000Z'), Date.parse('2026-08-05T10:00:00.000Z'));
 assert.equal(timestampMs('invalid'), 0);

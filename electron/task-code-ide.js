@@ -23,7 +23,7 @@ function createTaskCodeIdeLauncher({ shell, platform = process.platform, env = p
     }
     const editor = editors.find(item => item.id === id);
     if (!editor) throw new Error('The selected IDE is not installed or is no longer available.');
-    launchEditor(editor, target);
+    await launchEditor(editor, target);
     return { ok: true, editor: { id: editor.id, label: editor.label } };
   }
 
@@ -88,14 +88,19 @@ function macCandidate(id, label, appPath) {
 function launchEditor(editor, target) {
   const executable = editor.macApp ? '/usr/bin/open' : editor.executable;
   const args = editor.macApp ? ['-a', editor.macApp, target] : editor.args(target);
-  const child = spawn(executable, args, {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-    shell: false
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: false
+    });
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
   });
-  child.on('error', () => {});
-  child.unref();
 }
 
 export { createTaskCodeIdeLauncher, detectEditors };

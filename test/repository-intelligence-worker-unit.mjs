@@ -3,13 +3,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { repositoryIndexPath } from '../src/repository/intelligence/database.js';
+import {
+  indexProducerVersion,
+  openIndexDatabase,
+  repositoryIndexPath,
+  setIndexProducerVersion
+} from '../src/repository/intelligence/database.js';
 import {
   INDEX_FULL_TIMEOUT_MS,
   INDEX_INCREMENTAL_TIMEOUT_MS,
   evictIdleRepositoryWorkers
 } from '../src/repository/intelligence/indexer.js';
 import { repositoryIntelligence } from '../src/repository/intelligence/service.js';
+import { intelligenceRuntimeFingerprint } from '../src/repository/intelligence/producer.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-repository-worker-'));
 const stateDir = path.join(root, '.state');
@@ -124,6 +130,24 @@ try {
   const repairedPartial = await repositoryIntelligence.ensure(workspace, config, { watch: false });
   assert.equal(repairedPartial.pendingRefresh, false,
     'a partial index must remain dirty until a complete reconciliation succeeds');
+
+  await repositoryIntelligence.shutdown();
+  const staleProducerDb = openIndexDatabase(repositoryIndexPath(config, workspace));
+  try {
+    setIndexProducerVersion(staleProducerDb, 'stale-producer-regression');
+  } finally {
+    staleProducerDb.close();
+  }
+  const producerRecovered = await repositoryIntelligence.ensure(workspace, config, { watch: false });
+  assert.equal(producerRecovered.recovered, true,
+    'a producer-version change must rebuild the derived index from a clean database instead of rewriting the old index in place');
+  assert.match(String(producerRecovered.recoveryReason || ''), /producer changed/i);
+  const producerDb = openIndexDatabase(repositoryIndexPath(config, workspace), { readonly: true });
+  try {
+    assert.equal(indexProducerVersion(producerDb), intelligenceRuntimeFingerprint());
+  } finally {
+    producerDb.close();
+  }
 
   await repositoryIntelligence.shutdown();
   fs.writeFileSync(repositoryIndexPath(config, workspace), 'not-a-sqlite-database', 'utf8');

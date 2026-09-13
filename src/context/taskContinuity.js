@@ -1,5 +1,5 @@
 import { knowledgeSettings } from '../knowledgeStore.js';
-import { readConversationContinuity, readCrossWorkspaceTaskEpisodes } from '../taskHistoryStore.js';
+import { readConversationContinuity, readCrossWorkspaceTaskEpisodes } from '../taskHistoryStore.ts';
 import { matchingRelevanceTerms, relevanceTerms } from './relevance.js';
 
 const SOURCE_PRIORITY = Object.freeze({
@@ -35,17 +35,22 @@ function rankBootstrapGroups(query, groups = {}, maxBytes = 4096) {
       const sourcePriority = Number(SOURCE_PRIORITY[source] || 3);
       const confidence = Number(value?.confidence);
       const confidenceBoost = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0;
+      const reservedTaskMatch = source === 'relatedTasks' && (value?.matchStrength === 'strong' || confidenceBoost >= 0.8);
       candidates.push({
         source,
         value,
         bytes,
+        reservedTaskMatch,
         score: sourcePriority + matches * 0.8 + confidenceBoost * 0.5 - Math.min(0.75, bytes / 8192),
         sourceIndex: sourceIndex++,
         itemIndex
       });
     }
   }
-  candidates.sort((left, right) => right.score - left.score || left.sourceIndex - right.sourceIndex || left.itemIndex - right.itemIndex);
+  candidates.sort((left, right) => Number(right.reservedTaskMatch) - Number(left.reservedTaskMatch)
+    || right.score - left.score
+    || left.sourceIndex - right.sourceIndex
+    || left.itemIndex - right.itemIndex);
 
   const result = {};
   for (const candidate of candidates) {

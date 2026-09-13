@@ -127,6 +127,19 @@ const reloaded = createDesktopNotifications(options);
 assert.deepEqual(reloaded.getPreferences(), service.getPreferences(), 'preferences must persist across application launches');
 assert.equal(logs.length, 0);
 
+const fallbackNotifications = [];
+const fallbackService = createDesktopNotifications({
+  ...options,
+  useNativeNotifications: false,
+  showFallbackNotification(content) {
+    fallbackNotifications.push(content);
+    return true;
+  }
+});
+assert.equal(fallbackService.show('taskCompleted', { title: 'Task completed', body: 'Done.' }), true);
+assert.deepEqual(fallbackNotifications, [{ category: 'taskCompleted', title: 'Task completed', body: 'Done.', silent: false }]);
+assert.equal(shown.length, 8, 'fallback delivery must not construct an Electron Notification');
+
 const unsupportedLogs = [];
 const unsupportedService = createDesktopNotifications({
   ...options,

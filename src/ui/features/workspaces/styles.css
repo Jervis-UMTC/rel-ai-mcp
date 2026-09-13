@@ -6,10 +6,6 @@
   border-color: var(--ui-border-control) !important;
   box-shadow: none;
 }
-.workspace-recents { @apply flex items-center gap-3 rounded-xl px-4 py-3; background: var(--ui-surface-primary); border: 1px solid var(--ui-border-default); }
-.workspace-recents > span { @apply shrink-0 text-[11px] font-semibold; color: var(--ui-text-secondary); }
-.workspace-recents > div { @apply flex min-w-0 flex-wrap gap-2; }
-.workspace-recent-chip { @apply min-h-8 px-2.5; }
 .workspace-grid { @apply grid gap-3; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .workspace-card { @apply flex min-w-0 flex-col; }
 .workspace-card-head { @apply flex items-start justify-between gap-4 border-b px-4 py-3; border-color: var(--ui-border-subtle); }
@@ -56,21 +52,21 @@
 .ws-form-label, .ws-source-heading { @apply block text-[12px] font-semibold; color: var(--ui-text-primary); }
 .ws-project-name-field { @apply flex min-h-10 items-center overflow-hidden rounded-xl; border: 1px solid var(--ui-border-control); background: var(--ui-surface-primary); }
 .ws-project-name-field:focus-within { border-color: var(--ui-action-primary); box-shadow: 0 0 0 1px var(--ui-action-primary); }
-.ws-project-name-field input { @apply min-w-0 flex-1 border-0 bg-transparent px-2.5; min-height: 38px; outline: none; }
+.ws-project-name-field input { @apply min-w-0 flex-1 border-0 bg-transparent px-2.5; min-height: 40px; outline: none; }
 .ws-folder-icon { @apply grid shrink-0 place-items-center; color: var(--ui-text-tertiary); }
 .ws-project-name-field > .ws-folder-icon { @apply ml-3; }
-.ws-form-help { @apply text-[11px] leading-5; color: var(--ui-text-tertiary); }
+.ws-form-help { @apply text-[12px] leading-6; color: var(--ui-text-secondary); }
 .ws-source-heading { @apply mt-1; }
 .ws-source-folder-box { @apply overflow-hidden rounded-xl; border: 1px solid var(--ui-border-default); background: var(--ui-surface-primary); }
 .ws-source-folder-list { @apply m-0 p-0; list-style: none; }
 .ws-source-folder-row { @apply grid min-h-12 items-center gap-3 px-3 py-2; grid-template-columns: auto minmax(0,1fr) auto; }
-.ws-source-folder-copy { @apply grid min-w-0; }
+.ws-source-folder-copy { @apply grid min-w-0; max-width: 65ch; }
 .ws-source-folder-title { @apply flex min-w-0 items-center gap-2; }
-.ws-source-folder-copy strong { @apply truncate text-[12px] font-medium; }
-.ws-source-folder-copy small { @apply truncate text-[11px]; color: var(--ui-text-tertiary); }
+.ws-source-folder-copy strong { @apply truncate text-[13px] font-medium; }
+.ws-source-folder-copy small { @apply truncate text-[12px]; color: var(--ui-text-secondary); }
 .ws-source-primary { @apply shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[.04em]; background: var(--ui-surface-secondary); color: var(--ui-text-tertiary); }
 .ws-source-folder-actions { @apply flex shrink-0 items-center gap-1; }
-.ws-source-folder-change, .ws-source-folder-remove { @apply min-h-8 rounded-lg px-2.5 text-[11px] font-medium; color: var(--ui-text-secondary); }
+.ws-source-folder-change, .ws-source-folder-remove { @apply min-h-11 rounded-lg px-2.5 text-[12px] font-medium; color: var(--ui-text-secondary); }
 .ws-source-folder-change:hover, .ws-source-folder-remove:hover { background: var(--ui-surface-secondary); color: var(--ui-text-primary); }
 .ws-source-folder-add, .ws-source-folder-empty { @apply flex min-h-11 w-full items-center justify-center gap-2 border-t px-4 py-2.5 text-[12px] font-medium; border-color: var(--ui-border-subtle); color: var(--ui-text-secondary); }
 .ws-source-folder-empty { @apply min-h-24 flex-col border-t-0; font-weight: 400; }
@@ -81,7 +77,7 @@
 .ws-source-manual .ws-form-help { @apply mt-1 block; }
 .ws-form-path { @apply min-w-0 w-full; }
 textarea.ws-form-path { @apply min-h-24 resize-y; }
-.ws-form-status { @apply min-h-4 text-[11px]; }
+.ws-form-status { @apply min-h-6 text-[12px] leading-5; }
 .ws-form-status.success { color: var(--ui-status-success-foreground); }
 .ws-form-status.warn { color: var(--ui-status-warning-foreground); }
 .ws-form-status.error { color: var(--ui-status-danger-foreground); }
@@ -134,8 +130,7 @@ textarea.ws-form-path { @apply min-h-24 resize-y; }
 .workspace-analytics-metrics > div { @apply grid min-w-0 gap-0.5; }
 .workspace-analytics-metrics span { @apply text-[11px]; overflow-wrap: anywhere; color: var(--ui-text-tertiary); }
 .workspace-analytics-metrics strong { @apply text-[13px] font-bold; overflow-wrap: anywhere; color: var(--ui-text-primary); }
-.workspace-analytics-sparkline { width: 100%; height: 30px; color: var(--ui-action-primary); }
-.workspace-analytics-sparkline polyline { stroke: currentColor; stroke-width: 1.5; }
+.workspace-analytics-sparkline { position: relative; width: 100%; height: 30px; }
 .workspace-analytics-sparkline-empty { display: block; height: 30px; }
 @media (max-width: 520px) {
   .workspace-analytics-metrics { grid-template-columns: repeat(3,minmax(0,1fr)); }

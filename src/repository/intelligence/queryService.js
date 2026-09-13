@@ -20,8 +20,8 @@ const MAX_QUERY_CANDIDATES = 1000;
 
 async function executeCodeInspectQuery(workspace, config, args = {}, index = {}, options = {}) {
   const action = String(args.action || '').trim().toLowerCase();
-  if (!['symbol', 'references', 'related', 'impact', 'trace', 'diagnostics', 'architecture'].includes(action)) {
-    throw new Error('relai_inspect action must be one of: symbol, references, related, impact, trace, diagnostics, architecture.');
+  if (!['symbol', 'references', 'related', 'impact', 'trace', 'diagnostics', 'architecture', 'audit'].includes(action)) {
+    throw new Error('relai_inspect action must be one of: symbol, references, related, impact, trace, diagnostics, architecture, audit.');
   }
   const maxResults = Math.floor(clampNumber(args.maxResults, 1, 1000, DEFAULT_MAX_RESULTS));
   const sourceCache = options.sourceCache || new Map();
@@ -39,6 +39,27 @@ async function executeCodeInspectQuery(workspace, config, args = {}, index = {},
         ...base,
         ...architecture,
         architecture: { ...architecture.architecture, crossWorkspace }
+      };
+    }
+    if (action === 'audit') {
+      const architecture = analyzeArchitecture(db, { maxResults, workspaceRoot: workspace.path });
+      const crossWorkspace = analyzeCrossWorkspace(workspace, config, db, {
+        maxRelationships: Math.min(100, maxResults),
+        repositoryStatuses: options.repositoryStatuses
+      });
+      const readiness = diagnosticReadiness(workspace, db);
+      return {
+        ...base,
+        ...architecture,
+        architecture: {
+          ...architecture.architecture,
+          crossWorkspace,
+          strategy: 'audit-fast',
+          stale: Boolean(index?.stale),
+          backgroundRefresh: Boolean(index?.backgroundRefresh)
+        },
+        readiness,
+        next: 'Audit fast path: review modules/entryPoints/hotspots/cycles, then read recommended entry points and run relai_validate checks.'
       };
     }
     if (action === 'diagnostics') return { ...base, ...diagnosticReadiness(workspace, db) };

@@ -1,5 +1,3 @@
-import { esc } from '../utils.js';
-
 const STATIC_PROGRESS_STATES = Object.freeze({
   failed: Object.freeze({ fallback: 'Task failed', state: 'Failed', className: 'terminal failed' }),
   cancelled: Object.freeze({ fallback: 'Task cancelled', state: 'Cancelled', className: 'terminal cancelled' }),
@@ -10,29 +8,66 @@ const STATIC_PROGRESS_STATES = Object.freeze({
   waiting_for_approval: Object.freeze({ fallback: 'Blocked', state: 'Action required', className: 'paused blocked' })
 });
 
-export function taskProgressHtml(progress = {}, status = '', options = {}) {
+export function taskProgressView(progress = {}, status = '', options = {}) {
   const compact = options.compact === true;
   const normalizedStatus = String(status || '').trim().toLowerCase();
   if (normalizedStatus === 'completed') {
-    return `<div class="task-progress complete ${compact ? 'compact' : ''}" role="status" aria-label="Task completed. 100 percent."><div class="task-progress-label"><span>${esc(progress?.label || 'Complete')}</span><strong>100%</strong></div><progress class="task-progress-track" aria-label="Task complete" value="100" max="100"></progress></div>`;
+    return {
+      kind: 'complete',
+      className: classNames('task-progress', 'complete', compact && 'compact'),
+      role: 'status',
+      ariaLabel: 'Task completed. 100 percent.',
+      label: progress?.label || 'Complete',
+      state: '100%',
+      value: 100,
+      progressAriaLabel: 'Task complete'
+    };
   }
+
   const staticState = STATIC_PROGRESS_STATES[normalizedStatus];
-  if (staticState) return staticProgressHtml(progress, staticState, compact);
+  if (staticState) return staticProgressView(progress, staticState, compact);
+
   if (progress?.mode === 'determinate') {
     const value = clampPercentage(progress.percentage);
     const label = progress.label || `${progress.completedUnits || 0} of ${progress.totalUnits || 0} complete`;
-    return `<div class="task-progress ${compact ? 'compact' : ''}"><div class="task-progress-label"><span>${esc(label)}</span><strong>${value}%</strong></div><progress class="task-progress-track" aria-label="${esc(label)}" value="${value}" max="100"></progress></div>`;
+    return {
+      kind: 'determinate',
+      className: classNames('task-progress', compact && 'compact'),
+      role: '',
+      ariaLabel: '',
+      label,
+      state: `${value}%`,
+      value,
+      progressAriaLabel: label
+    };
   }
+
   const label = progress?.label || 'Workload size is not yet known';
-  const statusAttributes = compact ? `aria-label="${esc(label)}"` : `role="status" aria-label="${esc(label)}"`;
-  return `<div class="task-progress indeterminate ${compact ? 'compact' : ''}" ${statusAttributes}><div class="task-progress-label"><span>${esc(label)}</span></div><div class="task-progress-track" aria-hidden="true"></div></div>`;
+  return {
+    kind: 'indeterminate',
+    className: classNames('task-progress', 'indeterminate', compact && 'compact'),
+    role: compact ? '' : 'status',
+    ariaLabel: label,
+    label,
+    state: '',
+    value: null,
+    progressAriaLabel: ''
+  };
 }
 
-function staticProgressHtml(progress, state, compact) {
+function staticProgressView(progress, state, compact) {
   const terminal = state.className.startsWith('terminal');
   const label = terminal ? state.fallback : meaningfulLabel(progress?.label, state.fallback);
-  const classes = `task-progress static ${state.className} ${compact ? 'compact' : ''}`.trim();
-  return `<div class="${classes}" role="status" aria-label="${esc(`${label}. ${state.state}.`)}"><div class="task-progress-label"><span>${esc(label)}</span><strong>${esc(state.state)}</strong></div></div>`;
+  return {
+    kind: 'static',
+    className: classNames('task-progress', 'static', state.className, compact && 'compact'),
+    role: 'status',
+    ariaLabel: `${label}. ${state.state}.`,
+    label,
+    state: state.state,
+    value: null,
+    progressAriaLabel: ''
+  };
 }
 
 function meaningfulLabel(value, fallback) {
@@ -43,4 +78,8 @@ function meaningfulLabel(value, fallback) {
 
 function clampPercentage(value) {
   return Math.max(0, Math.min(100, Number(value || 0)));
+}
+
+function classNames(...values) {
+  return values.filter(Boolean).join(' ');
 }

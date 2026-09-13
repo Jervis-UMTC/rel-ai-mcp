@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { relaiCodeInspect } from '../src/bridge/codeIntelligence.js';
-import { codeIntelligence } from '../src/codeIntelligence/service.js';
 import { planEdit } from '../src/executionPlanner.js';
 import { repositoryIntelligence } from '../src/repository/intelligence/service.js';
 
@@ -112,14 +111,13 @@ try {
     'semantic mutations must remain primary-repository-only'
   );
 
-  const servers = new Map(codeIntelligence.status(workspace).map(item => [`${item.source || 1}:${item.id}`, item]));
+  const servers = new Map(repositoryIntelligence.languageServers(workspace).map(item => [`${item.source || 1}:${item.id}`, item]));
   assert.equal(servers.get('1:typescript-language-server')?.available, true);
   assert.equal(servers.get('1:pyright')?.available, true);
   assert.equal(servers.get('2:typescript-language-server')?.available, true);
 
   console.log('Hybrid LSP intelligence and Rel.AI-controlled semantic rename passed.');
 } finally {
-  await codeIntelligence.shutdown().catch(() => {});
   await repositoryIntelligence.shutdown().catch(() => {});
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.rmSync(secondary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

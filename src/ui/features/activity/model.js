@@ -136,6 +136,7 @@ export function filterActivityEntries(entries, filterState = {}, now = Date.now(
         entry.operation,
         activityMessage(entry),
         entry.path,
+        activityFileLocation(entry),
         entry.resourceUri,
         entry.workspace,
         entry.category,
@@ -200,6 +201,10 @@ export function activityActionLabel(entry) {
   const action = activityDisplayAction(entry);
   const message = activityMessage(entry).replace(/\s+/g, ' ').slice(0, 120);
   return `Open ${action} details: ${message}`;
+}
+
+export function activityFileLocation(entry) {
+  return displayText(entry?.result?.path);
 }
 
 function mergeActivityEntry(existing, incoming) {

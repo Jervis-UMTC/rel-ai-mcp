@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { relaiSemanticSearch } from '../src/bridge/semanticSearch.js';
-import { codeIntelligence } from '../src/codeIntelligence/service.js';
 import { relaiDiagnosticsRun } from '../src/bridge/diagnosticsRunner.js';
 import { relaiCodeInspect } from '../src/bridge/codeIntelligence.js';
 import { openIndexDatabase, repositoryIndexPath } from '../src/repository/intelligence/database.js';
@@ -24,7 +23,8 @@ assert.match(zoektSource, /await runProcess\(/, 'Zoekt commands must use the asy
 assert.match(indexBuildSource, /await rebuildZoektIndex\(/, 'full Zoekt rebuilds must execute inside the Repository Intelligence worker job');
 assert.match(queryServiceSource, /await searchZoekt\(/, 'query-time Zoekt search must remain asynchronous');
 assert.match(queryServiceSource, /options\.sourceCache \|\| new Map\(\)/, 'repository queries must accept a generation-aware shared source cache');
-assert.match(queryWorkerClientSource, /new Worker\(new URL\('\.\/queryWorker\.js'/, 'repository query work must execute in a dedicated worker');
+assert.match(queryWorkerClientSource, /import Piscina from 'piscina'/, 'repository query work must use the production worker-pool dependency');
+assert.match(queryWorkerClientSource, /maxThreads:\s*QUERY_WORKER_GLOBAL_COUNT/, 'repository query work must retain a bounded global worker budget');
 assert.doesNotMatch(queryWorkerClientSource, /warmIdleReaders|type: 'warm'/,
   'one query must not eagerly warm every reader slot');
 assert.match(queryWorkerSource, /SOURCE_CACHE_MAX_FILES/, 'query worker source caching must have a file-count bound');
@@ -171,7 +171,6 @@ try {
     message: 'Argument is invalid', source: 'typescript'
   });
 } finally {
-  await codeIntelligence.shutdown();
   await repositoryIntelligence.shutdown();
   fs.rmSync(root, { recursive: true, force: true });
 }

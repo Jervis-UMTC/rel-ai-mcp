@@ -44,12 +44,12 @@ body.electron-page {
   overflow-x: hidden;
   color: var(--ui-text-primary);
   background: var(--ui-canvas);
-  font: var(--font-13)/1.5 var(--font-sans);
+  font: var(--font-14)/1.6 var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 button, input { font: inherit; }
 button {
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 var(--space-3);
   border: 1px solid var(--ui-border-default);
   border-radius: var(--radius-md);
@@ -74,9 +74,10 @@ button.primary:active { background: var(--ui-action-primary-active); border-colo
 button.secondary { color: var(--ui-text-secondary); }
 button.danger { color: var(--ui-status-danger-foreground); background: var(--ui-status-danger-background); border-color: var(--ui-status-danger-border); }
 button.success { color: var(--ui-status-success-foreground); background: var(--ui-status-success-background); border-color: var(--ui-status-success-border); }
-button[data-state="loading"] { cursor: progress; }
+button[data-state="loading"] { cursor: progress; opacity: .8; pointer-events: none; }
 button[data-state="success"] { color: var(--ui-status-success-foreground); border-color: var(--ui-status-success-border); background: var(--ui-status-success-background); }
 button[data-state="error"] { color: var(--ui-status-danger-foreground); border-color: var(--ui-status-danger-border); background: var(--ui-status-danger-background); }
+button[aria-busy="true"] { cursor: progress; }
 input[type="text"], input[type="number"], input[type="password"] {
   width: 100%;
   min-height: 42px;
@@ -146,6 +147,7 @@ input:focus { border-color: var(--ui-action-primary); box-shadow: 0 0 0 3px var(
 .status-badge.connecting::before { background: var(--ui-status-info-foreground); }
 .status-badge.degraded::before { background: var(--ui-status-warning-foreground); }
 .status-badge.working::before { background: var(--ui-status-info-foreground); animation: activityPulse 1.35s ease-in-out infinite; }
+.status-badge.attention::before { background: var(--ui-status-danger-foreground); }
 .status-badge.waiting::before, .status-badge.settling::before { background: var(--ui-status-info-foreground); }
 .status-badge.failed::before { background: var(--ui-status-danger-foreground); }
 .status-hero { padding: 20px; overflow: hidden; position: relative; }
@@ -284,8 +286,8 @@ input:focus { border-color: var(--ui-action-primary); box-shadow: 0 0 0 3px var(
 .notification-switch.enabled { color: var(--ui-text-primary); }
 .notification-switch.enabled .switch-track { background: var(--ui-action-primary); }
 .notification-switch.enabled .switch-track span { background: var(--ui-switch-thumb); transform: translateX(14px); }
-.status-details summary span { transition: transform var(--dur) var(--ease); }
-.status-details[open] summary span { transform: rotate(180deg); }
+.status-details > summary > span { transition: transform var(--dur) var(--ease); }
+.status-details[open] > summary > span { transform: rotate(180deg); }
 
 .wizard-page { display: block; overflow-y: auto; }
 .wizard { width: min(500px, 100%); margin: 0 auto; }
@@ -482,11 +484,12 @@ label, .field-label { display: block; margin: 14px 0 7px; color: var(--ui-text-s
   * { scrollbar-color: auto; }
   *::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: Canvas; }
   *::-webkit-scrollbar-thumb { background: CanvasText; border-color: Canvas; forced-color-adjust: none; }
-  button.primary, .progress-step.current span, .status-badge { border: 2px solid ButtonText; }
+  button.primary, .progress-step.current span, .status-badge, .status-dot { border: 2px solid ButtonText; forced-color-adjust: none; }
+  .status-dot, .progress-fill { background: CanvasText; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: 120ms !important; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 
 .setup-advanced {

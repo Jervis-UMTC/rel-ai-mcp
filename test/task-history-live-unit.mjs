@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { clearTaskHistory, flushTaskHistoryPersistence, readTaskHistorySession, recordTaskActivityEvent, recordTaskHistoryEvent, taskHistoryPersistenceSnapshot } from "../src/taskHistoryStore.js";
+import { clearTaskHistory, flushTaskHistoryPersistence, readTaskHistorySession, recordTaskActivityEvent, recordTaskHistoryEvent, taskHistoryPersistenceSnapshot } from "../src/taskHistoryStore.ts";
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-task-history-live-'));
 const config = { stateDir: sandbox, auditLogPath: path.join(sandbox, 'audit.jsonl') };

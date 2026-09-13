@@ -20,10 +20,11 @@ const electronPkg = JSON.parse(fs.readFileSync(path.join(root, 'electron', 'pack
 const rootPkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const srcResource = electronPkg.build.extraResources.find(item => item.from === '../src');
 assert.ok(srcResource, 'Electron packaging must include the backend source runtime.');
-assert.deepEqual(srcResource.filter, ['**/*.js']);
+assert.deepEqual(srcResource.filter, ['**/*.js', '**/*.ts']);
 assert.equal(fs.existsSync(path.join(root, 'src', 'mcp', 'ui', 'workflow-card.html')), false, 'Electron packaging must not retain the removed ChatGPT iframe task card.');
 
 for (const file of [
+  'desktop-host.js',
   'secure-tunnel-runtime.js',
   'tunnel-credentials.js',
   'service-runtime.js',
@@ -88,14 +89,23 @@ for (const renderer of ['status.html', 'wizard.html']) {
 }
 
 const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
+const desktopHost = fs.readFileSync(path.join(root, 'electron', 'desktop-host.js'), 'utf8');
+const serviceProcess = fs.readFileSync(path.join(root, 'electron', 'service-process.js'), 'utf8');
 const serviceRuntime = fs.readFileSync(path.join(root, 'electron', 'service-runtime.js'), 'utf8');
-assert.match(main, /createSecureTunnelRuntime/);
-assert.match(main, /createTunnelCredentialStore/);
-assert.match(main, /createServiceProcessClient/);
-assert.match(main, /utilityProcess/);
-assert.doesNotMatch(main, /startHttpServer|stopAllManagedProcesses/, 'Electron main must not own the MCP HTTP/runtime process path');
-assert.match(main, /readLocalUsageSnapshotAsync/, 'desktop analytics reads must use the fresh asynchronous snapshot path');
-assert.doesNotMatch(main, /readLocalUsageSnapshot\(/, 'Electron main must not use the process-local cached analytics snapshot');
+assert.match(main, /createDesktopHost/);
+assert.doesNotMatch(main, /await desktop\.start\(\)/, 'Awaiting startup at module scope deadlocks Electron readiness');
+assert.match(main, /desktop\.start\(\)\.catch\(/, 'Desktop startup failures must be handled');
+assert.doesNotMatch(main, /createSecureTunnelRuntime|createTunnelCredentialStore|createServiceProcessClient|registerIpcHandlers/, 'Electron main must remain a composition root rather than a behavioral module');
+assert.match(desktopHost, /createSecureTunnelRuntime/);
+assert.match(desktopHost, /createTunnelCredentialStore/);
+assert.match(desktopHost, /createServiceProcessClient/);
+assert.match(desktopHost, /utilityProcess/);
+assert.doesNotMatch(desktopHost, /startHttpServer|stopAllManagedProcesses/, 'Electron desktop host must not own the MCP HTTP/runtime process path');
+assert.doesNotMatch(desktopHost, /readLocalUsageSnapshot(?:Async)?|onboardingState|taskCodeWorkspace/, 'Rel.AI business operations must stay behind the utility-process boundary');
+assert.match(desktopHost, /getLocalUsage:\s*serviceProcessClient\.getLocalUsage/);
+assert.match(serviceProcess, /desktop-local-usage/);
+assert.match(serviceProcess, /desktop-onboarding-handoff/);
+assert.match(serviceProcess, /desktop-task-code-workspace/);
 assert.doesNotMatch(main, /createGatewayClient|createPublicConnectionRuntime|createApprovalTokenManager|managedNgrok/);
 assert.match(serviceRuntime, /serviceProcessClient\.start\(\{[\s\S]*host:[\s\S]*port:[\s\S]*token:/s);
 assert.match(serviceRuntime, /secureTunnelRuntime\.start\(\{[\s\S]*tunnelId:[\s\S]*port:[\s\S]*localToken:[\s\S]*apiKey/s);

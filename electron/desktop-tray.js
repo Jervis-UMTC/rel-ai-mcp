@@ -3,6 +3,7 @@
 function createDesktopTray(deps) {
   const {
     Tray, Menu, nativeImage, clipboard, iconPath, getStatus,
+    platform = process.platform,
     openDashboard, focusPrimaryWindow, openDiagnostics, openSettings,
     startServer, stopServer, getUpdateStatus = () => null,
     checkForUpdates, downloadUpdate, installUpdate,
@@ -25,7 +26,8 @@ function createDesktopTray(deps) {
     try {
       tray = new Tray(image);
       tray.setToolTip('Rel.AI MCP');
-      tray.on('double-click', focusPrimaryWindow);
+      tray.on(platform === 'linux' ? 'click' : 'double-click', focusPrimaryWindow);
+      if (platform === 'win32') tray.on('balloon-click', focusPrimaryWindow);
       update();
       return tray;
     } catch (error) {
@@ -39,6 +41,7 @@ function createDesktopTray(deps) {
   function update() {
     if (!tray) return false;
     const status = getStatus();
+    const updateInstalling = getUpdateStatus()?.state === 'installing';
     const menu = Menu.buildFromTemplate([
       { label: status.serverRunning ? 'Rel.AI: running' : 'Rel.AI: stopped', enabled: false },
       { label: `Connection: ${status.tunnelStatus || 'stopped'}`, enabled: false },
@@ -46,21 +49,22 @@ function createDesktopTray(deps) {
       { label: 'Open Dashboard', click: () => void openDashboard().catch(onError) },
       {
         label: 'Copy local MCP address',
-        enabled: Boolean(status.localMcpUrl),
+        enabled: Boolean(status.localMcpUrl) && !updateInstalling,
         click: () => { if (status.localMcpUrl) clipboard.writeText(status.localMcpUrl); }
       },
       {
         label: status.serverRunning ? 'Stop Rel.AI' : 'Start Rel.AI',
+        enabled: !updateInstalling,
         click: () => status.serverRunning
           ? void Promise.resolve(stopServer()).catch(onError)
           : void startServer().catch(onError)
       },
       { type: 'separator' },
       updateMenuItem(),
-      { label: 'Troubleshooting', click: () => void openDiagnostics().catch(onError) },
-      { label: 'Settings', click: () => void openSettings().catch(onError) },
+      { label: 'Troubleshooting', enabled: !updateInstalling, click: () => void openDiagnostics().catch(onError) },
+      { label: 'Settings', enabled: !updateInstalling, click: () => void openSettings().catch(onError) },
       { type: 'separator' },
-      { label: 'Quit Rel.AI MCP', click: quit }
+      { label: 'Quit Rel.AI MCP', enabled: !updateInstalling, click: quit }
     ]);
     tray.setContextMenu(menu);
     return true;
@@ -73,7 +77,7 @@ function createDesktopTray(deps) {
     if (status.state === 'downloading') return { label: `Downloading update… ${Math.round(status.progress?.percent || 0)}%`, enabled: false };
     if (status.state === 'installing') return { label: 'Installing update…', enabled: false };
     if (status.state === 'downloaded') {
-      const label = status.installMode === 'open_dmg' ? `Open update DMG${version}` : `Restart to install${version}`;
+      const label = status.installMode === 'open_dmg' ? `Open update DMG${version}` : `Install update${version}`;
       return { label, click: () => runUpdateAction(installUpdate) };
     }
     if (status.state === 'available') return { label: `Download update${version}`, click: () => runUpdateAction(downloadUpdate) };
@@ -89,7 +93,40 @@ function createDesktopTray(deps) {
     }).catch(onError);
   }
 
-  return { setup, update, isAvailable: () => Boolean(tray) };
+  function showBalloon(content = {}) {
+    if (platform !== 'win32' || !tray || typeof tray.displayBalloon !== 'function') return false;
+    const title = String(content.title || '').trim();
+    const body = String(content.body || '').trim();
+    if (!title) return false;
+    try {
+      tray.displayBalloon({
+        title,
+        content: body,
+        iconType: content.category === 'errors' ? 'error' : 'info',
+        noSound: content.silent === true,
+        respectQuietTime: true
+      });
+      return true;
+    } catch (error) {
+      onError(error);
+      return false;
+    }
+  }
+
+  function destroy() {
+    if (!tray) return false;
+    const current = tray;
+    tray = null;
+    try {
+      current.destroy?.();
+      return true;
+    } catch (error) {
+      onError(error);
+      return false;
+    }
+  }
+
+  return { setup, update, showBalloon, destroy, isAvailable: () => Boolean(tray) };
 }
 
 export { createDesktopTray };

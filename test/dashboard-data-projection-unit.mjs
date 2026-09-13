@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { mergeDashboardActivity, summarizeDashboardTask } from '../src/http/dashboardData.js';
+import { mergeDashboardActivity, summarizeDashboardTask } from '../src/core/dashboard-data.ts';
 
 const merged = mergeDashboardActivity({
   entries: [

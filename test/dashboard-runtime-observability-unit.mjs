@@ -12,8 +12,9 @@ import {
   processStateView,
   workSessionStateView
 } from '../src/ui/task-identity.js';
-import { taskProgressHtml } from '../src/ui/components/task-progress.js';
+import { taskProgressView } from '../src/ui/components/task-progress.js';
 import { activeTaskList } from '../src/ui/features/home/index.js';
+import { processListView } from '../src/ui/features/processes/index.js';
 
 const TASKS_EXTENSION_ID = 'io.modelcontextprotocol/tasks';
 
@@ -144,6 +145,14 @@ const restartedProcess = processStateView({ status: 'orphaned', pid: 123 });
 assert.equal(restartedProcess.label, 'Unknown after restart');
 assert.equal(restartedProcess.canStop, true);
 assert.match(restartedProcess.recovery, /Stop the process explicitly/i);
+const processSummary = processListView({
+  managedProcesses: [
+    { processId: 'orphaned-process', status: 'orphaned', pid: 123 },
+    { processId: 'finished-process', status: 'exited', endedAt: '2026-09-07T10:00:00.000Z' }
+  ]
+});
+assert.equal(processSummary.running, 0);
+assert.equal(processSummary.finished, 1, 'orphaned processes must not be counted as finished');
 const stoppedProcess = processStateView({ status: 'stopped' });
 assert.equal(stoppedProcess.terminal, true);
 assert.equal(stoppedProcess.canStop, false);
@@ -182,9 +191,10 @@ const inactiveBlockedView = workSessionStateView({
   currentActivity: 'The previous operation was blocked.'
 });
 assert.equal(inactiveBlockedView.label, 'Blocked');
-const inactiveProgress = taskProgressHtml({ mode: 'indeterminate', label: 'Waiting for the next task step' }, 'inactive');
-assert.match(inactiveProgress, /Inactive|Ready to resume/i);
-assert.doesNotMatch(inactiveProgress, /expired/i, 'resumable inactive sessions must not be presented as expired');
+const inactiveProgress = taskProgressView({ mode: 'indeterminate', label: 'Waiting for the next task step' }, 'inactive');
+assert.equal(inactiveProgress.state, 'Inactive');
+assert.match(inactiveProgress.label, /Ready to resume/i);
+assert.doesNotMatch(inactiveProgress.label, /expired/i, 'resumable inactive sessions must not be presented as expired');
 
 const observableActiveSessions = activeTaskList({
   activeCalls: 9,
@@ -197,32 +207,32 @@ assert.deepEqual(observableActiveSessions.map(task => task.id), ['open']);
 assert.deepEqual(activeTaskList({ tasks: [{ id: 'expired', status: 'expired', activeCalls: 1 }] }), []);
 
 for (const status of ['completed', 'failed', 'cancelled', 'expired']) {
-  const html = taskProgressHtml({}, status);
-  assert.doesNotMatch(html, /indeterminate/, `${status} must not retain indeterminate progress`);
-  assert.doesNotMatch(html, /runtime-activity-spinner/, `${status} must not render an activity spinner`);
+  const view = taskProgressView({}, status);
+  assert.notEqual(view.kind, 'indeterminate', `${status} must not retain indeterminate progress`);
 }
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const taskIdentitySource = fs.readFileSync(path.join(root, 'src/ui/task-identity.js'), 'utf8');
-const sessionsSource = fs.readFileSync(path.join(root, 'src/ui/features/sessions/index.js'), 'utf8');
-const processesSource = fs.readFileSync(path.join(root, 'src/ui/features/processes/index.js'), 'utf8');
-const connectorSource = fs.readFileSync(path.join(root, 'src/ui/features/settings/connector.js'), 'utf8');
+const sessionsSource = fs.readFileSync(path.join(root, 'src/ui/features/sessions/react.js'), 'utf8');
+const processesSource = fs.readFileSync(path.join(root, 'src/ui/features/processes/react.js'), 'utf8');
+const settingsSource = fs.readFileSync(path.join(root, 'src/ui/features/settings/react.js'), 'utf8');
 const cssSource = fs.readFileSync(path.join(root, 'src/ui/styles/app.css'), 'utf8');
 const sessionCssSource = fs.readFileSync(path.join(root, 'src/ui/features/sessions/styles.css'), 'utf8');
 
 assert.match(sessionsSource, /Recent (?:sessions|tasks)/, 'Tasks surface must use a compact user-facing heading');
 assert.match(sessionsSource, /Work session ID/);
 assert.match(sessionsSource, /Process ID/);
-assert.match(sessionsSource, /aria-label="Copy \$\{esc\(label\)\}/);
+assert.match(sessionsSource, /'aria-label': `Copy \$\{label\} \$\{value\}`/);
 assert.doesNotMatch(sessionsSource, /Client task capability|Native MCP tasks|Native task ID/);
 assert.doesNotMatch(sessionsSource, /nativeTasksCard|nativeTaskRow|data-cancel-native-task|bindNativeTaskActions/);
 assert.match(processesSource, /data-stop-process/);
-assert.match(processesSource, />Stop<\/button>/);
+assert.match(processesSource, /: 'Stop'/);
 assert.doesNotMatch(processesSource, /Startup task completed; process still running|Native task ID|Process ID|Saved output|process-detail-grid|process-relationship/);
 assert.doesNotMatch(processesSource, /Cancel task|data-cancel-native-task/);
-assert.match(processesSource, /aria-label="Recent \$\{stream\} output"/);
+assert.match(processesSource, /'aria-label': `Recent \$\{stream\} output`/);
 assert.doesNotMatch(taskIdentitySource, /Required backend fields|stdoutTail and stderrTail/);
-assert.doesNotMatch(connectorSource, /Native MCP Tasks|Execution mode|connector-technical-details/);
+const connectionPageSource = settingsSource.match(/function ConnectionPage[\s\S]*?function DesktopConnectionSettings/)?.[0] || '';
+assert.doesNotMatch(connectionPageSource, /Native MCP Tasks|Execution mode|connector-technical-details/);
 assert.doesNotMatch(cssSource, /\.native-task-row|\.runtime-activity-spinner|\.runtime-capability-row/);
 assert.match(sessionCssSource, /\.task-progress\.static\.terminal\.cancelled[\s\S]*--ui-status-neutral-background/);
 assert.match(sessionCssSource, /@media \(prefers-reduced-motion: reduce\)/);

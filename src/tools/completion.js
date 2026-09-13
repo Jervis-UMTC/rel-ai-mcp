@@ -1,8 +1,8 @@
 import { resolveWorkspace } from '../config.js';
 import { clearSessionPolicy, resolvePolicy } from '../policyResolver.js';
-import { readTaskHistorySession, readTaskHistorySessionRecord } from '../taskHistoryStore.js';
+import { readTaskHistorySession, readTaskHistorySessionRecord } from '../taskHistoryStore.ts';
 import { recordTaskValidationAffinity } from '../knowledgeStore.js';
-import { readTaskIntegrity } from '../taskIntegrity.js';
+import { readTaskIntegrity } from '../taskIntegrity.ts';
 import { workspaceDirtyPaths } from '../repo/gitOps.js';
 import { createValidationFingerprint } from '../bridge/validationPlan.js';
 import { sanitizeCompletionSummary } from '../taskObservability.js';

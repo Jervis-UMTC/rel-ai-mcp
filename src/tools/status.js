@@ -15,7 +15,7 @@ import { runtimeCompatibility } from '../runtimeCompatibility.js';
 import { getToolActivity } from '../toolActivity.js';
 import { fallbackExecutionStatus } from '../mcp/fallbackExecutions.js';
 import { authorizedWorkspaceAliases } from '../mcp/authorizationPolicy.js';
-import { readTaskHistorySessionRecord } from '../taskHistoryStore.js';
+import { readTaskHistorySessionRecord } from '../taskHistoryStore.ts';
 import { compactSessionSummary } from '../context/session-compactor.js';
 import { compactActiveRelatedWork } from '../context/activeRelatedWork.js';
 import { buildTaskContinuity } from '../context/taskContinuity.js';

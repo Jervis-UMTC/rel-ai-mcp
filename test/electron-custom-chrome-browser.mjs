@@ -52,9 +52,13 @@ try {
     assert.equal(measurement.mainClear, true, `${measurement.route} main scroller overlaps the custom title bar: ${JSON.stringify(measurement)}`);
     assert.equal(measurement.topbarClear, true, `${measurement.route} topbar overlaps the custom title bar: ${JSON.stringify(measurement)}`);
     assert.equal(measurement.titleVisible, true, `${measurement.route} title is clipped under the custom title bar: ${JSON.stringify(measurement)}`);
+    assert.notEqual(measurement.titleOverflow, 'hidden', `${measurement.route} title glyphs must not be clipped by overflow:hidden: ${JSON.stringify(measurement)}`);
     if (measurement.route === '#usage') {
       assert.equal(measurement.localAnalyticsLoaded, true, 'Usage must render from the local desktop bridge.');
       assert.equal(measurement.inlineUsageError, false, 'Local Usage must not show an unavailable error in the browser probe.');
+      assert.ok(measurement.usageMetricOverflow <= 0.5, `Analytics sparklines must stay inside their metric tiles: ${JSON.stringify(measurement)}`);
+      assert.equal(measurement.usageMatrixLoaded, true, `Usage must render the task-linked work-type matrix when categorized activity exists: ${JSON.stringify(measurement)}`);
+      assert.ok(measurement.documentOverflow <= 0.5, `Analytics must contain horizontal overflow inside its own controls instead of overflowing the page: ${JSON.stringify(measurement)}`);
     }
     if (measurement.route === '#tools') {
       assert.equal(measurement.toolCategories.relai_exec, 'Execute');
@@ -88,9 +92,10 @@ function waitForProcessClose(childProcess, timeoutMs) {
 }
 
 async function waitForHealth(url) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
     if (await healthRequest(url)) return;
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error('HTTP server did not become healthy. ' + serverError);
 }

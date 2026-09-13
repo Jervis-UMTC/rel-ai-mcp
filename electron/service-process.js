@@ -6,14 +6,17 @@ import { projectServiceActivityEvent, projectServiceActivitySnapshot } from './s
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error('Rel.AI service process requires an Electron utility-process parent port.');
 
-const [httpModule, toolActivity, dashboardSessions, processManager, configModule, codeIntelligenceModule] = await Promise.all([
-  importResourceModule('src/httpServer.js'),
+const [httpModule, toolActivity, dashboardSessions, coreDesktopOperations, desktopManager, browserDriver] = await Promise.all([
+  importResourceModule('src/httpServer.ts'),
   importResourceModule('src/toolActivity.js'),
-  importResourceModule('src/http/dashboardSessions.js'),
-  importResourceModule('src/processManager.js'),
-  importResourceModule('src/config.js'),
-  importResourceModule('src/codeIntelligence/service.js')
+  importResourceModule('src/http/dashboardSessions.ts'),
+  importResourceModule('src/core/desktop-operations.ts'),
+  importResourceModule('src/desktopManager.ts'),
+  importResourceModule('src/browser/browserDriver.ts')
 ]);
+
+desktopManager.configureDesktopNativeBridge(payload => callNative('desktopOperation', payload));
+browserDriver.configureBrowserNativeBridge((payload, options) => callNative('browserOperation', payload, options));
 
 let httpServer = null;
 let activeToken = '';
@@ -45,6 +48,10 @@ parentPort.on('message', event => {
     updateDesktopContext(message.context);
     return;
   }
+  if (message.type === 'native-event') {
+    browserDriver.dispatchBrowserNativeEvent(message.event || {});
+    return;
+  }
   if (message.type === 'native-response') settleNativeRequest(message);
 });
 
@@ -71,6 +78,11 @@ async function dispatchRequest(method, payload) {
   if (method === 'stop') return runLifecycle(stopService);
   if (method === 'dashboard-bootstrap') return createDashboardBootstrap();
   if (method === 'activity-snapshot') return projectServiceActivitySnapshot(toolActivity.getToolActivity());
+  if (method === 'desktop-local-usage') return coreDesktopOperations.getDesktopLocalUsage(payload.month);
+  if (method === 'desktop-onboarding-handoff') return coreDesktopOperations.markDesktopOnboardingHandoff();
+  if (method === 'desktop-task-code-workspace') return coreDesktopOperations.getDesktopTaskCodeWorkspace(payload);
+  if (method === 'desktop-task-code-diff') return coreDesktopOperations.readDesktopTaskCodeDiff(payload);
+  if (method === 'desktop-task-code-workspace-path') return coreDesktopOperations.getDesktopTaskCodeWorkspacePath(payload);
   throw new Error(`Unknown service-process request: ${method}`);
 }
 
@@ -97,7 +109,6 @@ async function startService(payload = {}) {
       publicUrl: '',
       exitOnError: false,
       writeProfile: false,
-      stopManagedProcessesOnClose: false,
       pickFolder: () => callNative('pickFolder'),
       openFolder: folderPath => callNative('openFolder', { path: folderPath }),
       getTaskActivity: () => toolActivity.getToolActivity(),
@@ -141,34 +152,44 @@ async function stopService() {
   httpServer = null;
   activeToken = '';
   activePort = 0;
-  let runtimeConfig = null;
-  let configError = null;
-  try {
-    runtimeConfig = configModule.readConfig();
-  } catch (error) {
-    configError = error;
-  }
-  const managedProcessStop = runtimeConfig
-    ? processManager.stopAllManagedProcesses(runtimeConfig)
-      .catch(error => ({ attempted: 0, stopped: 0, orphaned: 1, error: errorMessage(error) }))
-    : Promise.resolve({ attempted: 0, stopped: 0, orphaned: 1, error: errorMessage(configError) });
-  const [managedProcesses, localService, codeIntelligence] = await Promise.all([
-    managedProcessStop,
-    closeHttpServer(ownedServer),
-    codeIntelligenceModule.codeIntelligence.shutdown()
-      .then(() => ({ closed: true }))
-      .catch(error => ({ closed: false, error: errorMessage(error) }))
-  ]);
+  const localService = await closeHttpServer(ownedServer);
+  const shutdownResult = ownedServer?.waitForShutdown
+    ? await ownedServer.waitForShutdown()
+    : null;
+  const runtimeCleanup = normalizeRuntimeCleanup(shutdownResult);
   dashboardSessions.clearDashboardSessions();
   publishActivitySnapshot();
+  const clean = localService.closed !== false && runtimeCleanup.clean !== false;
   return {
-    ok: managedProcesses.orphaned === 0 && localService.closed !== false && codeIntelligence.closed !== false,
+    ok: clean,
     cleanup: {
-      clean: managedProcesses.orphaned === 0 && localService.closed !== false && codeIntelligence.closed !== false,
-      managedProcesses,
+      clean,
+      managedProcesses: runtimeCleanup.managedProcesses,
       localService,
-      codeIntelligence
+      repositoryIntelligence: runtimeCleanup.repositoryIntelligence,
+      ...(runtimeCleanup.errors.length ? { errors: runtimeCleanup.errors } : {}),
+      ...(runtimeCleanup.reported ? {} : { runtimeCleanupReported: false })
     }
+  };
+}
+
+function normalizeRuntimeCleanup(value) {
+  const reported = Boolean(value && typeof value === 'object');
+  const cleanup = reported ? value : {};
+  return {
+    reported,
+    clean: cleanup.clean !== false,
+    managedProcesses: cleanup.managedProcesses || {
+      attempted: 0,
+      stopped: 0,
+      orphaned: 0,
+      delegated: true
+    },
+    repositoryIntelligence: cleanup.repositoryIntelligence || {
+      closed: true,
+      delegated: true
+    },
+    errors: Array.isArray(cleanup.errors) ? cleanup.errors : []
   };
 }
 
@@ -211,26 +232,64 @@ function runtimeLogSnapshot(options = {}) {
   return { ...snapshot, entries: entries.slice(-limit) };
 }
 
-function callNative(method, payload = {}) {
+function callNative(method, payload = {}, options = {}) {
   const id = `native-${++nativeRequestSequence}`;
+  const signal = options.signal;
+  if (signal?.aborted) return Promise.reject(nativeCancelledError(signal.reason));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const timeoutMs = nativeRequestTimeoutMs(method, payload);
+    const finish = () => {
+      const entry = pendingNativeRequests.get(id);
+      if (!entry) return false;
       pendingNativeRequests.delete(id);
+      clearTimeout(entry.timer);
+      if (entry.signal && entry.onAbort) entry.signal.removeEventListener('abort', entry.onAbort);
+      return true;
+    };
+    const onAbort = () => {
+      if (!finish()) return;
+      post({ type: 'native-cancel', id });
+      reject(nativeCancelledError(signal?.reason));
+    };
+    const timer = setTimeout(() => {
+      if (!finish()) return;
+      post({ type: 'native-cancel', id });
       reject(new Error(`Native desktop request timed out: ${method}`));
-    }, 30_000);
+    }, timeoutMs);
     timer.unref?.();
-    pendingNativeRequests.set(id, { resolve, reject, timer });
+    pendingNativeRequests.set(id, { resolve, reject, timer, signal, onAbort });
+    signal?.addEventListener('abort', onAbort, { once: true });
     post({ type: 'native-request', id, method, payload });
   });
 }
 
 function settleNativeRequest(message) {
-  const entry = pendingNativeRequests.get(String(message.id || ''));
+  const id = String(message.id || '');
+  const entry = pendingNativeRequests.get(id);
   if (!entry) return;
-  pendingNativeRequests.delete(String(message.id || ''));
+  pendingNativeRequests.delete(id);
   clearTimeout(entry.timer);
+  if (entry.signal && entry.onAbort) entry.signal.removeEventListener('abort', entry.onAbort);
   if (message.ok) entry.resolve(message.result);
-  else entry.reject(new Error(String(message.error?.message || 'Native desktop request failed.')));
+  else {
+    const error = new Error(String(message.error?.message || 'Native desktop request failed.'));
+    if (message.error?.code) error.code = String(message.error.code);
+    entry.reject(error);
+  }
+}
+
+function nativeRequestTimeoutMs(method, payload) {
+  const requested = Number(payload?.timeoutMs);
+  if (method === 'browserOperation' && Number.isFinite(requested)) {
+    return Math.max(5_000, Math.min(35_000, Math.floor(requested) + 5_000));
+  }
+  return 30_000;
+}
+
+function nativeCancelledError(reason) {
+  const error = new Error(reason instanceof Error ? reason.message : String(reason || 'Browser operation cancelled.'));
+  error.code = 'BROWSER_OPERATION_CANCELLED';
+  return error;
 }
 
 function publishActivitySnapshot() {

@@ -1,13 +1,4 @@
-let currentStatus = {
-  serverRunning: false,
-  tunnelStatus: 'stopped',
-  tunnelId: '',
-  localMcpUrl: '',
-  error: '',
-  localUrl: '',
-  version: '',
-  taskActivity: { state: 'idle', activeCalls: 0, activeTaskCount: 0, tasks: [], workspace: '', tool: '', operation: '', completionKnown: false, startedAt: null, lastTask: null }
-};
+let currentStatus = {};
 let previousAnnouncementKey = '';
 let actionError = '';
 let clockTimer = null;
@@ -49,7 +40,7 @@ function connectionView(status) {
   }
   if (status.serverRunning && status.tunnelStatus === 'degraded') {
     return {
-      key: 'degraded', badge: 'Reconnecting', eyebrow: 'Secure MCP Tunnel interrupted',
+      key: 'degraded', badge: 'Tunnel reconnecting', eyebrow: 'Secure MCP Tunnel interrupted',
       title: 'The tunnel connection was interrupted.',
       description: 'The local Rel.AI service is still running. Rel.AI is retrying the tunnel automatically.'
     };
@@ -68,12 +59,57 @@ function connectionView(status) {
   };
 }
 
+function taskPresentation(status) {
+  const projected = status?.taskActivityPresentation;
+  if (projected && ['attention', 'working', 'waiting', 'idle'].includes(projected.category)) return projected;
+  const activity = status?.taskActivity || {};
+  const activityState = String(activity.state || '').trim().toLowerCase();
+  const activeCalls = Math.max(0, Number(activity.activeCalls || 0));
+  const taskCount = Math.max(0, Number(activity.activeTaskCount || activity.tasks?.length || 0), activeCalls > 0 ? 1 : 0);
+  return {
+    category: activeCalls > 0 || activityState === 'working'
+      ? 'working'
+      : taskCount > 0 || ['waiting', 'settling'].includes(activityState)
+        ? 'waiting'
+        : 'idle',
+    activeCalls,
+    taskCount,
+    actionRequired: false,
+    reason: ''
+  };
+}
+
 function heroView(status) {
   const activity = status.taskActivity || {};
-  const taskCount = Math.max(1, Number(activity.activeTaskCount || activity.tasks?.length || 0));
-  if (activity.state === 'working') return workingHero(activity, taskCount);
-  if (activity.state === 'waiting' || activity.state === 'settling') return waitingHero(activity, taskCount);
+  const presentation = taskPresentation(status);
+  const taskCount = Math.max(1, Number(presentation.taskCount || 0));
+  if (presentation.category === 'attention') return attentionHero(activity, taskCount, presentation.reason);
+  if (presentation.category === 'working') return workingHero(activity, taskCount);
+  if (presentation.category === 'waiting') return waitingHero(activity, taskCount);
   return connectionView(status);
+}
+
+function attentionHero(activity, taskCount, reason = '') {
+  const task = (Array.isArray(activity.tasks) ? activity.tasks : []).find(item => String(item?.status || '').trim().toLowerCase().replaceAll('-', '_') === reason)
+    || activity.tasks?.[0]
+    || null;
+  const title = reason === 'waiting_for_approval'
+    ? 'Approval required.'
+    : reason === 'validation_failed'
+      ? 'Checks need attention.'
+      : 'The current task is blocked.';
+  const description = reason === 'waiting_for_approval'
+    ? 'The task is paused until the required approval is handled in the AI host.'
+    : reason === 'validation_failed'
+      ? 'Review the failed checks, fix the issue, then validate again.'
+      : 'Resolve the blocker before the task can continue.';
+  return {
+    key: 'attention',
+    badge: 'Action required',
+    eyebrow: 'Current task',
+    title: task?.title || title,
+    description: task?.currentActivity || task?.errorSummary || description
+  };
 }
 
 function workingHero(activity, taskCount) {
@@ -163,16 +199,19 @@ function announceStatus(view) {
 
 function renderTaskMeta() {
   const activity = currentStatus.taskActivity || {};
+  const presentation = taskPresentation(currentStatus);
   const element = document.getElementById('taskMeta');
-  const active = activity.state === 'working' || activity.state === 'waiting' || activity.state === 'settling';
+  const active = presentation.category !== 'idle';
   element.hidden = !active;
   if (!active) return;
   const tasks = Array.isArray(activity.tasks) ? activity.tasks : [];
-  const taskCount = Number(activity.activeTaskCount || tasks.length || 1);
-  const activeCalls = Number(activity.activeCalls || 0);
-  const calls = activity.state === 'working'
+  const taskCount = Math.max(1, Number(presentation.taskCount || 0));
+  const activeCalls = Math.max(0, Number(presentation.activeCalls || 0));
+  const calls = presentation.category === 'working'
     ? `${activeCalls} ${pluralize(activeCalls, 'active action')}`
-    : 'no active action';
+    : presentation.category === 'attention'
+      ? 'action required'
+      : 'no active action';
   const workspace = activityLocation(activity, tasks);
   const taskLabel = `${taskCount} ${pluralize(taskCount, 'task')}`;
   element.innerHTML = `<span class="activity-pulse" aria-hidden="true"></span><strong>${escapeText(taskLabel)}</strong><span>${escapeText(workspace)}</span><span>${escapeText(calls)}</span><time id="taskElapsed"></time>`;
@@ -183,7 +222,7 @@ function renderEndpoint(view) {
   const endpoint = document.getElementById('mcpUrl');
   const copyButton = document.getElementById('copyBtn');
   const wrap = document.getElementById('endpointWrap');
-  wrap.classList.toggle('compact', view.key === 'working' || view.key === 'waiting' || view.key === 'settling');
+  wrap.classList.toggle('compact', ['attention', 'working', 'waiting', 'settling'].includes(view.key));
   if (currentStatus.tunnelId) {
     endpoint.textContent = currentStatus.tunnelId;
     endpoint.className = 'endpoint-box';
@@ -288,7 +327,7 @@ function ensureClock() {
   clockTimer = null;
   if (document.visibilityState === 'hidden') return;
   const activity = currentStatus.taskActivity || {};
-  const active = ['working', 'waiting', 'settling'].includes(String(activity.state || ''));
+  const active = taskPresentation(currentStatus).category !== 'idle';
   const lastTask = activity.lastTask;
   if (!active && !lastTask) return;
   renderTemporalText();

@@ -1,3 +1,5 @@
+import { QueryClient } from '@tanstack/react-query';
+
 // Consolidated fetch layer — replaces divergent fetchJson helpers across client files.
 // Dashboard requests authenticate only with the HttpOnly session cookie established
 // by the one-time /dashboard bootstrap. The MCP bearer token never enters renderer JS.
@@ -6,29 +8,32 @@
 // bootstrap, manual/live refresh, workspace mutations, and settings cache
 // invalidation — keep them in sync via this constant, not copied literals.
 export const DASHBOARD_DATA_URL = '/api/dashboard/v10?limit=100';
-const _cache = new Map();
+const QUERY_NAMESPACE = 'relai-dashboard-http';
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { gcTime: 60_000, retry: false, staleTime: 1000 }
+  }
+});
+let _cacheGeneration = 0;
 let _dashboardReloadPromise = null;
 
 
-export function requestDashboardRefresh(options = {}) {
+export function requestDashboardRefresh() {
   invalidateCache();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('relai:dashboard-refresh', {
-      detail: { structural: options.structural === true }
-    }));
-  }
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('relai:dashboard-refresh'));
 }
 
 function cacheKeyFor(url, fetchOpts) {
   const isGet = !fetchOpts.method || fetchOpts.method === 'GET';
   const bypassCache = fetchOpts.cache === 'no-store' || fetchOpts.cache === 'reload';
-  return isGet && !bypassCache ? url : null;
+  return isGet && !bypassCache ? [QUERY_NAMESPACE, url] : null;
 }
 
 function cachedValue(cacheKey) {
-  if (!cacheKey || !_cache.has(cacheKey)) return null;
-  const { ts, val } = _cache.get(cacheKey);
-  return Date.now() - ts < 1000 ? val : null;
+  if (!cacheKey) return null;
+  const state = queryClient.getQueryState(cacheKey);
+  if (!state || Date.now() - Number(state.dataUpdatedAt || 0) >= 1000) return null;
+  return queryClient.getQueryData(cacheKey) || null;
 }
 
 function timeoutFor(timeout) {
@@ -138,6 +143,7 @@ export async function fetchJson(url, opts = {}) {
   const cacheKey = cacheKeyFor(url, fetchOpts);
   const cached = cachedValue(cacheKey);
   if (cached) return cached;
+  const cacheGeneration = _cacheGeneration;
 
   const timeoutMs = timeoutFor(timeout);
   const ctrl = new AbortController();
@@ -151,7 +157,9 @@ export async function fetchJson(url, opts = {}) {
       headers: requestHeaders(fetchOpts)
     });
     const data = normalizeResponseData(res, await parseJsonResponse(res));
-    if (cacheKey && res.ok) _cache.set(cacheKey, { ts: Date.now(), val: data });
+    if (cacheKey && res.ok && cacheGeneration === _cacheGeneration) {
+      queryClient.setQueryData(cacheKey, data);
+    }
     return data;
   } catch (err) {
     return requestError(err, timeoutMs);
@@ -165,6 +173,9 @@ export async function postJson(url, body, opts = {}) {
 }
 
 export function invalidateCache(url) {
-  if (url) _cache.delete(url);
-  else _cache.clear();
+  _cacheGeneration += 1;
+  queryClient.removeQueries({
+    queryKey: url ? [QUERY_NAMESPACE, url] : [QUERY_NAMESPACE],
+    exact: Boolean(url)
+  });
 }

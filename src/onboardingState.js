@@ -1,20 +1,23 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
 import * as connection from "./connectionProfile.js";
 import { readConfig } from "./config.js";
+import { readJsonFile, writeJsonAtomic } from './durableState.ts';
 
 function onboardingPath() {
   return path.join(connection.stateDir(), "onboarding.json");
 }
 
 function readOnboardingState() {
-  try { return JSON.parse(fs.readFileSync(onboardingPath(), "utf8")); }
-  catch { return null; }
+  return readJsonFile(onboardingPath(), {
+    backup: true,
+    fallback: null,
+    mode: 0o600,
+    validate: value => Boolean(value && typeof value === 'object' && !Array.isArray(value))
+  });
 }
 
 function writeOnboardingState(state) {
-  fs.mkdirSync(connection.stateDir(), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(onboardingPath(), `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  writeJsonAtomic(onboardingPath(), state, { backup: true, mode: 0o600, spacing: 2 });
   return state;
 }
 

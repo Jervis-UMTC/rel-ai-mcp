@@ -15,7 +15,8 @@ function detectPackageJsonChecks(root, level, commands) {
     }
     const hasStandardTest = level !== 'quick' && Boolean(scripts.test);
     const testCoversCheck = hasStandardTest && npmScriptInvokes(scripts, 'test', 'check');
-    if (scripts.check && !testCoversCheck) commands.push('npm run check');
+    if (level === 'quick' && scripts['check:quick']) commands.push('npm run check:quick');
+    else if (scripts.check && !testCoversCheck) commands.push('npm run check');
     else if (level === 'quick' && fs.existsSync(path.join(root, 'src', 'tools.js'))) commands.push('node --check src/tools.js');
     if (hasStandardTest) commands.push(canonicalNpmScriptCommand(scripts, 'test'));
     const testCoversBuild = hasStandardTest && npmScriptInvokes(scripts, 'test', 'build');

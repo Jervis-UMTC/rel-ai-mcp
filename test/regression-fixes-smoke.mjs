@@ -42,15 +42,15 @@ function read(rel) {
 
 // Shared ChatGPT guidance owns create and reconnect instructions.
 {
-  const connector = read('src/ui/features/settings/connector.js');
+  const settingsReact = read('src/ui/features/settings/react.js');
   const guidance = read('src/ui/features/settings/connection-guidance.js');
-  assert.match(connector, /createChatGptSetupGuide/);
-  assert.match(connector, /connectionGuideMode/);
-  assert.match(guidance, /Connection set to Tunnel/i);
+  assert.match(settingsReact, /chatGptGuideSteps/);
+  assert.match(settingsReact, /connectionGuideMode/);
+  assert.match(guidance, /Set Connection to Tunnel/i);
   assert.match(guidance, /No authentication/i);
   assert.match(guidance, /chatgpt\.com\/plugins#settings\/Connectors\?create-connector=true/i);
   assert.match(guidance, /Scan Tools/i);
-  assert.match(guidance, /existing Rel\.AI MCP connector instead of creating a duplicate/i);
+  assert.match(guidance, /already exists in that workspace, open it instead of creating a duplicate/i);
 }
 
 // Dashboard tool metadata stays internally consistent; workspace cards do not
@@ -62,7 +62,7 @@ function read(rel) {
   assert.deepEqual(dashboard.config.localRepoBridge.visibleTools, dashboard.tools);
   assert.ok(publicConfigSummary(cfg).localRepoBridge.visibleTools.includes('relai_edit'));
   assert.doesNotMatch(read('src/ui/features/home/index.js'), /visibleToolCount/);
-  assert.doesNotMatch(read('src/ui/features/workspaces/cards.js'), /data\.toolCount|ChatGPT tools/);
+  assert.doesNotMatch(read('src/ui/features/workspaces/react.js'), /data\.toolCount|ChatGPT tools/);
 }
 
 // Audit-fix smoke guards for docs, UI copy, and tunnel process safety.
@@ -89,32 +89,37 @@ function read(rel) {
 }
 
 // Targeted state reads bypass the shared GET cache and collapse overlapping requests.
-// Routine dashboard updates use typed domain deltas, while workspace filters are
-// page-owned Tailwind listboxes instead of native topbar controls.
+// Routine dashboard updates use typed domain deltas, while project filters remain
+// page-owned controls instead of native topbar controls.
 {
   const dashboard = read('public/dashboard.js');
-  const dashboardHtml = read('src/http/dashboard.js');
+  const dashboardHtml = read('src/http/dashboard.ts');
+  const dashboardRuntime = read('src/core/dashboard-runtime.ts');
   const dashboardCss = read('public/dashboard.css');
-  const workspaceMenu = read('src/ui/components/workspace-menu.js');
+  const sessionsReact = read('src/ui/features/sessions/react.js');
   assert.match(dashboard, /invalidateCache\(DASHBOARD_DATA_URL\)/);
   assert.match(dashboard, /fetchJson\(DASHBOARD_DATA_URL, \{ cache: 'no-store' \}\)/);
   assert.match(dashboard, /let _refreshPromise = null/);
   assert.match(dashboard, /finally \{[\s\S]{0,400}_refreshPromise = null;/);
-  assert.match(dashboardHtml, /onToolActivity\(activity =>/);
-  assert.match(dashboardHtml, /sendDomain\('task\.updated', 'task'/);
-  assert.match(dashboardHtml, /mcpConnectionManager\.onChange\(snapshot => sendConnection\(snapshot\)\)/);
-  assert.match(dashboardHtml, /sendDomain\('workspace\.updated', 'workspace'/);
-  assert.match(dashboardHtml, /sendDomain\('process\.updated', 'process'/);
+  assert.match(dashboardRuntime, /onToolActivity\(\(activity: JsonRecord\) => taskEvents\.push\(activity\)\)/);
+  assert.match(dashboardRuntime, /sendDomain\(DASHBOARD_LIVE_EVENTS\.TASK_UPDATED, 'task'/);
+  assert.match(dashboardRuntime, /mcpConnectionManager\.onChange\(\(snapshot: JsonRecord\) => sendConnection\(snapshot\)\)/);
+  assert.match(dashboardRuntime, /sendDomain\(DASHBOARD_LIVE_EVENTS\.WORKSPACE_UPDATED, 'workspace'/);
+  assert.match(dashboardRuntime, /sendDomain\(DASHBOARD_LIVE_EVENTS\.PROCESS_UPDATED, 'process'/);
   assert.doesNotMatch(dashboardHtml, /sendSse\(res, ['"]dashboard['"]|scheduleSnapshot|DASHBOARD_SNAPSHOT_COALESCE_MS|DASHBOARD_SNAPSHOT_MAX_WAIT_MS/);
   assert.doesNotMatch(dashboardHtml, /workspaceScope|refreshBtn|topbar-refresh/);
   assert.match(dashboardCss, /\.workspace-menu-popover/);
   assert.doesNotMatch(dashboardCss, /workspace-scope-control/);
-  assert.match(workspaceMenu, /aria-haspopup="listbox"/);
+  assert.match(sessionsReact, /function ProjectFilter/);
+  assert.match(sessionsReact, /h\('select',[\s\S]{0,300}'aria-label': 'Project filter'/);
   const router = read('src/ui/router.js');
-  assert.match(router, /pageScroller\(\)\.scrollTo\(view\.scrollX, view\.scrollY\)/);
-  assert.match(router, /_container\.setAttribute\('aria-busy', 'true'\)/);
-  assert.match(router, /Promise\.resolve\(result\)\.finally\(\(\) => finishMount/);
-  assert.doesNotMatch(router, /_container\.innerHTML = ''/);
+  const reactMain = read('src/ui/react/main.js');
+  assert.match(router, /window\.dispatchEvent\(new CustomEvent\('relai:route-change'/);
+  assert.match(reactMain, /function RouteOutlet/);
+  assert.match(reactMain, /fallback: h\(DashboardState/);
+  assert.match(reactMain, /document\.getElementById\('pageTitle'\)\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(reactMain, /new CustomEvent\('relai:route-mounted'/);
+  assert.doesNotMatch(router, /\.innerHTML\s*=/);
 }
 
 // Workspace command aliases are legacy state: current manifests are the source of truth.

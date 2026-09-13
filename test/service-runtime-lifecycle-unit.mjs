@@ -22,6 +22,7 @@ try {
   let localStartCalls = 0;
   let localStopCalls = 0;
   let tunnelStopCalls = 0;
+  let doctorArgs = null;
   let dashboardCloseCalls = 0;
   let localStopGate = null;
   let currentStatus = { serverRunning: false, tunnelStatus: 'stopped' };
@@ -69,6 +70,7 @@ try {
     secureTunnelRuntime: {
       snapshot: () => ({ state: currentStatus.tunnelStatus || 'stopped', processOwned: currentStatus.tunnelStatus === 'running' }),
       start: () => tunnelStart.promise,
+      doctor: args => { doctorArgs = args; return { ok: true, result: 'pass' }; },
       async stop() {
         tunnelStopCalls += 1;
         tunnelStart.resolve({ cancelled: true });
@@ -141,6 +143,14 @@ try {
   await racingStop;
   await racingStart;
   assert.equal(localStartCalls, 2, 'the deferred start must run after shutdown completes');
+  const doctor = await runtime.runTunnelDoctor();
+  assert.equal(doctor.ok, true);
+  assert.deepEqual(doctorArgs, {
+    tunnelId: 'tunnel_lifecycle123',
+    port: 4567,
+    localToken: 'local-token',
+    apiKey: 'test-api-key'
+  }, 'tunnel diagnostics must use the active local MCP endpoint and encrypted tunnel credential');
 
   let terminalStatus = { serverRunning: false, tunnelStatus: 'stopped' };
   let terminalListening = false;

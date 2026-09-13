@@ -3,8 +3,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { resolveResourcePath } from './resource-path.js';
+import { createTunnelLogParser } from './tunnel-log-parser.js';
+import { sanitizeDiagnosticValue, sanitizeText } from '../src/diagnostics.js';
+import { assertTunnelLifecycleTransition } from '../src/runtimeLifecycle.js';
 
 const START_TIMEOUT_MS = 30_000;
+const DOCTOR_TIMEOUT_MS = 15_000;
+const DOCTOR_MAX_OUTPUT_BYTES = 128 * 1024;
 const START_POLL_MS = 200;
 const HEALTH_REQUEST_TIMEOUT_MS = 1_500;
 const MONITOR_INTERVAL_MS = 2_000;
@@ -82,12 +87,7 @@ function createSecureTunnelRuntime({
     await fs.promises.rm(healthUrlFile, { force: true });
 
     const args = [
-      'run',
-      '--control-plane.tunnel-id', tunnelId,
-      '--control-plane.api-key', 'env:CONTROL_PLANE_API_KEY',
-      '--mcp.server-url', `url=http://127.0.0.1:${port}/mcp,channel=main`,
-      '--mcp.extra-headers', 'Authorization: env:REL_AI_LOCAL_AUTH_HEADER',
-      '--mcp.discovery-extra-headers', 'Authorization: env:REL_AI_LOCAL_AUTH_HEADER',
+      ...tunnelConnectionArgs('run', tunnelId, port),
       '--health.listen-addr', '127.0.0.1:0',
       '--health.url-file', healthUrlFile,
       '--log.format', 'json',
@@ -292,6 +292,75 @@ function createSecureTunnelRuntime({
     }
   }
 
+  async function doctor(config = {}) {
+    const tunnelId = normalizeTunnelId(config.tunnelId);
+    const apiKey = normalizeRequiredSecret(config.apiKey, 'OpenAI tunnel runtime API key');
+    const localToken = normalizeRequiredSecret(config.localToken, 'Rel.AI local bearer token');
+    const port = normalizePort(config.port);
+    let executable;
+    try {
+      executable = await resolveExecutable();
+      if (!executable) throw new Error('Bundled OpenAI tunnel-client is missing. Fetch and verify vendor/tunnel-client before running diagnostics.');
+      await ensureExecutable(executable);
+    } catch (error) {
+      throw tunnelFailure(TUNNEL_RUNTIME_UNAVAILABLE_CODE, messageOf(error));
+    }
+
+    const args = [
+      ...tunnelConnectionArgs('doctor', tunnelId, port),
+      '--health.listen-addr', '127.0.0.1:0',
+      '--json',
+      '--explain'
+    ];
+    const startedAt = Date.now();
+    let doctorChild;
+    try {
+      const doctorCwd = path.resolve(stateDir);
+      await fs.promises.mkdir(doctorCwd, { recursive: true, mode: 0o700 });
+      doctorChild = spawnImpl(executable, args, {
+        cwd: doctorCwd,
+        env: makeEnvironment({
+          CONTROL_PLANE_API_KEY: apiKey,
+          REL_AI_LOCAL_AUTH_HEADER: `Bearer ${localToken}`
+        }),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+    } catch (error) {
+      throw tunnelFailure(TUNNEL_RUNTIME_UNAVAILABLE_CODE, messageOf(error));
+    }
+
+    const timeoutMs = Math.max(1_000, Math.min(30_000, Number(config.timeoutMs || DOCTOR_TIMEOUT_MS)));
+    const completed = await collectDoctorOutput(doctorChild, {
+      timeoutMs,
+      maxBytes: DOCTOR_MAX_OUTPUT_BYTES,
+      stopProcess
+    });
+    let parsed;
+    try {
+      parsed = JSON.parse(completed.stdout.trim());
+    } catch {
+      const detail = sanitizeText(completed.stderr || completed.stdout, 2_000);
+      throw new Error(`OpenAI tunnel-client doctor returned invalid JSON${detail ? `: ${detail}` : '.'}`);
+    }
+    const sanitized = sanitizeDiagnosticValue(parsed);
+    const checks = Array.isArray(sanitized?.checks) ? sanitized.checks : [];
+    const failedChecks = Array.isArray(sanitized?.failed_checks)
+      ? sanitized.failed_checks.map(value => String(value))
+      : checks.filter(check => String(check?.status || '').toUpperCase() === 'FAIL').map(check => String(check?.id || '')).filter(Boolean);
+    const result = String(sanitized?.result || (failedChecks.length ? 'fail' : 'unknown')).toLowerCase();
+    return {
+      ok: result === 'pass' && completed.exitCode === 0,
+      result,
+      exitCode: completed.exitCode,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      failedChecks,
+      checks,
+      truncated: completed.truncated,
+      rawOutput: sanitizeText([completed.stdout, completed.stderr].filter(Boolean).join('\n'), 64 * 1024)
+    };
+  }
+
   async function stop() {
     generation += 1;
     stopping = true;
@@ -313,11 +382,78 @@ function createSecureTunnelRuntime({
   }
 
   function update(patch) {
-    state = freezeState({ ...state, ...patch });
+    const nextState = patch.state === undefined
+      ? state.state
+      : assertTunnelLifecycleTransition(state.state, patch.state);
+    state = freezeState({ ...state, ...patch, state: nextState });
     onStatus(snapshot());
   }
 
-  return Object.freeze({ start, stop, snapshot });
+  return Object.freeze({ start, doctor, stop, snapshot });
+}
+
+function tunnelConnectionArgs(command, tunnelId, port) {
+  return [
+    command,
+    '--control-plane.tunnel-id', tunnelId,
+    '--control-plane.api-key', 'env:CONTROL_PLANE_API_KEY',
+    '--mcp.server-url', `url=http://127.0.0.1:${port}/mcp,channel=main`,
+    '--mcp.extra-headers', 'Authorization: env:REL_AI_LOCAL_AUTH_HEADER',
+    '--mcp.discovery-extra-headers', 'Authorization: env:REL_AI_LOCAL_AUTH_HEADER'
+  ];
+}
+
+function collectDoctorOutput(child, { timeoutMs, maxBytes, stopProcess }) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    let capturedBytes = 0;
+    let truncated = false;
+    let settled = false;
+    let timer = null;
+    const append = (current, chunk) => {
+      if (capturedBytes >= maxBytes) {
+        truncated = true;
+        return current;
+      }
+      const text = String(chunk ?? '');
+      const remaining = maxBytes - capturedBytes;
+      const bytes = Buffer.byteLength(text, 'utf8');
+      if (bytes <= remaining) {
+        capturedBytes += bytes;
+        return current + text;
+      }
+      truncated = true;
+      const clipped = Buffer.from(text, 'utf8').subarray(0, remaining).toString('utf8');
+      capturedBytes += Buffer.byteLength(clipped, 'utf8');
+      return current + clipped;
+    };
+    child.stdout?.on('data', chunk => { stdout = append(stdout, chunk); });
+    child.stderr?.on('data', chunk => { stderr = append(stderr, chunk); });
+    const finish = callback => {
+      if (settled) return false;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      callback();
+      return true;
+    };
+    child.once('error', error => finish(() => reject(error)));
+    child.once('exit', (code, signal) => finish(() => resolve({
+      exitCode: Number.isInteger(code) ? code : null,
+      signal: signal || null,
+      stdout,
+      stderr,
+      truncated
+    })));
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      void Promise.resolve(stopProcess(child, { graceMs: 500, forceWaitMs: 1_500 })).catch(() => {}).finally(() => {
+        reject(new Error(`OpenAI tunnel-client doctor timed out after ${Math.round(timeoutMs / 1000)} seconds.`));
+      });
+    }, timeoutMs);
+    timer.unref?.();
+  });
 }
 
 async function waitForOperational({ ownedChild, healthUrlFile, fetchImpl, tunnelId, timeoutMs, getFatalFailure, onPhase }) {
@@ -501,232 +637,4 @@ function messageOf(error) {
   return error instanceof Error ? error.message : String(error || 'Unknown tunnel error');
 }
 
-const MAX_BUFFER_CHARS = 256 * 1024;
-const MAX_MESSAGE_CHARS = 1200;
-const MAX_DETAIL_CHARS = 800;
-const DEBUG_MESSAGES = new Set([
-  'provided',
-  'run',
-  'invoking',
-  'onstart hook executing',
-  'onstart hook executed'
-]);
-
-function createTunnelLogParser({ onEntry = () => {}, defaultLevel = 'info', now = () => new Date().toISOString() } = {}) {
-  if (typeof onEntry !== 'function') throw new TypeError('onEntry is required.');
-  let buffer = '';
-
-  function write(chunk) {
-    buffer += String(chunk ?? '');
-    if (buffer.length > MAX_BUFFER_CHARS) {
-      const overflow = buffer.slice(0, buffer.length - MAX_BUFFER_CHARS);
-      buffer = buffer.slice(-MAX_BUFFER_CHARS);
-      emit(overflow);
-    }
-    drain(false);
-  }
-
-  function flush() {
-    drain(true);
-  }
-
-  function drain(final) {
-    let cursor = 0;
-    while (cursor < buffer.length) {
-      while (cursor < buffer.length && /\s/.test(buffer[cursor])) cursor += 1;
-      if (cursor >= buffer.length) break;
-      if (buffer[cursor] === '{') {
-        const end = jsonObjectEnd(buffer, cursor);
-        if (end < 0) break;
-        emit(buffer.slice(cursor, end));
-        cursor = end;
-        continue;
-      }
-      const newline = buffer.indexOf('\n', cursor);
-      const nextJson = buffer.indexOf('{', cursor);
-      const end = newline >= 0 && (nextJson < 0 || newline < nextJson)
-        ? newline + 1
-        : nextJson >= 0
-          ? nextJson
-          : final
-            ? buffer.length
-            : -1;
-      if (end < 0) break;
-      emit(buffer.slice(cursor, end));
-      cursor = end;
-    }
-    buffer = buffer.slice(cursor);
-    if (final && buffer.trim()) {
-      emit(buffer);
-      buffer = '';
-    }
-  }
-
-  function emit(record) {
-    const entry = normalizeTunnelLogRecord(record, { defaultLevel, now });
-    if (entry) onEntry(entry);
-  }
-
-  return Object.freeze({ write, flush });
-}
-
-function jsonObjectEnd(text, start) {
-  let depth = 0;
-  let quoted = false;
-  let escaped = false;
-  for (let index = start; index < text.length; index += 1) {
-    const character = text[index];
-    if (quoted) {
-      if (escaped) escaped = false;
-      else if (character === '\\') escaped = true;
-      else if (character === '"') quoted = false;
-      continue;
-    }
-    if (character === '"') {
-      quoted = true;
-      continue;
-    }
-    if (character === '{') depth += 1;
-    else if (character === '}') {
-      depth -= 1;
-      if (depth === 0) return index + 1;
-    }
-  }
-  return -1;
-}
-
-function normalizeTunnelLogRecord(record, { defaultLevel = 'info', now = () => new Date().toISOString() } = {}) {
-  const raw = String(record || '').trim();
-  if (!raw) return null;
-  let value = null;
-  if (raw.startsWith('{')) {
-    try { value = JSON.parse(raw); } catch {}
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {
-      ts: now(),
-      level: normalizeTunnelLevel(defaultLevel),
-      source: 'openai-tunnel',
-      component: '',
-      code: '',
-      message: sanitizeTunnelText(raw, MAX_MESSAGE_CHARS),
-      details: {}
-    };
-  }
-
-  const message = sanitizeTunnelText(value.msg ?? value.message ?? '', MAX_MESSAGE_CHARS);
-  const component = sanitizeTunnelField(value.component, 80);
-  const error = sanitizeTunnelText(value.error, MAX_DETAIL_CHARS);
-  const statusCode = numericStatus(value.status_code ?? value.statusCode);
-  const classification = classifyTunnelEvent({ message, component, error, statusCode });
-  const details = compactTunnelDetails({
-    httpStatus: statusCode || undefined,
-    retryInMs: finiteTunnelNumber(value.retry_in_ms ?? value.retryInMs),
-    timeoutMs: durationMilliseconds(value.timeout),
-    lastError: error || undefined,
-    tunnelId: value.tunnel_id,
-    clientInstanceId: value.client_instance_id,
-    tunnelRequestId: value.tunnel_request_id,
-    method: value.method,
-    target: value.target,
-    channel: value.channel,
-    transport: value.transport
-  });
-
-  return {
-    ts: normalizeTunnelTimestamp(value.time ?? value.ts, now),
-    level: classification.level || normalizeTunnelLevel(value.level || defaultLevel),
-    source: 'openai-tunnel',
-    component,
-    code: classification.code,
-    message: classification.message || message || error || 'OpenAI tunnel event.',
-    details
-  };
-}
-
-function classifyTunnelEvent({ message, component, error, statusCode }) {
-  const combined = `${message} ${error}`.toLowerCase();
-  if (statusCode === 401 || /\b401\b|unauthori[sz]ed|invalid api key/.test(combined)) {
-    return { level: 'error', code: 'tunnel_authentication_failed', message: 'OpenAI rejected the tunnel runtime API key.' };
-  }
-  if (statusCode === 403 || /\b403\b|forbidden|access denied|permission denied/.test(combined)) {
-    return { level: 'error', code: 'tunnel_access_denied', message: 'OpenAI denied this runtime key access to the tunnel.' };
-  }
-  if (statusCode === 404 && (component === 'controlplane' || /tunnel/.test(combined))) {
-    return { level: 'error', code: 'tunnel_not_found', message: 'OpenAI could not find the configured Secure MCP Tunnel.' };
-  }
-  if (/poll failed|unexpected eof|\bgoaway\b|context deadline exceeded|i\/o timeout|dns|no such host|connection reset|connection refused|network is unreachable/.test(combined)) {
-    return { level: 'warning', code: 'tunnel_connection_interrupted', message: 'Tunnel polling was interrupted. Retrying automatically.' };
-  }
-  if (DEBUG_MESSAGES.has(message.toLowerCase())) return { level: 'debug', code: '', message };
-  return { level: '', code: '', message };
-}
-
-function compactTunnelDetails(value) {
-  const details = {};
-  for (const [key, raw] of Object.entries(value)) {
-    if (raw === undefined || raw === null || raw === '') continue;
-    if (typeof raw === 'number') {
-      if (Number.isFinite(raw)) details[key] = raw;
-      continue;
-    }
-    const sanitized = sanitizeTunnelText(raw, MAX_DETAIL_CHARS);
-    if (sanitized) details[key] = sanitized;
-  }
-  return details;
-}
-
-function sanitizeTunnelText(value, limit = MAX_DETAIL_CHARS) {
-  const redacted = String(value == null ? '' : value)
-    .replace(/Bearer\s+[^\s,;"']+/gi, 'Bearer [redacted]')
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[redacted-api-key]')
-    .replace(/([?&](?:token|bootstrap|code|client_secret|api_key)=)[^&#\s]+/gi, '$1[redacted]')
-    .replace(/(["']?(?:token|secret|password|authorization|api[_-]?key|authtoken|client[_-]?secret)["']?\s*[:=]\s*)["']?[^\s,;"']+["']?/gi, '$1[redacted]');
-  return Array.from(redacted)
-    .filter(character => {
-      const code = character.codePointAt(0);
-      return code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127);
-    })
-    .join('')
-    .slice(0, Math.max(1, limit))
-    .trim();
-}
-
-function sanitizeTunnelField(value, limit) {
-  return sanitizeTunnelText(value, limit).replace(/\s+/g, ' ').trim();
-}
-
-function normalizeTunnelLevel(value) {
-  const level = String(value || '').toLowerCase();
-  if (level === 'error' || level === 'fatal') return 'error';
-  if (level === 'warn' || level === 'warning') return 'warning';
-  if (level === 'debug' || level === 'trace') return 'debug';
-  return 'info';
-}
-
-function normalizeTunnelTimestamp(value, now) {
-  const parsed = Date.parse(String(value || ''));
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : now();
-}
-
-function numericStatus(value) {
-  const status = Number(value);
-  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : 0;
-}
-
-function finiteTunnelNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : undefined;
-}
-
-function durationMilliseconds(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const text = String(value || '').trim();
-  const match = text.match(/^(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m)$/i);
-  if (!match) return undefined;
-  const number = Number(match[1]);
-  const factors = { ns: 1e-6, us: 1e-3, 'µs': 1e-3, ms: 1, s: 1000, m: 60000 };
-  return Math.round(number * factors[match[2].toLowerCase()]);
-}
-
-export { createSecureTunnelRuntime, createTunnelLogParser, normalizeTunnelLogRecord };
+export { createSecureTunnelRuntime };

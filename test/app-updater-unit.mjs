@@ -53,7 +53,7 @@ async function waitFor(condition, message, timeoutMs = 2000) {
   }
 }
 
-function createHarness({ currentVersion = '0.20.7', packaged = true, env = {}, platform = 'win32', manualMacUpdater = null, activeCalls = 0, activeTaskCount = 0, taskState = 'idle', tasks = [], checkFailures = [], downloadFailures = [], currentCompatibility = null, lastCheckAt = 0, fetchImpl = globalThis.fetch, now = () => Date.parse('2026-07-25T00:00:00.000Z'), autoDownloadUpdates = false } = {}) {
+function createHarness({ currentVersion = '0.20.7', packaged = true, env = {}, platform = 'win32', manualMacUpdater = null, activeCalls = 0, activeTaskCount = 0, taskState = 'idle', tasks = [], checkFailures = [], downloadFailures = [], currentCompatibility = null, lastCheckAt = 0, fetchImpl = globalThis.fetch, now = () => Date.parse('2026-07-25T00:00:00.000Z'), autoDownloadUpdates = false, beforeInstallError = null } = {}) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-updater-'));
   roots.push(temp);
   if (lastCheckAt > 0) fs.writeFileSync(path.join(temp, 'update-state.json'), `${JSON.stringify({ lastCheckAt })}\n`);
@@ -63,6 +63,8 @@ function createHarness({ currentVersion = '0.20.7', packaged = true, env = {}, p
   const timers = [];
   const activity = { activeCalls, activeTaskCount, state: taskState, tasks };
   let beforeInstall = 0;
+  let installCommit = 0;
+  let installRecovery = 0;
   const updater = createAppUpdater({
     app: {
       isPackaged: packaged,
@@ -83,7 +85,12 @@ function createHarness({ currentVersion = '0.20.7', packaged = true, env = {}, p
     clearTimer: () => {},
     getTaskActivity: () => ({ ...activity, tasks: [...activity.tasks] }),
     onStatusChange: status => statuses.push(status),
-    onBeforeInstall: () => { beforeInstall += 1; },
+    onBeforeInstall: () => {
+      beforeInstall += 1;
+      if (beforeInstallError) throw beforeInstallError;
+    },
+    onInstallCommit: () => { installCommit += 1; },
+    onInstallFailed: () => { installRecovery += 1; },
     shouldAutoDownload: () => autoDownloadUpdates,
     retryDelay: async () => {},
     onLog: (message, options) => logs.push({ message, options }),
@@ -101,7 +108,12 @@ function createHarness({ currentVersion = '0.20.7', packaged = true, env = {}, p
       UPDATE_INSTALL_BLOCKED: 'update_install_blocked'
     }
   });
-  return { updater, fake, statuses, logs, timers, activity, beforeInstall: () => beforeInstall };
+  return {
+    updater, fake, statuses, logs, timers, activity,
+    beforeInstall: () => beforeInstall,
+    installCommit: () => installCommit,
+    installRecovery: () => installRecovery
+  };
 }
 
 const supportApp = {
@@ -163,6 +175,7 @@ const valid = createHarness();
 assert.equal(valid.updater.start().state, 'idle');
 assert.equal(valid.fake.autoDownload, false);
 assert.equal(valid.fake.autoInstallOnAppQuit, false);
+assert.equal(valid.fake.disableDifferentialDownload, false);
 assert.equal(valid.fake.allowPrerelease, false);
 await waitFor(
   () => valid.timers.some(timer => timer.delay === AUTO_CHECK_DELAY_MS),
@@ -253,6 +266,24 @@ newerVersionDiscovery.updater.start();
 assert.equal((await newerVersionDiscovery.updater.discoverUpdate({ force: true })).ok, true);
 assert.equal(newerVersionDiscovery.fake.checkCalls, 1, 'a newer published release must trigger the full updater verification exactly once');
 assert.ok(newerVersionDiscovery.logs.some(entry => /Newly published release 0\.27\.5 detected/.test(entry.message)));
+
+let resolveStoppedDiscovery;
+const stoppedDiscovery = createHarness({
+  currentVersion: '0.27.4',
+  fetchImpl: () => new Promise(resolve => { resolveStoppedDiscovery = resolve; })
+});
+stoppedDiscovery.updater.start();
+const stoppedDiscoveryPromise = stoppedDiscovery.updater.discoverUpdate({ force: true });
+await waitFor(() => typeof resolveStoppedDiscovery === 'function', 'release discovery must enter the fetch before shutdown');
+stoppedDiscovery.updater.stop();
+resolveStoppedDiscovery({
+  status: 302,
+  headers: { get: name => name.toLowerCase() === 'location' ? 'https://github.com/Kyne0328/rel-ai-chatgpt-web-harness/releases/download/0.27.5/latest.yml' : null }
+});
+const stoppedDiscoveryResult = await stoppedDiscoveryPromise;
+assert.equal(stoppedDiscoveryResult.skipped, true, 'an in-flight release discovery must become inert after updater shutdown');
+assert.equal(stoppedDiscovery.fake.checkCalls, 0, 'shutdown discovery must not restart the full updater check');
+assert.equal(stoppedDiscovery.updater.getStatus().state, 'idle', 'shutdown discovery must not move updater state back to checking');
 
 const failedDiscovery = createHarness({
   currentVersion: '0.27.4',
@@ -348,7 +379,7 @@ assert.equal(valid.updater.getStatus().canInstall, true);
 valid.activity.activeCalls = 2;
 valid.activity.activeTaskCount = 2;
 valid.activity.state = 'working';
-const blocked = valid.updater.installUpdate();
+const blocked = await valid.updater.installUpdate();
 assert.equal(blocked.ok, false);
 assert.equal(blocked.errorCode, 'update_install_blocked');
 assert.match(blocked.error, /2 active Rel\.AI tasks/);
@@ -358,23 +389,37 @@ valid.activity.activeCalls = 0;
 valid.activity.activeTaskCount = 1;
 valid.activity.state = 'waiting';
 valid.activity.tasks = [{ taskId: 'waiting-task', status: 'waiting', activeCalls: 0 }];
-const waitingBlocked = valid.updater.installUpdate();
-assert.equal(waitingBlocked.ok, false, 'an open task must block restart even between connector calls');
+const waitingBlocked = await valid.updater.installUpdate();
+assert.equal(waitingBlocked.ok, false, 'an open task must block install even between connector calls');
 assert.match(waitingBlocked.error, /active Rel\.AI task/);
 assert.equal(valid.updater.getStatus().state, 'downloaded');
 
 valid.activity.activeTaskCount = 0;
 valid.activity.state = 'idle';
 valid.activity.tasks = [];
-const install = valid.updater.installUpdate();
+const install = await valid.updater.installUpdate();
 assert.equal(install.ok, true);
 assert.equal(valid.updater.getStatus().state, 'installing');
 assert.equal(valid.beforeInstall(), 1);
-valid.timers.at(-1).callback();
-await Promise.resolve();
-assert.deepEqual(valid.fake.installCalls, [{ silent: false, forceRunAfter: true }]);
+assert.equal(valid.installCommit(), 1);
+assert.equal(valid.installRecovery(), 0);
+assert.deepEqual(valid.fake.installCalls, [{ silent: true, forceRunAfter: true }]);
 assert.ok(valid.logs.some(entry => entry.options.source === 'updater'));
 assert.ok(valid.statuses.some(status => status.state === 'downloaded' && status.integrityVerified === true));
+
+const preparationFailure = createHarness({ beforeInstallError: new Error('service cleanup failed') });
+preparationFailure.updater.start();
+preparationFailure.fake.emit('update-available', { version: '0.21.0' });
+await preparationFailure.updater.downloadUpdate();
+preparationFailure.fake.emit('update-downloaded', { version: '0.21.0' });
+const failedInstall = await preparationFailure.updater.installUpdate();
+assert.equal(failedInstall.ok, false);
+assert.equal(preparationFailure.updater.getStatus().state, 'downloaded', 'failed preparation must keep the verified update retryable');
+assert.equal(preparationFailure.updater.getStatus().integrityVerified, true);
+assert.match(preparationFailure.updater.getStatus().error, /current version was not replaced/i);
+assert.equal(preparationFailure.installCommit(), 0);
+assert.equal(preparationFailure.installRecovery(), 1);
+assert.deepEqual(preparationFailure.fake.installCalls, [], 'NSIS must not launch after failed in-app preparation');
 
 for (const candidate of ['bad-version', 'v0.21.0', '0.21.0-beta.1', '0.20.7', '0.19.9']) {
   const harness = createHarness();
@@ -437,8 +482,9 @@ assert.equal(mismatch.updater.getStatus().integrityVerified, false);
 assert.equal(mismatch.updater.getStatus().canInstall, false);
 assert.match(mismatch.updater.getStatus().error, /could not verify this update/i);
 assert.ok(mismatch.logs.some(entry => /does not match expected version/i.test(entry.message)), 'download mismatch detail must remain in diagnostics');
-assert.equal(mismatch.updater.installUpdate().ok, false);
-assert.match(mismatch.updater.installUpdate().error, /Download and verify/);
+const mismatchInstall = await mismatch.updater.installUpdate();
+assert.equal(mismatchInstall.ok, false);
+assert.match(mismatchInstall.error, /Download and verify/);
 
 const unsupported = createHarness({ packaged: false });
 assert.equal(unsupported.updater.start().state, 'unsupported');

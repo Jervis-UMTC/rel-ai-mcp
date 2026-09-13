@@ -6,8 +6,8 @@ import { resolveWorkspace } from './config.js';
 import { runProcess } from './process.js';
 import { gitStatusArgs, parseGitStatus } from './repo/gitStatus.js';
 import { collectOptionsFromWorkspace, createCollectionPathFilter, isSecretPath, looksBinary, resolveSafePath } from './safety.js';
-import { readTaskHistorySessionRecord } from './taskHistoryStore.js';
-import { taskOwnedChangedFiles } from './taskIntegrity.js';
+import { readTaskHistorySessionRecord } from './taskHistoryStore.ts';
+import { readTaskIntegrity, taskOwnedChangedFiles } from './taskIntegrity.ts';
 
 const MAX_DIFF_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_CHANGED_FILES = 500;
@@ -77,10 +77,20 @@ function resolveTaskCodeContext(config, taskIdValue) {
     error.code = 'TASK_NOT_FOUND';
     throw error;
   }
-  const baseWorkspace = resolveWorkspace(config, session.workspace);
+  const taskWorkspaceAlias = String(session.workspace || '').trim();
+  let baseWorkspace;
+  try {
+    baseWorkspace = resolveWorkspace(config, taskWorkspaceAlias);
+  } catch (error) {
+    if (error?.code !== 'WORKSPACE_NOT_CONFIGURED') throw error;
+    const workspacePath = String(readTaskIntegrity(config, taskId)?.workspacePath || '').trim();
+    if (!workspacePath) throw error;
+    baseWorkspace = resolveWorkspace(config, workspacePath);
+  }
   return {
     taskId,
     session,
+    taskWorkspaceAlias,
     baseWorkspace,
     executionPath: baseWorkspace.path
   };
@@ -89,7 +99,7 @@ function resolveTaskCodeContext(config, taskIdValue) {
 async function listLiveTaskChanges(config, context) {
   const repositoryChanges = await repositoryChangedEntries(config, context.executionPath);
   const ownedChanges = new Set(
-    taskOwnedChangedFiles(config, context.taskId, context.baseWorkspace.alias)
+    taskOwnedChangedFiles(config, context.taskId, context.taskWorkspaceAlias)
       .map(normalizePath)
       .filter(Boolean)
   );
@@ -172,6 +182,7 @@ async function historicalCommitContext(config, context, taskFiles = historicalTa
 async function inferHistoricalCommit(config, context, taskFiles) {
   if (!taskFiles.length) return '';
   const args = [
+    '-c', 'core.quotepath=false',
     'log',
     `--max-count=${HISTORICAL_LOG_LIMIT}`,
     '--format=__RELAI_COMMIT__%H%x09%cI',
@@ -225,6 +236,7 @@ async function historicalChangedEntries(config, context, commitHeads, taskFiles)
   const byPath = new Map();
   for (const head of commitHeads) {
     const result = await runProcess('git', [
+      '-c', 'core.quotepath=false',
       'diff-tree', '--root', '--no-commit-id', '--name-status', '-r', '-M', head, '--', ...taskFiles
     ], {
       cwd: context.executionPath,
@@ -498,7 +510,12 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+function resolveTaskCodeWorkspacePath(config, taskIdValue) {
+  return resolveTaskCodeContext(config, taskIdValue).executionPath;
+}
+
 export {
   describeTaskCodeWorkspace,
-  readTaskCodeDiff
+  readTaskCodeDiff,
+  resolveTaskCodeWorkspacePath
 };

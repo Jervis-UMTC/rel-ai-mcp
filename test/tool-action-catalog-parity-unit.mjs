@@ -118,10 +118,6 @@ function sampleArgs(entry) {
     case 'relai_inspect:trace': args.symbol = 'target'; break;
     case 'relai_inspect:related': args.query = 'target'; break;
     case 'relai_inspect:impact': args.paths = ['src/index.js']; break;
-    case 'relai_skill:create':
-    case 'relai_skill:edit': Object.assign(args, { name: 'catalog-skill', content: 'skill content' }); break;
-    case 'relai_skill:patch': Object.assign(args, { name: 'catalog-skill', oldText: 'old', newText: 'new' }); break;
-    case 'relai_skill:delete': args.name = 'catalog-skill'; break;
     case 'relai_exec:default': args.command = 'node --version'; break;
     case 'relai_process:start': Object.assign(args, { command: 'node server.js', kind: 'service', purpose: 'Catalog parity.' }); break;
     case 'relai_process:read':
@@ -137,6 +133,24 @@ function sampleArgs(entry) {
     case 'relai_ui:stop': args.sessionId = 'ui_abcdefghijklmnopqrst'; break;
     case 'relai_ui:interact': Object.assign(args, { sessionId: 'ui_abcdefghijklmnopqrst', interaction: 'click', target: { by: 'text', value: 'Save' } }); break;
     case 'relai_ui:viewport': Object.assign(args, { sessionId: 'ui_abcdefghijklmnopqrst', width: 1280, height: 720 }); break;
+    case 'relai_browser:start': args.url = 'http://192.168.1.20/app'; break;
+    case 'relai_browser:status': break;
+    case 'relai_browser:tabs':
+    case 'relai_browser:open_tab':
+    case 'relai_browser:snapshot':
+    case 'relai_browser:screenshot':
+    case 'relai_browser:stop': args.sessionId = 'browser_abcdefghijklmnopqrst'; break;
+    case 'relai_browser:close_tab': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', tabId: 'tab_abcdefghijklmnopqrst' }); break;
+    case 'relai_browser:navigate': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', url: 'https://intranet.example.test/page' }); break;
+    case 'relai_browser:interact': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', interaction: 'click', target: { by: 'text', value: 'Save' } }); break;
+    case 'relai_browser:upload': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', path: 'artifact.pdf', target: { by: 'label', value: 'Upload' } }); break;
+    case 'relai_browser:download': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', path: 'downloads/report.pdf', interaction: 'click', target: { by: 'text', value: 'Download' } }); break;
+    case 'relai_desktop:open_path':
+    case 'relai_desktop:reveal_path': Object.assign(args, { workspace: 'repo', path: 'README.md' }); break;
+    case 'relai_desktop:open_uri': Object.assign(args, { workspace: 'repo', uri: 'https://example.com' }); break;
+    case 'relai_desktop:launch_application': Object.assign(args, { workspace: 'repo', application: 'notepad.exe' }); break;
+    case 'relai_desktop:clipboard_read': args.workspace = 'repo'; break;
+    case 'relai_desktop:clipboard_write': Object.assign(args, { workspace: 'repo', text: 'hello' }); break;
     case 'relai_computer:move':
     case 'relai_computer:click':
     case 'relai_computer:double_click':
@@ -146,6 +160,11 @@ function sampleArgs(entry) {
     case 'relai_computer:type': args.text = 'hello'; break;
     case 'relai_computer:key': args.key = 'enter'; break;
     case 'relai_computer:hotkey': args.keys = ['ctrl', 's']; break;
+    case 'relai_computer:activate': Object.assign(args, { semanticObservationId: 'uia_fixture', targetId: 'e1' }); break;
+    case 'relai_computer:batch': args.actions = [{ action: 'move', x: 10, y: 20 }]; break;
+    case 'relai_computer:stop': break;
+    case 'relai_computer:approve_app':
+    case 'relai_computer:revoke_app': args.app = 'example-app'; break;
     case 'relai_validate:http': args.route = '/health'; break;
     case 'relai_changes:restore': args.paths = ['README.md']; break;
     case 'relai_changes:reset': break;
@@ -153,5 +172,6 @@ function sampleArgs(entry) {
     case 'relai_changes:tidy_run': args.planId = 'tidy_abcdefghijklmnopqrst'; break;
     case 'relai_publish:commit': args.message = 'Catalog commit'; break;
   }
+  if (entry.publicTool === 'relai_computer' && entry.required?.includes('app') && !args.app) args.app = 'example-app';
   return args;
 }

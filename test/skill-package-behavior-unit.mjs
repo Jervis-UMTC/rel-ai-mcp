@@ -14,22 +14,23 @@ assert.deepEqual(validation.skills, expected);
 const workflow = read('skills/rel-ai-workflow/SKILL.md');
 assert.match(descriptionOf(workflow), /inspect.*read.*edit.*test.*build.*debug.*validate.*review.*publish/i);
 assert.match(descriptionOf(workflow), /Do not use.*no repository or local runtime access/i);
-assert.match(workflow, /action: "begin"` exactly once/);
-assert.match(workflow, /Tests, builds, linters, source checks, and release gates are one-shot commands/);
+assert.match(workflow, /durable `work_id` is optional/i);
+assert.match(workflow, /ownership, recovery, task-scoped review\/publication, or durable history materially helps/i);
+assert.match(workflow, /One-shot tests, builds, linters, source checks, and release gates belong in `relai_exec` or `relai_validate`/);
 assert.match(workflow, /relai:\/\/server\/tool-surface/);
 assert.match(workflow, /shortest sufficient path/i);
-assert.match(workflow, /only work-session owner/i);
+assert.match(workflow, /Reuse an active work session instead of opening another/i);
 assert.match(workflow, /invoking every specialist.*anti-pattern/i);
 assert.match(workflow, /continue through ordinary task boundaries/i);
 assert.match(workflow, /update.*checkbox/i);
-assert.match(workflow, /runtime policy remains authoritative/i);
 assert.match(workflow, /\[references\/workflows\.md\]\(references\/workflows\.md\)/);
 assert.match(workflow, /\[references\/safety\.md\]\(references\/safety\.md\).*destructive or approval-gated/i);
 
 const planning = read('skills/rel-ai-planning/SKILL.md');
 assert.match(descriptionOf(planning), /Do not use for small localized changes/i);
-assert.match(planning, /Reuse the active `work_id`/);
-assert.match(planning, /Do not call `relai_work` with `action: "begin"`/);
+assert.match(planning, /Reuse an active `work_id`/);
+assert.match(planning, /Planning itself does not require a work session/);
+assert.match(planning, /open one only when persistent ownership, recovery, or task-scoped execution will materially help/i);
 assert.match(planning, /Do not trigger for small localized changes/);
 assert.match(planning, /explicit completion conditions/);
 assert.match(planning, /cumulative consolidation/i);
@@ -37,8 +38,8 @@ assert.match(planning, /hand execution back to `rel-ai-workflow`/i);
 
 for (const name of expected.filter(name => name !== 'rel-ai-workflow')) {
   const source = read(`skills/${name}/SKILL.md`);
-  assert.match(source, /Reuse the active `work_id`/);
-  assert.match(source, /Do not call `relai_work` with `action: "begin"`/);
+  assert.match(source, /Reuse an active `work_id`/);
+  assert.doesNotMatch(source, /(?:must|always) (?:open|create|start).*work session/i);
 }
 
 const investigation = read('skills/rel-ai-investigation/SKILL.md');
@@ -64,7 +65,7 @@ assert.match(verification, /inspect existing coverage/i);
 assert.match(verification, /extend, consolidate, or replace/i);
 assert.match(verification, /distinct meaningful concern/i);
 assert.match(verification, /local UI.*state\/runtime.*protocol\/API.*packaging\/platform\/release/i);
-assert.match(verification, /Do not complete.*work session independently/i);
+assert.match(verification, /If a durable work session exists, its owner may close it; verification itself does not require or own a session/i);
 
 const processSkill = read('skills/rel-ai-dev-process/SKILL.md');
 assert.match(descriptionOf(processSkill), /must stay alive across later steps/i);

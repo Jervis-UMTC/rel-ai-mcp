@@ -187,6 +187,11 @@ function finishGeneration(db, generationId, status, processedFiles = 0, errorMes
   if (status === 'committed') setMeta(db, 'current_generation', generationId);
 }
 
+function failBuildingGenerations(db, errorMessage) {
+  return Number(db.prepare("UPDATE generations SET status='failed', completed_at=?, error_message=? WHERE status='building'")
+    .run(new Date().toISOString(), String(errorMessage || 'Repository Intelligence worker terminated before generation finalization.')).changes || 0);
+}
+
 function currentGeneration(db) {
   const id = metaNumber(db, 'current_generation', 0);
   if (!id) return null;
@@ -612,6 +617,7 @@ export {
   currentGeneration,
   deleteIndexedPath,
   ensureIndexSchema,
+  failBuildingGenerations,
   finishGeneration,
   indexProducerVersion,
   indexStats,

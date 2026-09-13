@@ -85,7 +85,7 @@ assert.equal(isToolSurfaceSourcePath('src/tools/status.js'), true, 'tool status 
 assert.equal(isToolSurfaceSourcePath('src/tools/task.js'), true, 'tool task handlers are tool-surface changes');
 assert.equal(isToolSurfaceSourcePath('src/tools/cancellation.js'), true, 'tool cancellation behavior is a tool-surface change');
 assert.equal(isToolSurfaceSourcePath('src/tools/new-contract-module.js'), true, 'new tool-system files must inherit tool-surface risk without allowlist maintenance');
-assert.equal(isToolSurfaceSourcePath('src/http/mcpTransport.js'), false, 'non-tool-system paths keep their own risk classification');
+assert.equal(isToolSurfaceSourcePath('src/http/mcpTransport.ts'), false, 'non-tool-system paths keep their own risk classification');
 
 const publicSchemaByName = new Map(gatewayManifest.tools.map(tool => [tool.name, tool.inputSchema]));
 const resolvedKeys = [];
@@ -182,6 +182,14 @@ assert.equal(approvalRequirement('relai_publish', { action: 'commit', work_id: '
 assert.equal(approvalRequirement('relai_publish', { action: 'commit', message: 'Taskless explicit commit', paths: ['src/selected.js'] }), null, 'taskless explicit local commits must execute without dashboard approval');
 assert.equal(approvalRequirement('relai_publish', { action: 'commit', work_id: 'work_contract', message: 'Contract commit', addAll: true }), null, 'explicit addAll local commits must not require dashboard approval');
 assert.equal(approvalRequirement('relai_publish', { action: 'commit', message: 'Sensitive commit', paths: ['secret.txt'], sensitiveAuthorization: { operation: 'commit', paths: ['secret.txt'], reason: 'User explicitly requested this local commit.' } }), null, 'sensitiveAuthorization is the explicit local commit authorization and must not trigger a second approval layer');
+for (const entry of catalog.filter(item => item.publicTool === 'relai_browser')) {
+  assert.equal(entry.capability, 'process:manage', `relai_browser:${entry.action} must use structured process/browser authorization rather than raw computer control`);
+  assert.equal(entry.behavior.taskScope, 'optional', `relai_browser:${entry.action} must allow principal/workspace/session authority without synthetic durable work`);
+  assert.equal(approvalRequirement('relai_browser', sampleArgs(entry)), null, `relai_browser:${entry.action} must use principal authorization without a duplicate MCP approval flow`);
+}
+for (const entry of catalog.filter(item => item.publicTool === 'relai_desktop')) {
+  assert.equal(approvalRequirement('relai_desktop', sampleArgs(entry)), null, `relai_desktop:${entry.action} must use principal authorization without a duplicate MCP approval flow`);
+}
 for (const entry of catalog.filter(item => item.publicTool === 'relai_computer')) {
   assert.equal(approvalRequirement('relai_computer', sampleArgs(entry)), null, `relai_computer:${entry.action} must never enter the MCP approval flow`);
 }
@@ -202,10 +210,6 @@ function sampleArgs(entry) {
     case 'relai_inspect:trace': args.symbol = 'target'; break;
     case 'relai_inspect:related': args.query = 'target'; break;
     case 'relai_inspect:impact': args.paths = ['src/index.js']; break;
-    case 'relai_skill:create':
-    case 'relai_skill:edit': Object.assign(args, { name: 'contract-skill', content: 'skill content' }); break;
-    case 'relai_skill:patch': Object.assign(args, { name: 'contract-skill', oldText: 'old', newText: 'new' }); break;
-    case 'relai_skill:delete': args.name = 'contract-skill'; break;
     case 'relai_exec:default': args.command = 'node --version'; break;
     case 'relai_process:start': Object.assign(args, { command: 'node server.js', kind: 'service', purpose: 'Contract parity.' }); break;
     case 'relai_process:read':
@@ -221,6 +225,24 @@ function sampleArgs(entry) {
     case 'relai_ui:stop': args.sessionId = 'ui_abcdefghijklmnopqrst'; break;
     case 'relai_ui:interact': Object.assign(args, { sessionId: 'ui_abcdefghijklmnopqrst', interaction: 'click', target: { by: 'text', value: 'Save' } }); break;
     case 'relai_ui:viewport': Object.assign(args, { sessionId: 'ui_abcdefghijklmnopqrst', width: 1280, height: 720 }); break;
+    case 'relai_browser:start': args.url = 'http://192.168.1.20/app'; break;
+    case 'relai_browser:status': break;
+    case 'relai_browser:tabs':
+    case 'relai_browser:open_tab':
+    case 'relai_browser:snapshot':
+    case 'relai_browser:screenshot':
+    case 'relai_browser:stop': args.sessionId = 'browser_abcdefghijklmnopqrst'; break;
+    case 'relai_browser:close_tab': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', tabId: 'tab_abcdefghijklmnopqrst' }); break;
+    case 'relai_browser:navigate': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', url: 'https://intranet.example.test/page' }); break;
+    case 'relai_browser:interact': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', interaction: 'click', target: { by: 'text', value: 'Save' } }); break;
+    case 'relai_browser:upload': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', path: 'artifact.pdf', target: { by: 'label', value: 'Upload' } }); break;
+    case 'relai_browser:download': Object.assign(args, { sessionId: 'browser_abcdefghijklmnopqrst', path: 'downloads/report.pdf', interaction: 'click', target: { by: 'text', value: 'Download' } }); break;
+    case 'relai_desktop:open_path':
+    case 'relai_desktop:reveal_path': Object.assign(args, { workspace: 'fixture', path: 'README.md' }); break;
+    case 'relai_desktop:open_uri': Object.assign(args, { workspace: 'fixture', uri: 'https://example.com' }); break;
+    case 'relai_desktop:launch_application': Object.assign(args, { workspace: 'fixture', application: 'notepad.exe' }); break;
+    case 'relai_desktop:clipboard_read': args.workspace = 'fixture'; break;
+    case 'relai_desktop:clipboard_write': Object.assign(args, { workspace: 'fixture', text: 'hello' }); break;
     case 'relai_computer:move':
     case 'relai_computer:click':
     case 'relai_computer:double_click':
@@ -230,6 +252,11 @@ function sampleArgs(entry) {
     case 'relai_computer:type': args.text = 'hello'; break;
     case 'relai_computer:key': args.key = 'enter'; break;
     case 'relai_computer:hotkey': args.keys = ['ctrl', 's']; break;
+    case 'relai_computer:activate': Object.assign(args, { semanticObservationId: 'uia_fixture', targetId: 'e1' }); break;
+    case 'relai_computer:batch': args.actions = [{ action: 'move', x: 10, y: 20 }]; break;
+    case 'relai_computer:stop': break;
+    case 'relai_computer:approve_app':
+    case 'relai_computer:revoke_app': args.app = 'example-app'; break;
     case 'relai_validate:http': args.route = '/health'; break;
     case 'relai_changes:restore': args.paths = ['README.md']; break;
     case 'relai_changes:reset': break;
@@ -237,5 +264,6 @@ function sampleArgs(entry) {
     case 'relai_changes:tidy_run': args.planId = 'tidy_abcdefghijklmnopqrst'; break;
     case 'relai_publish:commit': args.message = 'Contract commit'; break;
   }
+  if (entry.publicTool === 'relai_computer' && entry.required?.includes('app') && !args.app) args.app = 'example-app';
   return args;
 }

@@ -17,6 +17,7 @@ function createDashboardWindowManager(deps) {
     platform = process.platform,
     iconPath = '',
     canHideOnClose = () => true,
+    canUserClose = () => true,
     isQuitting = () => false,
     onError = () => {},
     onLoadError = onError
@@ -91,8 +92,8 @@ function createDashboardWindowManager(deps) {
     dashboardWindow = new BrowserWindow({
       ...bounds,
       ...chrome.windowOptions,
-      minWidth: DASHBOARD_WINDOW_LIMITS.minWidth,
-      minHeight: DASHBOARD_WINDOW_LIMITS.minHeight,
+      minWidth: Math.min(DASHBOARD_WINDOW_LIMITS.minWidth, bounds.width),
+      minHeight: Math.min(DASHBOARD_WINDOW_LIMITS.minHeight, bounds.height),
       show: false,
       autoHideMenuBar: true,
       title: 'Rel.AI MCP Dashboard',
@@ -104,7 +105,6 @@ function createDashboardWindowManager(deps) {
     });
     secureSession(dashboardWindow.webContents.session);
     configureNavigation(dashboardWindow);
-    dashboardWindow.once('ready-to-show', () => { dashboardWindow?.show(); sendWindowState(); });
     dashboardWindow.on('resize', schedulePersist);
     dashboardWindow.on('move', schedulePersist);
     bindWindowState(dashboardWindow);
@@ -112,6 +112,11 @@ function createDashboardWindowManager(deps) {
       void persistBounds();
       if (isQuitting()) return;
       event.preventDefault();
+      if (!canUserClose()) {
+        dashboardWindow.show();
+        dashboardWindow.focus();
+        return;
+      }
       if (!canHideOnClose()) {
         app.quit();
         return;

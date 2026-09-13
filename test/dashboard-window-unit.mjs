@@ -123,6 +123,31 @@ const dependencies = {
 };
 
 try {
+  let releaseDashboardLoad;
+  let markDashboardLoadStarted;
+  const dashboardLoadStarted = new Promise(resolve => { markDashboardLoadStarted = resolve; });
+  const dashboardLoadGate = new Promise(resolve => { releaseDashboardLoad = resolve; });
+  class DelayedDashboardWindow extends FakeWindow {
+    async loadURL(url) {
+      this.loadCount += 1;
+      this.webContents.url = url;
+      markDashboardLoadStarted();
+      await dashboardLoadGate;
+    }
+  }
+  const delayedManager = createDashboardWindowManager({ ...dependencies, BrowserWindow: DelayedDashboardWindow });
+  const delayedOpen = delayedManager.open();
+  await dashboardLoadStarted;
+  const delayedWindow = delayedManager.getWindow();
+  assert.ok(delayedWindow, 'dashboard window must exist while its authenticated navigation is loading');
+  delayedWindow.emit('ready-to-show');
+  assert.notEqual(delayedWindow.shown, true, 'ready-to-show must not expose the dark bootstrap canvas before dashboard navigation completes');
+  releaseDashboardLoad();
+  await delayedOpen;
+  assert.equal(delayedWindow.shown, true, 'dashboard must become visible after its authenticated navigation finishes');
+  await delayedManager.close();
+  windows.length = 0;
+
   const manager = createDashboardWindowManager(dependencies);
   const [win, concurrentWin] = await Promise.all([manager.open(), manager.open()]);
   assert.equal(concurrentWin, win, 'concurrent dashboard opens must share one BrowserWindow');
@@ -133,6 +158,8 @@ try {
   );
   assert.ok(win.options.width < workArea.width * 0.9, 'default dashboard width must be visibly windowed');
   assert.ok(win.options.height < workArea.height * 0.9, 'default dashboard height must be visibly windowed');
+  assert.equal(win.options.minWidth, Math.min(900, win.options.width));
+  assert.equal(win.options.minHeight, Math.min(600, win.options.height));
   assert.equal(win.options.frame, false);
   assert.equal(win.options.thickFrame, true);
   assert.equal(win.options.titleBarStyle, 'hidden');
@@ -269,6 +296,22 @@ try {
     height: 610
   }, 'a stale debounced bounds write must not overwrite the final close-time window state');
 
+  let updateCloseAllowed = false;
+  const updateLockedManager = createDashboardWindowManager({
+    ...dependencies,
+    canUserClose: () => updateCloseAllowed
+  });
+  const updateLockedWindow = await updateLockedManager.open();
+  updateLockedWindow.focused = false;
+  assert.deepEqual(updateLockedManager.requestClose(), { ok: true });
+  assert.equal(updateLockedWindow.hidden, false, 'update preparation must keep the dashboard visible when the user tries to close it');
+  assert.equal(updateLockedWindow.focused, true, 'a blocked update-time close must return focus to the update UI');
+  assert.equal(updateLockedWindow.destroyed, false, 'user close must not terminate the dashboard during update preparation');
+  updateCloseAllowed = true;
+  assert.deepEqual(updateLockedManager.requestClose(), { ok: true });
+  assert.equal(updateLockedWindow.hidden, true, 'the updater-controlled final handoff may close the normal dashboard path');
+  await updateLockedManager.close();
+
   const linuxManager = createDashboardWindowManager({ ...dependencies, platform: 'linux', canHideOnClose: () => true });
   const linuxWindow = await linuxManager.open();
   assert.deepEqual(linuxManager.requestClose(), { ok: true });
@@ -296,8 +339,28 @@ try {
     'legacy unversioned near-fullscreen bounds must migrate to the smaller default'
   );
 
+  const shortWorkArea = { x: 0, y: 0, width: 1280, height: 560 };
+  const shortScreen = {
+    getPrimaryDisplay: () => ({ workArea: shortWorkArea }),
+    getDisplayMatching: () => ({ workArea: shortWorkArea })
+  };
+  const shortSandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-dashboard-window-short-'));
+  const shortManager = createDashboardWindowManager({
+    ...dependencies,
+    app: { ...dependencies.app, getPath(name) { assert.equal(name, 'userData'); return shortSandbox; } },
+    screen: shortScreen
+  });
+  const shortWindow = await shortManager.open();
+  assert.ok(shortWindow.options.height <= shortWorkArea.height - 32, 'short displays must keep the dashboard inside the usable work area');
+  assert.ok(shortWindow.options.y >= shortWorkArea.y + 16, 'short displays must keep the dashboard below the top work-area inset');
+  assert.ok(shortWindow.options.y + shortWindow.options.height <= shortWorkArea.y + shortWorkArea.height - 16, 'short displays must keep the dashboard above the taskbar work-area edge');
+  assert.equal(shortWindow.options.minHeight, shortWindow.options.height, 'Electron minHeight must not exceed the constrained window height');
+  await shortManager.close();
+  fs.rmSync(shortSandbox, { recursive: true, force: true });
+
   assert.equal(validateConnection({ url: 'http://localhost:3333/dashboard' }).pathname, '/dashboard');
   assert.equal(normalizeRouteHash('settings/connection'), '#settings/connection');
+  assert.equal(normalizeRouteHash('#tasks?workspace=repo&task=task-1'), '#tasks?workspace=repo&task=task-1');
   assert.throws(() => normalizeRouteHash('settings/connection?token=secret'), /Invalid dashboard route/);
   assert.throws(() => validateConnection({ url: 'https://example.com/dashboard' }), /local loopback/);
   assert.throws(() => validateConnection({ url: 'http://127.0.0.1:3333/health' }), /local loopback/);

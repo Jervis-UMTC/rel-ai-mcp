@@ -35,8 +35,8 @@ function createShutdownCoordinator(options = {}) {
       await runStepAsync(removeRuntimeMarker, 'runtime marker', errors);
 
       const serviceClean = serviceResult?.cleanup?.clean !== false;
+      if (errors.length === 0 && serviceClean) await runStepAsync(markCleanShutdown, 'lifecycle marker', errors);
       const clean = errors.length === 0 && serviceClean;
-      if (clean) await runStepAsync(markCleanShutdown, 'lifecycle marker', errors);
       prepared = true;
 
       for (const item of errors) {
@@ -63,7 +63,12 @@ function createShutdownCoordinator(options = {}) {
     return prepared;
   }
 
-  return { prepare, isPrepared };
+  function reset() {
+    shutdownPromise = null;
+    prepared = false;
+  }
+
+  return { prepare, isPrepared, reset };
 }
 
 function closeHttpServer(server, options = {}) {

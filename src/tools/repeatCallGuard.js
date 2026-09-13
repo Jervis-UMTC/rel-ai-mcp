@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import { LRUCache } from 'lru-cache';
 import { stableJson } from '../workflow/contracts.js';
 import { OPERATION_IDS as OP } from './operationIds.js';
 
@@ -12,7 +13,7 @@ const POLLING_OPERATIONS = new Set([
   OP.PROCESS_LIST,
   OP.VALIDATE_HTTP
 ]);
-const taskState = new Map();
+const taskState = new LRUCache({ max: MAX_TRACKED_TASKS });
 
 function observeRepeatCall({ connector = false, taskId = '', operationName = '', args = {}, mutationGeneration = 0 } = {}) {
   const id = String(taskId || '').trim();
@@ -25,9 +26,7 @@ function observeRepeatCall({ connector = false, taskId = '', operationName = '',
   const count = previous?.fingerprint === fingerprint && previous?.mutationGeneration === generation
     ? previous.count + 1
     : 1;
-  taskState.delete(id);
   taskState.set(id, { fingerprint, mutationGeneration: generation, count });
-  trimTaskState();
 
   if (count < REPEAT_WARNING_THRESHOLD) return null;
   return {
@@ -45,10 +44,6 @@ function repeatFingerprint(operationName, args) {
   return crypto.createHash('sha256')
     .update(`${operationName}\n${stableJson(publicArgs)}`)
     .digest('base64url');
-}
-
-function trimTaskState() {
-  while (taskState.size > MAX_TRACKED_TASKS) taskState.delete(taskState.keys().next().value);
 }
 
 function resetRepeatCallGuard() {

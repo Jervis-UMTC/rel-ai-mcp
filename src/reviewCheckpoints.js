@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { readJsonFile, writeJsonAtomic } from './durableState.js';
+import { readJsonFile, writeJsonAtomic } from './durableState.ts';
 import { getStateDir } from './statePaths.js';
 
 const REVIEW_SCHEMA_VERSION = 1;

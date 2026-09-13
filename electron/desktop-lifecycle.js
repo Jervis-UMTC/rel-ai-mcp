@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { importResourceModule } from './resource-path.js';
 
-const { readJsonFileAsync, writeJsonAtomicAsync } = await importResourceModule('src/durableState.js');
+const { readJsonFileAsync, writeJsonAtomicAsync } = await importResourceModule('src/durableState.ts');
 
 function createDesktopLifecycleManager(options = {}) {
   const {
@@ -52,13 +52,15 @@ function createDesktopLifecycleManager(options = {}) {
       firstLaunch: !previous.version,
       updated,
       connectorRefreshRequired,
-      recoveredAfterUncleanShutdown: previous.running === true,
+      recoveredAfterUncleanShutdown: previous.running === true && !updated,
       launchCount: Math.max(0, Number(previous.launchCount || 0)) + 1,
       launchedAt: now(),
       lastCleanExitAt: cleanText(previous.lastCleanExitAt, 80),
       launchAtLogin,
       keepAwake: previous.keepAwake === true,
       keepRunningOnClose: previous.keepRunningOnClose !== false,
+      pulseEnabled: previous.pulseEnabled !== false,
+      themePreference: normalizeThemePreference(previous.themePreference),
       autoDownloadUpdates: previous.autoDownloadUpdates === true,
       reducedBackgroundWork: previous.reducedBackgroundWork === true,
       openedAtLogin: argv.includes('--background') || launchAtLogin.openedAtLogin === true
@@ -125,8 +127,11 @@ function createDesktopLifecycleManager(options = {}) {
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
       return { ok: false, errorCode: codes.state, error: 'App preferences are invalid.', status: snapshot() };
     }
-    const fields = ['keepRunningOnClose', 'autoDownloadUpdates', 'reducedBackgroundWork'];
-    const previous = Object.fromEntries(fields.map(field => [field, status[field] === true]));
+    const fields = ['keepRunningOnClose', 'pulseEnabled', 'autoDownloadUpdates', 'reducedBackgroundWork'];
+    const previous = {
+      ...Object.fromEntries(fields.map(field => [field, status[field] === true])),
+      themePreference: normalizeThemePreference(status.themePreference)
+    };
     const next = { ...previous };
     let changed = false;
     for (const field of fields) {
@@ -136,6 +141,13 @@ function createDesktopLifecycleManager(options = {}) {
       }
       next[field] = patch[field];
       if (next[field] !== previous[field]) changed = true;
+    }
+    if (Object.hasOwn(patch, 'themePreference')) {
+      if (!['system', 'dark', 'light'].includes(patch.themePreference)) {
+        return { ok: false, errorCode: codes.state, error: 'Theme preference is invalid.', status: snapshot() };
+      }
+      next.themePreference = patch.themePreference;
+      if (next.themePreference !== previous.themePreference) changed = true;
     }
     if (!changed) return { ok: true, status: snapshot() };
     status = { ...status, ...next };
@@ -198,6 +210,8 @@ function createDesktopLifecycleManager(options = {}) {
       lastCleanExitAt,
       keepAwake: status.keepAwake === true,
       keepRunningOnClose: status.keepRunningOnClose !== false,
+      pulseEnabled: status.pulseEnabled !== false,
+      themePreference: normalizeThemePreference(status.themePreference),
       autoDownloadUpdates: status.autoDownloadUpdates === true,
       reducedBackgroundWork: status.reducedBackgroundWork === true
     };
@@ -240,6 +254,8 @@ function baseStatus(app, support, connectorRevision = '') {
     launchAtLogin: { supported: support.supported, enabled: false, openedAtLogin: false, reason: support.reason },
     keepAwake: false,
     keepRunningOnClose: true,
+    pulseEnabled: true,
+    themePreference: 'system',
     autoDownloadUpdates: false,
     reducedBackgroundWork: false,
     openedAtLogin: false
@@ -290,6 +306,10 @@ function safeUserDataPath(app) {
 
 function cleanVersion(value) {
   return cleanText(value, 80).replace(/^v/i, '');
+}
+
+function normalizeThemePreference(value) {
+  return ['dark', 'light'].includes(value) ? value : 'system';
 }
 
 function cleanText(value, limit) {

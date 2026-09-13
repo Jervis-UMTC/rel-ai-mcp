@@ -54,12 +54,7 @@ assert.ok(report.summary.blocking >= 1);
 assert.ok(report.findings.some(item => item.code === 'workspace_unavailable'));
 assert.ok(report.findings.every(item => item.action?.href));
 assert.equal(report.findings.some(item => item.code === 'public_endpoint_failed'), false, 'a connected Secure MCP Tunnel must not be reported unavailable');
-assert.equal(report.maintenance.history.blocked, true);
-assert.equal(report.maintenance.runtimeLogs.available, true);
-assert.equal(report.maintenance.all.available, true);
-assert.equal(report.maintenance.all.blocked, true);
-assert.equal(report.maintenance.all.confirmation, 'RESET');
-assert.match(report.maintenance.history.reason, /2 Rel\.AI tasks are still active/);
+assert.equal('maintenance' in report, false, 'Troubleshooting reports must not advertise duplicate data-clearing controls owned by App settings');
 assert.equal(report.logs.runtime.persistent, true);
 assert.equal(report.logs.runtime.revision, 7, 'diagnostic snapshots must preserve the runtime-log revision for live replay ordering');
 assert.equal(report.logs.runtime.persistence.healthy, true);
@@ -122,16 +117,6 @@ assert.ok(runtimePersistenceFinding, 'persistent app-log write failures must bec
 assert.match(runtimePersistenceFinding.title, /App log/);
 assert.match(runtimePersistenceFinding.recommendation, /disk space|write permissions/i);
 assert.doesNotMatch(JSON.stringify(runtimePersistenceFinding), new RegExp(secret), 'app-log persistence errors must be sanitized');
-
-const waitingTaskReport = buildDiagnosticReport({
-  connection: { tunnelId: 'tunnel_12345678', token: 'set' },
-  connectionState: { publicEndpoint: { status: 'available' }, error: null },
-  runtimeLogs: { available: true, persistent: true, entries: [] },
-  activeCalls: 0,
-  activeTaskCount: 1
-});
-assert.equal(waitingTaskReport.maintenance.history.blocked, true, 'waiting logical tasks must protect task history between tool calls');
-assert.match(waitingTaskReport.maintenance.history.reason, /1 Rel\.AI task is still active/);
 
 const disconnected = buildDiagnosticReport({
   connection: { tunnelId: '', token: 'set' },

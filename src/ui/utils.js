@@ -1,5 +1,3 @@
-import { statusDotClass } from './status-tone.js';
-
 // Shared UI helpers for dashboard sections.
 export function esc(v) {
   return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({
@@ -10,16 +8,6 @@ export function esc(v) {
     "'": '&#39;'
   })[c]);
 }
-
-export function statusClass(v) {
-  return statusDotClass(v);
-}
-
-export function metricHtml(label, value, meta, type) {
-  return `<div class="metric ${esc(type || '')}"><div class="metric-label">${esc(label)}</div><div class="metric-value">${esc(value)}</div><div class="metric-meta">${esc(meta || '')}</div></div>`;
-}
-
-
 
 export function timeAgo(v, now = Date.now()) {
   const ts = typeof v === 'number' && Number.isFinite(v) ? v : Date.parse(String(v || ''));

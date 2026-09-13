@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { importResourceModule } from './resource-path.js';
 import { compareVersions, isStableVersion } from './update-version.js';
 
-const { readJsonFile, readJsonFileAsync, writeJsonAtomicAsync } = await importResourceModule('src/durableState.js');
+const { readJsonFile, readJsonFileAsync, writeJsonAtomicAsync } = await importResourceModule('src/durableState.ts');
 
 const DEFAULT_SUPPORT_POLICY_URL = 'https://raw.githubusercontent.com/Kyne0328/rel-ai-chatgpt-web-harness/main/.github/relai/support-policy.json';
 const SUPPORT_POLICY_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;

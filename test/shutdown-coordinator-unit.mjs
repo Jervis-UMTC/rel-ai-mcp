@@ -25,6 +25,12 @@ assert.equal(result.clean, true);
 assert.equal(coordinator.isPrepared(), true);
 assert.deepEqual(calls, ['updater', 'activity', 'windows', 'service', 'telemetry', 'marker', 'clean', 'logs']);
 
+coordinator.reset();
+assert.equal(coordinator.isPrepared(), false, 'a reset coordinator must allow a fresh shutdown preparation after a failed update');
+const retried = await coordinator.prepare('update-retry');
+assert.equal(retried.clean, true);
+assert.equal(coordinator.isPrepared(), true);
+
 const failureCalls = [];
 const failed = createShutdownCoordinator({
   stopService: async () => ({ cleanup: { clean: false } }),
@@ -34,6 +40,15 @@ const failed = createShutdownCoordinator({
 const failedResult = await failed.prepare('quit');
 assert.equal(failedResult.clean, false);
 assert.deepEqual(failureCalls, ['marker'], 'uncertain cleanup must preserve the unclean-shutdown marker');
+
+const lifecycleMarkerFailure = createShutdownCoordinator({
+  stopService: async () => ({ cleanup: { clean: true } }),
+  markCleanShutdown: () => { throw new Error('marker write failed'); }
+});
+const lifecycleMarkerResult = await lifecycleMarkerFailure.prepare('quit');
+assert.equal(lifecycleMarkerResult.ok, false);
+assert.equal(lifecycleMarkerResult.clean, false, 'a failed clean-shutdown marker must not be reported as a clean exit');
+assert.equal(lifecycleMarkerResult.errors[0]?.step, 'lifecycle marker');
 
 const forcedClose = deferred();
 const shutdownGate = deferred();

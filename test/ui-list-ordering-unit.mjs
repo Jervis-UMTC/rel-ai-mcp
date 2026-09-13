@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 
 import { orderToolsForCatalog } from '../src/ui/features/tools/index.js';
 import { orderChangedFiles, orderSessionsForDisplay } from '../src/ui/features/sessions/index.js';
+import { mergeSessionEvents } from '../src/ui/features/sessions/model.js';
 import { timeAgo } from '../src/ui/utils.js';
 import { orderWorkspacesAlphabetically } from '../src/ui/components/workspace-menu.js';
 import { orderOverviewTasks, orderOverviewWorkspaces } from '../src/ui/features/home/index.js';
-import { sortEntries as orderActivityEntries } from '../src/ui/features/activity/index.js';
+import { sortActivityEntries as orderActivityEntries } from '../src/ui/features/activity/model.js';
 
 import { cautionSummary } from "../src/productUx.js";
 
@@ -62,6 +63,37 @@ assert.deepEqual(orderSessionsForDisplay([
   { id: 'inactive', status: 'inactive', inactiveAt: '2026-07-25T12:04:00.000Z', endedAt: '2026-07-25T11:00:00.000Z' }
 ]).map(session => session.id), ['cancelled', 'inactive', 'completed'], 'inactive rows must sort by the same inactivity timestamp shown in the list even if stale terminal timestamps remain');
 assert.equal(timeAgo(Date.parse('2026-07-25T12:00:00.000Z'), Date.parse('2026-07-25T12:05:00.000Z')), '5m ago', 'relative time must support numeric epoch timestamps used by historical task records');
+
+const mergedSessionEvents = mergeSessionEvents([
+  {
+    eventId: 'operation-1',
+    operationId: 'operation-1',
+    timestamp: '2026-07-25T12:00:00.000Z',
+    tool: { name: 'relai_exec', invocationId: 'operation-1' },
+    status: 'running',
+    summary: 'Running command.'
+  }
+], [
+  {
+    id: 'operation-1',
+    operationId: 'operation-1',
+    ts: '2026-07-25T12:00:01.000Z',
+    tool: 'relai_exec',
+    status: 'succeeded',
+    summary: 'Command completed.'
+  },
+  {
+    id: 'operation-2',
+    operationId: 'operation-2',
+    ts: '2026-07-25T12:00:02.000Z',
+    tool: 'relai_exec',
+    status: 'succeeded',
+    summary: 'Second command completed.'
+  }
+]);
+assert.equal(mergedSessionEvents.length, 2, 'live audit projections must update an existing operation instead of duplicating it');
+assert.equal(mergedSessionEvents.find(event => event.operationId === 'operation-1')?.status, 'succeeded');
+assert.equal(mergedSessionEvents.find(event => event.operationId === 'operation-1')?.summary, 'Command completed.');
 assert.deepEqual(orderOverviewTasks(sessions).map(session => session.id), ['newer', 'older', 'invalid']);
 assert.deepEqual(orderActivityEntries([
   { id: 'older', ts: '2026-07-25T10:00:00.000Z' },

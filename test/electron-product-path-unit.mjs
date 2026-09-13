@@ -69,10 +69,9 @@ for (const outcome of [
 const publicCopyFiles = [
   'electron/renderer/wizard.html',
   'electron/renderer/wizard.js',
-  'src/ui/features/settings/connector.js',
-  'src/ui/features/settings/desktop-connection.js',
+  'src/ui/features/settings/react.js',
   'src/ui/features/settings/connection-guidance.js',
-  'src/ui/features/settings/diagnostics.js',
+  'src/ui/features/settings/diagnostics-react.js',
   'src/ui/api.js',
   'src/desktopUxContracts.js'
 ];

@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { listSessions, readSession, resetTaskHistoryCaches, writeSession } from '../src/taskHistoryStorage.js';
-import { stateDatabasePath, withStateDatabase } from '../src/stateDatabase.js';
+import { listRecentSessionEvents, listSessionSummaries, listSessions, readSession, resetTaskHistoryCaches, writeSession } from '../src/taskHistoryStorage.ts';
+import { stateDatabasePath, withStateDatabase } from '../src/stateDatabase.ts';
 
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-history-storage-'));
 const directory = path.join(stateDir, 'sessions');
@@ -37,6 +37,57 @@ try {
   assert.equal(completed?.progress?.mode, 'complete');
   assert.equal(completed?.progress?.percentage, 100);
   assert.equal(completed?.resultSummary, 'Completed work.');
+
+  const summaryId = 'summary-task';
+  writeSession(directory, {
+    id: summaryId,
+    workspace: 'repo',
+    status: 'completed',
+    summary: 'Summary remains available.',
+    backgroundOperation: { status: 'running', signature: 'detail-signature' },
+    currentOperations: [{ operationId: 'op-1', status: 'running' }],
+    workflowEvidence: Array.from({ length: 40 }, (_, index) => ({ kind: 'check', marker: `large-detail-${index}`, detail: 'e'.repeat(1000) })),
+    events: Array.from({ length: 50 }, (_, index) => ({
+      eventId: `summary-${index}`,
+      tool: index % 2 ? 'edit' : 'read',
+      timestamp: new Date(Date.parse('2026-08-01T00:00:00.000Z') + index * 1000).toISOString(),
+      summary: `Event ${index} ${'x'.repeat(1000)}`
+    }))
+  });
+  const summary = listSessionSummaries(directory, 10).find(session => session.id === summaryId);
+  const fullSummary = readSession(directory, summaryId);
+  assert.equal(summary?.summary, 'Summary remains available.');
+  assert.deepEqual(summary?.events, [], 'summary reads must not materialize multi-event history payloads');
+  assert.equal(summary?.workflowEvidence, undefined, 'summary reads must omit dedicated detail-only workflow evidence');
+  assert.equal(summary?.backgroundOperation?.status, 'running', 'summary reads must preserve task-state fields used by dashboard projections');
+  assert.equal(summary?.currentOperations?.length, 1, 'summary reads must preserve current operation state');
+  assert.equal(fullSummary?.events?.length, 50, 'full task detail must remain available through the canonical record');
+  assert.ok(JSON.stringify(summary).length * 4 < JSON.stringify(fullSummary).length,
+    'summary reads must materially reduce the task-history payload instead of only hiding fields after parsing');
+  const recentEvents = listRecentSessionEvents(directory, 2);
+  assert.deepEqual(recentEvents.map(event => event.eventId), ['summary-49', 'summary-48'],
+    'recent-event reads must retain the newest task activity without materializing every task payload');
+  assert.equal(recentEvents[0]?.workspace, 'repo');
+  assert.equal(recentEvents[0]?.taskId, summaryId);
+  assert.equal(recentEvents[0]?.sessionId, summaryId);
+
+  const corruptId = 'corrupt-summary-row';
+  withStateDatabase(config, db => {
+    db.prepare('INSERT INTO task_history(id,updated_at_ms,payload) VALUES(?,?,?)').run(corruptId, Date.now() + 10_000, '{not-json');
+  }, { transaction: true });
+  assert.doesNotThrow(() => listRecentSessionEvents(directory, 10), 'recent-event reads must ignore malformed task-history rows');
+  assert.doesNotThrow(() => listSessionSummaries(directory, 10), 'summary reads must preserve corrupt-record quarantine behavior');
+  const corruptCount = withStateDatabase(config, db => db.prepare('SELECT COUNT(*) AS count FROM task_history WHERE id=?').get(corruptId).count);
+  assert.equal(Number(corruptCount), 0, 'invalid task-history rows must still be removed by summary reads');
+
+  const singleEventId = 'single-event-summary';
+  writeSession(directory, {
+    id: singleEventId,
+    status: 'inactive',
+    events: [{ eventId: 'single-begin', tool: 'work.begin', timestamp: '2026-08-01T00:00:00.000Z' }]
+  });
+  assert.equal(listSessionSummaries(directory, 10).find(session => session.id === singleEventId)?.events?.[0]?.tool, 'work.begin',
+    'summary reads must retain a lone begin event so stale-noise reconciliation keeps its existing behavior');
 
   const legacyStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-history-legacy-'));
   try {

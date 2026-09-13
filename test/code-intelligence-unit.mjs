@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { relaiCodeInspect, isTestPath } from "../src/bridge/codeIntelligence.js";
-import { codeIntelligence } from '../src/codeIntelligence/service.js';
 import { planEdit } from '../src/executionPlanner.js';
 import { repositoryIntelligence } from '../src/repository/intelligence/service.js';
 
@@ -44,6 +43,7 @@ try {
 
   const symbol = await relaiCodeInspect(workspace, {}, { action: 'symbol', symbol: 'add' });
   assert.equal(symbol.ok, true);
+  assert.equal(symbol.intelligence.primary, 'relai-native');
   assert.equal(symbol.index.mode, 'persistent-tree-sitter-sqlite');
   assert.equal(symbol.index.freshness, 'current');
   assert.equal(symbol.index.cacheHit, false);
@@ -72,12 +72,14 @@ try {
 
   const references = await relaiCodeInspect(workspace, {}, { action: 'references', symbol: 'add' });
   assert.equal(references.index.cacheHit, false, 'structural edits must invalidate the repository index before the next query');
+  assert.equal(references.intelligence.primary, 'relai-native', 'symbol references are graph-owned and must not start an overlapping LSP resolution');
   assert.ok(references.items.some(item => item.path === 'src/service.js' && item.classification === 'call'));
   assert.ok(references.items.some(item => item.path === 'test/math.test.js' && item.test === true));
   assert.ok(references.items.some(item => item.path === 'test/check.mjs' && item.test === true));
 
   const impact = await relaiCodeInspect(workspace, {}, { action: 'impact', symbol: 'add', maxDepth: 3 });
   assert.deepEqual(impact.seeds, ['src/math.js']);
+  assert.equal(impact.intelligence.primary, 'relai-native', 'impact analysis is graph-owned');
   assert.ok(impact.impactedPaths.some(item => item.path === 'src/service.js' && item.reason === 'imports:src/math.js'));
   assert.ok(impact.impactedPaths.some(item => item.path === 'src/index.js' && item.depth === 2));
   assert.ok(impact.affectedTests.includes('test/math.test.js'));
@@ -111,7 +113,6 @@ try {
 
   console.log('Code intelligence symbol, relationship, diagnostics, and freshness tests passed.');
 } finally {
-  await codeIntelligence.shutdown().catch(() => {});
   await repositoryIntelligence.shutdown().catch(() => {});
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

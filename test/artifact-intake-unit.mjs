@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -62,6 +63,76 @@ try {
   assert.equal(throughEdit.bytes, 5);
   assert.deepEqual([...fs.readFileSync(path.join(repo, 'public', 'via-edit.bin'))], [1, 2, 3, 4, 5]);
 
+  const largeBytes = Buffer.alloc((2 * 1024 * 1024) + 37, 0xa5);
+  const largeFile = {
+    ...file,
+    file_id: 'file_large_123',
+    file_name: 'large.bin',
+    size: largeBytes.length
+  };
+  globalThis.fetch = async () => new Response(largeBytes, {
+    status: 200,
+    headers: { 'content-length': String(largeBytes.length), 'content-type': 'application/octet-stream' }
+  });
+  const largeImported = await importNativeArtifact(workspace, config, { file: largeFile, path: 'public/large.bin' });
+  assert.equal(largeImported.bytes, largeBytes.length, 'multi-megabyte native artifact import must preserve the complete byte count');
+  assert.equal(largeImported.sha256, crypto.createHash('sha256').update(largeBytes).digest('hex'), 'large binary import must preserve the exact content hash');
+  assert.deepEqual(fs.readFileSync(path.join(repo, 'public', 'large.bin')), largeBytes, 'large binary import must preserve exact bytes');
+
+  let traversalFetchCalls = 0;
+  globalThis.fetch = async () => {
+    traversalFetchCalls += 1;
+    throw new Error('unexpected traversal fetch');
+  };
+  await assert.rejects(
+    () => importNativeArtifact(workspace, config, { file, path: '../escape.bin' }),
+    'artifact import must reject path traversal before network IO'
+  );
+  assert.equal(traversalFetchCalls, 0, 'path traversal rejection must happen before downloading the artifact');
+  assert.equal(fs.existsSync(path.join(root, 'escape.bin')), false);
+
+  const cancelController = new AbortController();
+  let transferSignal;
+  globalThis.fetch = async (_url, init = {}) => {
+    transferSignal = init.signal;
+    let sent = false;
+    return new Response(new ReadableStream({
+      start(controller) {
+        init.signal?.addEventListener('abort', () => controller.error(init.signal.reason), { once: true });
+      },
+      pull(controller) {
+        if (!sent) {
+          sent = true;
+          controller.enqueue(new Uint8Array([9, 8, 7, 6]));
+          return;
+        }
+        cancelController.abort(new Error('artifact import cancelled by test'));
+      }
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream' }
+    });
+  };
+  await assert.rejects(
+    () => planEdit(workspace, config, {
+      path: 'public/cancelled.bin',
+      file: {
+        download_url: file.download_url,
+        file_id: 'file_cancel_123',
+        file_name: 'cancelled.bin',
+        mime_type: file.mime_type
+      }
+    }, { signal: cancelController.signal }),
+    /artifact import cancelled by test/,
+    'request cancellation must stop a native artifact import'
+  );
+  assert.equal(transferSignal?.aborted, true, 'artifact fetch must receive the combined request cancellation signal');
+  assert.equal(fs.existsSync(path.join(repo, 'public', 'cancelled.bin')), false, 'cancelled artifact imports must remove partial files');
+
+  globalThis.fetch = async () => new Response(new Uint8Array([1, 2, 3, 4, 5]), {
+    status: 200,
+    headers: { 'content-length': '5', 'content-type': 'application/octet-stream' }
+  });
   await assert.rejects(
     () => importNativeArtifact(workspace, config, { file, path: 'public/asset.bin' }),
     /already exists/i,

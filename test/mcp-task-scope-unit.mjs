@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { getMcpAccess } from "../src/http/mcp.js";
+import { getMcpAccess } from "../src/http/mcp.ts";
 import * as serverExports from "../src/server.js";
 import * as toolExports from "../src/tools.js";
 import { connectorInstructions } from "../src/mcpServer.js";
@@ -14,6 +14,8 @@ for (const name of ['workspaceList', 'workspaceInspect', 'workspaceTree', 'works
 }
 const instructions = connectorInstructions({ workspaces: { repo: { path: '/repo' } } });
 assert.match(instructions, /work_id is optional durable attribution/i);
+assert.match(instructions, /substantial\/multi-step mutation starts relai_work begin; carry work_id/i);
+assert.match(instructions, /isolated reads\/inspection\/small one-shots omit it for workspace\/resource work/i);
 assert.match(instructions, /never infer one/i);
 assert.match(instructions, /path\/resource ownership/i);
 assert.match(instructions, /stale-write\/collision protection/i);

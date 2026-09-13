@@ -7,6 +7,8 @@ function createSetupWindowManager(deps) {
   const { BrowserWindow, iconPath = '', preloadPath, rendererRoot, runtimeLogs, isQuitting, recoveryWindowManager } = deps;
   let window = null;
   let recoveryMode = false;
+  let updateMode = false;
+  let updateVersions = { previousVersion: '', currentVersion: '' };
   let returnToFallback = false;
 
   function create(options = {}) {
@@ -16,8 +18,18 @@ function createSetupWindowManager(deps) {
       return window;
     }
     recoveryMode = options.recovery === true;
+    updateMode = recoveryMode ? false : options.update === true;
+    updateVersions = {
+      previousVersion: sanitizeVersion(options.previousVersion),
+      currentVersion: sanitizeVersion(options.currentVersion)
+    };
     returnToFallback = recoveryMode;
-    const rendererUrl = localRendererUrl('wizard.html', recoveryMode ? { recovery: '1' } : {});
+    const query = recoveryMode
+      ? { recovery: '1' }
+      : updateMode
+        ? { update: '1', previousVersion: updateVersions.previousVersion, currentVersion: updateVersions.currentVersion }
+        : {};
+    const rendererUrl = localRendererUrl('wizard.html', query);
     window = new BrowserWindow({
       width: WINDOW_SIZE_LIMITS.wizard.minWidth,
       height: 620,
@@ -28,7 +40,7 @@ function createSetupWindowManager(deps) {
       useContentSize: true,
       webPreferences: localWindowWebPreferences(preloadPath, 'relai-setup', 'application'),
       backgroundColor: STARTUP_BACKGROUND_COLOR,
-      title: recoveryMode ? 'Rel.AI MCP - Connection Recovery' : 'Rel.AI MCP - Setup',
+      title: recoveryMode ? 'Rel.AI MCP - Connection Recovery' : updateMode ? 'Rel.AI MCP - Update' : 'Rel.AI MCP - Setup',
       icon: iconPath || undefined,
       autoHideMenuBar: true
     });
@@ -55,6 +67,8 @@ function createSetupWindowManager(deps) {
     const shouldReturn = returnToFallback;
     window = null;
     recoveryMode = false;
+    updateMode = false;
+    updateVersions = { previousVersion: '', currentVersion: '' };
     returnToFallback = false;
     if (shouldReturn && !isQuitting()) recoveryWindowManager.show();
   }
@@ -63,7 +77,15 @@ function createSetupWindowManager(deps) {
     return window && !window.isDestroyed() ? window : null;
   }
 
-  return { create, close, getWindow };
+  function isUpdateMode() {
+    return updateMode === true && getWindow() !== null;
+  }
+
+  return { create, close, getWindow, isUpdateMode };
+}
+
+function sanitizeVersion(value) {
+  return String(value || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
 }
 
 function formatError(error) {

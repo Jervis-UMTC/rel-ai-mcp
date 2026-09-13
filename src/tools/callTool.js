@@ -2,32 +2,41 @@ import { safeLogAudit } from '../audit.js';
 import { createValidationFingerprint } from '../bridge/validationPlan.js';
 import { readConfig, resolveWorkspace, resolveWorkspaceInput } from '../config.js';
 import { principalFingerprint, principalForContext } from '../mcp/principal.js';
-import { assertAuthorizedToolCall } from '../mcp/authorizationPolicy.js';
+import { assertAuthorizedToolCall, authorizedWorkspaceAliases } from '../mcp/authorizationPolicy.js';
 import { clearSessionPolicy } from '../policyResolver.js';
-import { readTaskIntegrity } from '../taskIntegrity.js';
-import { bindTaskHistoryActivityPersistence, recordWorkflowEvidence } from '../taskHistoryStore.js';
+import { readTaskIntegrity } from '../taskIntegrity.ts';
+import { bindTaskHistoryActivityPersistence, recordWorkflowEvidence } from '../taskHistoryStore.ts';
 import { buildToolActivityDetails } from '../taskObservability.js';
 import { beginConnectorToolCall, normalizeTaskId, onToolActivity, taskError } from '../toolActivity.js';
 import { serializeConnectorResult } from './connector.js';
 import { enhanceToolError } from './errors.js';
 import { executeToolCall } from './execution.js';
 import { repositoryIntelligence } from '../repository/intelligence/service.js';
-import { codeIntelligence } from '../codeIntelligence/service.js';
 import { describeToolOperation } from './operation.js';
 import { resolveExecutableToolCall, validateExecutableOperationInput } from './runtimeRegistry.js';
 import { getToolNames, isToolCallable } from './schema.js';
 import { applyCautionAudit, buildExtraAudit, invalidateSessionCacheForCall } from './session.js';
 import { assertKnownTask, assertTaskWorkspaceOwnership, findReusableTask, isTerminalTaskReference, taskAuditContext, withTaskIdentity } from './task.js';
 import { deterministicActionId } from '../workflow/contracts.js';
-import { recordLocalToolOutcome } from '../localAnalytics.js';
+import { classifyTaskIntent } from '../workflow/intent.js';
+import { recordLocalTaskCompletion, recordLocalToolOutcome } from '../localAnalytics.js';
 import { buildWorkflowEvidenceReceipt } from '../workflow/evidence.js';
 import { invalidateRepositoryTopology } from '../workflow/topology.js';
 import { OPERATION_IDS as OP } from './operationIds.js';
 import { observeRepeatCall } from './repeatCallGuard.js';
+import {
+  measurePerformancePhaseSync,
+  performanceBreakdownSnapshot,
+  withPerformanceBreakdownIfAbsent
+} from '../performanceObservability.js';
 
 bindTaskHistoryActivityPersistence(onToolActivity, readConfig);
 
 async function callTool(name, args = {}, context = {}) {
+  return withPerformanceBreakdownIfAbsent(() => callToolObserved(name, args, context));
+}
+
+async function callToolObserved(name, args = {}, context = {}) {
   const config = readConfig();
   const started = Date.now();
   const connector = Boolean(context?.publicHttpOnly);
@@ -42,6 +51,8 @@ async function callTool(name, args = {}, context = {}) {
   let analyticsFailureCode = '';
   let sessionStart;
   let resolvedAction = '';
+  let effectivePrincipal = null;
+  let completedTaskAnalytics = null;
   try {
     if (!isToolCallable(name, config)) {
       throw new Error(`Unknown tool '${name}'. Available tools: ${getToolNames(config).join(', ')}. Removed direct operation names are not callable; restart or reconnect if discovery is stale.`);
@@ -55,7 +66,7 @@ async function callTool(name, args = {}, context = {}) {
     const taskScope = definition?.behavior?.taskScope || 'required';
     const taskScoped = taskScope === 'required';
     const taskAware = taskScoped || taskScope === 'optional';
-    const effectivePrincipal = principalForContext(context, connector);
+    effectivePrincipal = principalForContext(context, connector);
     requestedTaskId = normalizeTaskId(effectiveArgs?.work_id);
     if (taskScoped && !requestedTaskId) {
       throw taskError('TASK_ID_REQUIRED', `${name} requires the work_id returned by relai_work action begin.`);
@@ -64,13 +75,23 @@ async function callTool(name, args = {}, context = {}) {
       knownTask = assertKnownTask(config, requestedTaskId, '', operationName, effectivePrincipal, effectiveArgs);
       if (knownTask && taskAware && !String(effectiveArgs?.workspace || '').trim()) effectiveArgs = { ...effectiveArgs, workspace: knownTask.workspace };
     }
-    workspaceResolution = resolveConfiguredWorkspaceArgument(config, effectiveArgs?.workspace);
-    if (workspaceResolution?.alias) effectiveArgs = { ...effectiveArgs, workspace: workspaceResolution.alias };
     assertAuthorizedToolCall({
       principal: effectivePrincipal,
       operationName,
-      workspace: workspaceResolution?.alias || effectiveArgs?.workspace || knownTask?.workspace || ''
+      workspace: ''
     });
+    const workspaceRequired = Array.isArray(definition?.inputSchema?.required)
+      && definition.inputSchema.required.includes('workspace');
+    workspaceResolution = resolveConfiguredWorkspaceArgument(config, effectiveArgs?.workspace, { required: workspaceRequired });
+    if (workspaceResolution?.alias) effectiveArgs = { ...effectiveArgs, workspace: workspaceResolution.alias };
+    const authorizedWorkspace = workspaceResolution?.alias || effectiveArgs?.workspace || knownTask?.workspace || '';
+    if (authorizedWorkspace) {
+      assertAuthorizedToolCall({
+        principal: effectivePrincipal,
+        operationName,
+        workspace: authorizedWorkspace
+      });
+    }
     if (operationName === OP.WORK_BEGIN) {
       const reusableTask = findReusableTask(
         config,
@@ -213,22 +234,37 @@ async function callTool(name, args = {}, context = {}) {
         { persist: true }
       );
     }
+    if (
+      valueOk
+      && value?.completionKnown === true
+      && value?.duplicate !== true
+      && (operationName === OP.WORK_FINISH || operationName === OP.VALIDATE_CHECKS)
+    ) {
+      completedTaskAnalytics = {
+        workspace: workspaceResolution?.alias || effectiveArgs?.workspace || knownTask?.workspace || '',
+        taskIntent: knownTask?.intent || requestTaskContext?.session?.intent || 'auto'
+      };
+    }
     const responseValue = connector && resolved.compact
-      ? serializeConnectorResult({
+      ? measurePerformancePhaseSync('serialization', () => serializeConnectorResult({
         publicName: name,
         action: resolved.action,
         operationName,
         value,
         args: effectiveArgs || {},
         workId
-      })
+      }))
       : withTaskIdentity(value, workId);
     const responseWithRepeatWarning = repeatCall && responseValue && typeof responseValue === 'object'
       ? { ...responseValue, warning: repeatCall.warning }
       : responseValue;
     return ok(responseWithRepeatWarning);
   } catch (error) {
-    const enhanced = enhanceToolError(operationName, error);
+    const enhanced = restrictWorkspaceRecoveryErrorAliases(
+      enhanceToolError(operationName, error),
+      effectivePrincipal,
+      connector
+    );
     analyticsFailureCode = String(enhanced.code || '');
     activityResult = {
       ok: false,
@@ -283,12 +319,17 @@ async function callTool(name, args = {}, context = {}) {
       tool: name,
       operationName,
       workspace: workspaceResolution?.alias || knownTask?.workspace || '',
+      taskIntent: knownTask?.intent || (operationName === OP.WORK_BEGIN ? classifyTaskIntent(effectiveArgs?.objective) : 'untracked'),
       ok: activityResult.ok === true,
       durationMs: Date.now() - started,
+      timings: performanceBreakdownSnapshot(),
       errorCode: analyticsFailureCode,
       errorMessage: activityResult.error || ''
     });
     finishActivity?.(activityResult);
+    if (activityResult.ok === true && completedTaskAnalytics) {
+      recordLocalTaskCompletion(config, completedTaskAnalytics);
+    }
   }
 }
 
@@ -348,12 +389,30 @@ function workflowCommandId(operationName, action, args = {}) {
     }
   });
 }
-function resolveConfiguredWorkspaceArgument(config, input) {
-  if (input == null || String(input).trim() === '') return null;
+function resolveConfiguredWorkspaceArgument(config, input, options = {}) {
+  if (input == null || String(input).trim() === '') {
+    if (options.required === true) resolveWorkspace(config, input);
+    return null;
+  }
   const resolution = resolveWorkspaceInput(config, input);
   if (resolution.source === 'configured_path') return resolution;
   if (resolution.source === 'path_unavailable' || resolution.source === 'unmatched_path') resolveWorkspace(config, input);
+  if (options.required === true && resolution.source === 'unmatched_alias') resolveWorkspace(config, input);
   return resolution;
+}
+
+function restrictWorkspaceRecoveryErrorAliases(error, principal, connector) {
+  if (!error || typeof error !== 'object' || !Array.isArray(error.configuredWorkspaceAliases)) return error;
+  const aliases = connector
+    ? authorizedWorkspaceAliases(principal, error.configuredWorkspaceAliases)
+    : [...error.configuredWorkspaceAliases];
+  error.configuredWorkspaceAliases = aliases;
+  error.workspaceAliases = aliases;
+  error.workspaceCount = aliases.length;
+  error.allowedAlternatives = aliases.length
+    ? [`Use one authorized workspace alias: ${aliases.join(', ')}.`]
+    : ['No authorized workspace alias is available for this client.'];
+  return error;
 }
 
 function signalRepositoryIntelligenceMutation(config, operationName, args, value) {
@@ -373,7 +432,6 @@ function signalRepositoryIntelligenceMutation(config, operationName, args, value
     const workspace = resolveWorkspace(config, alias);
     const mutationPaths = broadMutation ? [] : (changedFiles.length ? changedFiles : restoreMutation);
     repositoryIntelligence.noteMutation(workspace, config, mutationPaths);
-    codeIntelligence.noteMutation(workspace, mutationPaths);
     invalidateRepositoryTopology(workspace.path, mutationPaths);
   } catch {}
 }

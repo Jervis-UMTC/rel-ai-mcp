@@ -5,9 +5,11 @@ import { Worker } from 'node:worker_threads';
 import { collectOptionsFromWorkspace, createCollectionPathFilter, isPathInside, realRootOf } from '../../safety.js';
 import { getStateDir } from '../../stateLayout.js';
 import { watchPathFor } from '../../watchPath.js';
-import { repositoryIndexPath } from './database.js';
+import { ensureIndexSchema, failBuildingGenerations, openIndexDatabase, repositoryIndexPath } from './database.js';
 import { DEFAULT_MAX_INDEX_FILES } from './indexBuild.js';
 import { recentIntelligenceDiagnostics, recordIntelligenceDiagnostic } from './state.js';
+import { measurePerformancePhase } from '../../performanceObservability.js';
+import { acquireHostResource } from '../../hostResourceScheduler.js';
 
 const FALLBACK_RECONCILE_INTERVAL_MS = 5 * 60_000;
 const ZOEKT_RECONCILE_DELAY_MS = 1500;
@@ -36,8 +38,20 @@ async function ensureRepositoryIndex(workspace, config = {}, options = {}) {
   const existing = activeBuilds.get(databaseFile);
   if (existing) return waitForBuild(existing, options.signal);
 
-  const record = { promise: null, waiters: 0, settled: false, cancel: reason => state.currentCancel?.(reason) };
-  record.promise = runCoalescedIndexing(workspace, config, databaseFile, state, options)
+  const buildAbortController = new AbortController();
+  const buildSignal = options.signal
+    ? AbortSignal.any([options.signal, buildAbortController.signal])
+    : buildAbortController.signal;
+  const record = {
+    promise: null,
+    waiters: 0,
+    settled: false,
+    cancel(reason) {
+      if (!buildAbortController.signal.aborted) buildAbortController.abort(abortError(reason));
+      state.currentCancel?.(reason);
+    }
+  };
+  record.promise = runCoalescedIndexing(workspace, config, databaseFile, state, { ...options, signal: buildSignal })
     .finally(() => {
       record.settled = true;
       if (activeBuilds.get(databaseFile) === record) activeBuilds.delete(databaseFile);
@@ -171,6 +185,7 @@ async function runCoalescedIndexing(workspace, config, databaseFile, state, opti
       const selection = zoektOnly ? { paths: [] } : consumeRefreshSelection(state, mode, options.force === true);
       state.status = statusForMode(mode, metadata);
       state.lastError = null;
+      const resourceLease = await acquireHostResource('heavy', workspace.alias, { signal: options.signal });
       const execution = runIndexWorker({
         kind: mode,
         workspace: serializableWorkspace(workspace),
@@ -185,7 +200,10 @@ async function runCoalescedIndexing(workspace, config, databaseFile, state, opti
           ? INDEX_FULL_TIMEOUT_MS
           : selection.paths === null ? INDEX_FULL_TIMEOUT_MS : INDEX_INCREMENTAL_TIMEOUT_MS;
         const previousZoekt = metadata?.zoekt;
-        const passMetadata = await withIndexTimeout(execution, positiveTimeout(options.indexTimeoutMs, defaultTimeoutMs));
+        const passMetadata = await measurePerformancePhase(
+          'repo.index_refresh',
+          () => withIndexTimeout(execution, positiveTimeout(options.indexTimeoutMs, defaultTimeoutMs))
+        );
         if (zoektOnly) {
           if (!metadata || Number(passMetadata?.generation || 0) !== Number(metadata.generation || 0)) {
             const error = new Error('Repository Intelligence generation changed during the Zoekt refresh.');
@@ -221,6 +239,7 @@ async function runCoalescedIndexing(workspace, config, databaseFile, state, opti
         }
       } finally {
         if (state.currentCancel === execution.cancel) state.currentCancel = null;
+        resourceLease.release();
       }
       state.metadata = metadata;
       if (!zoektOnly) {
@@ -241,6 +260,7 @@ async function runCoalescedIndexing(workspace, config, databaseFile, state, opti
     }
     return decorateMetadata(state, metadata);
   } catch (error) {
+    recoverAbandonedIndexGenerations(databaseFile, error);
     state.dirty = true;
     if (error?.code === 'INDEX_ABORTED' || error?.name === 'AbortError') {
       state.status = state.metadata ? 'ready' : 'idle';
@@ -355,14 +375,16 @@ function repositoryWorkerClient(databaseFile) {
       client.closed = true;
       clearIdleTermination();
       if (workerClients.get(databaseFile) === client) workerClients.delete(databaseFile);
-      for (const entry of pending.values()) {
+      const entries = [...pending.values()];
+      for (const entry of entries) {
         if (entry.cancelTimer) clearTimeout(entry.cancelTimer);
-        entry.reject(reason);
       }
       pending.clear();
       worker.unref();
       worker.removeAllListeners();
-      return worker.terminate().catch(() => {});
+      return worker.terminate().catch(() => {}).finally(() => {
+        for (const entry of entries) entry.reject(reason);
+      });
     }
   };
 
@@ -386,6 +408,19 @@ function repositoryWorkerClient(databaseFile) {
 
 function failedExecution(error) {
   return { promise: Promise.reject(error), cancel() {} };
+}
+
+function recoverAbandonedIndexGenerations(databaseFile, error) {
+  let db = null;
+  try {
+    db = openIndexDatabase(databaseFile);
+    ensureIndexSchema(db);
+    failBuildingGenerations(db, boundedErrorMessage(error));
+  } catch {
+    // Preserve the original indexing failure. A later refresh can retry recovery.
+  } finally {
+    try { db?.close(); } catch {}
+  }
 }
 
 function waitForBuild(record, signal) {

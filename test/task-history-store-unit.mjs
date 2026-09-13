@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { clearTaskHistory, getTaskHistoryDir, readCrossWorkspaceTaskEpisodes, readRecentWorkflowEvidence, readRelevantTaskEpisodes, readTaskHistory, readTaskHistorySessionRecord, recordTaskHistoryEvent, recordWorkflowEvidenceBatch } from "../src/taskHistoryStore.js";
-import { writeSession } from '../src/taskHistoryStorage.js';
+import { clearTaskHistory, getTaskHistoryDir, readCrossWorkspaceTaskEpisodes, readRecentWorkflowEvidence, readRelevantTaskEpisodes, readTaskHistory, readTaskHistorySessionRecord, recordTaskHistoryEvent, recordWorkflowEvidenceBatch } from "../src/taskHistoryStore.ts";
+import { writeSession } from '../src/taskHistoryStorage.ts';
 import { principalFingerprint } from '../src/mcp/principal.js';
 import { assertKnownTask } from '../src/tools/task.js';
 
@@ -182,7 +182,7 @@ try {
   assert.equal(exact.calls, 2);
   assert.equal(exact.status, 'completed');
   assert.equal(exact.summary, 'Completed exactly.');
-  const relatedEpisodes = readRelevantTaskEpisodes(config, 'repo', 'Investigate connector timeout recovery', { limit: 3, scanLimit: 80 });
+  const relatedEpisodes = readRelevantTaskEpisodes(config, 'repo', 'Investigate connector timeout recovery', { limit: 3 });
   assert.equal(relatedEpisodes[0].outcome, 'Fixed connector timeout recovery without changing unrelated behavior.', 'newer tasks from another workspace must not consume this workspace scan window');
   assert.deepEqual(relatedEpisodes[0].changes, ['src/connector.js']);
   assert.deepEqual(readRelevantTaskEpisodes(config, 'other-workspace', 'connector timeout recovery'), [], 'episodic retrieval must remain workspace-local');

@@ -9,7 +9,7 @@ const scannedFiles = [
   'src/tools.js',
   'src/tools/schema.js',
   'src/tools/actionCatalog.js',
-  'src/httpServer.js',
+  'src/httpServer.ts',
   'src/resources.js',
   'README.md',
   'docs/SECURITY.md',
@@ -103,11 +103,10 @@ if (descriptionFindings.length) {
   process.exit(1);
 }
 
-// Every tool's connector-facing surface (title + description) must avoid the
-// capability verbs OpenAI's tool-call safety classifier scores as high-risk
-// (arbitrary network fetch, local browser automation, shell/command execution).
-// These signals trigger pre-dispatch "blocked by OpenAI's safety checks" refusals
-// before the call ever reaches the MCP server, so they are banned across the board.
+// Connector-facing descriptions should avoid unnecessarily broad capability language.
+// Dedicated local-browser surfaces may say "browser" because that term is required to
+// distinguish machine-local browsing from host-native public-web research; unrelated
+// tools must not acquire browser wording accidentally.
 const highRiskVerbs = [
   { label: 'playwright', pattern: /\bplaywright\b/i },
   { label: 'fetch a url', pattern: /\bfetch\b/i },
@@ -118,11 +117,13 @@ const highRiskVerbs = [
   { label: 'arbitrary', pattern: /\barbitrary\b/i }
 ];
 
+const browserWordingTools = new Set(['relai_ui', 'relai_browser', 'relai_computer']);
 const surfaceFindings = [];
 const toolCount = toolDefinitions.length;
 for (const { name, title, description } of toolDefinitions) {
   const surface = `${title} ${description}`;
   for (const verb of highRiskVerbs) {
+    if (verb.label === 'browser' && browserWordingTools.has(name)) continue;
     if (verb.pattern.test(surface)) {
       surfaceFindings.push(`${name}: high-risk verb "${verb.label}" in title/description — "${title}: ${description}"`);
     }
@@ -151,8 +152,11 @@ const directivePatterns = [
   { label: 'use only', pattern: /\buse only\b/i },
   { label: 'keep one', pattern: /\bkeep one\b/i }
 ];
+const routingDirectiveTools = new Set(['relai_ui', 'relai_browser', 'relai_desktop', 'relai_computer']);
 const directiveFindings = [];
-for (const tool of getPublicToolSchemas()) collectDirectiveDescriptions(tool, tool.name, directiveFindings);
+for (const tool of getPublicToolSchemas()) {
+  collectDirectiveDescriptions(tool, tool.name, directiveFindings, routingDirectiveTools.has(tool.name));
+}
 if (directiveFindings.length) {
   console.error('Connector wording smoke test failed. Public MCP descriptions contain model-prescriptive workflow wording:');
   for (const msg of directiveFindings) console.error(`  ${msg}`);
@@ -161,9 +165,9 @@ if (directiveFindings.length) {
 
 console.log(`Connector wording smoke test passed. Scanned ${scannedFiles.length} files and ${toolCount} tool definitions.`);
 
-function collectDirectiveDescriptions(value, path, findings) {
+function collectDirectiveDescriptions(value, path, findings, allowDescriptionDirectives = false) {
   if (!value || typeof value !== 'object') return;
-  if (typeof value.description === 'string') {
+  if (!allowDescriptionDirectives && typeof value.description === 'string') {
     for (const directive of directivePatterns) {
       if (directive.pattern.test(value.description)) findings.push(`${path}: directive "${directive.label}" — "${value.description}"`);
     }

@@ -16,7 +16,7 @@
 .chatgpt-connector-values dd { min-width: 0; margin: 0 0 7px; overflow-wrap: anywhere; color: var(--ui-text-primary); font-size: 13px; font-weight: 700; }
 .chatgpt-connector-note { color: var(--ui-text-secondary); font-size: 13px; line-height: 1.5; }
 .chatgpt-connector-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.chatgpt-connector-actions button span { display: block; margin-top: 2px; font-size: 11px; font-weight: 600; opacity: .76; }
+.chatgpt-connector-actions button span { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; line-height: 1.5; }
 .chatgpt-connector-note { margin: 0; }
 .chatgpt-first-prompt { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--ui-border-default); border-radius: var(--radius-md); background: var(--ui-surface-secondary); }
 .chatgpt-first-prompt span { color: var(--ui-text-secondary); font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
@@ -39,10 +39,10 @@
 .connector-summary { @apply mt-1 text-[12px]; color: var(--ui-text-secondary); }
 .connection-field { @apply flex flex-col gap-2; }
 .connection-endpoint-row { @apply flex min-w-0 gap-2; }
-.connector-endpoint { @apply flex min-h-[38px] min-w-0 flex-1 items-center overflow-x-auto rounded-lg px-3 text-[11px]; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-default); }
+.connector-endpoint { @apply flex min-h-11 min-w-0 flex-1 items-center overflow-x-auto rounded-lg px-3 text-[12px] leading-6; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-default); }
 .connection-layer-heading { @apply mb-2 flex items-end justify-between gap-3; }
 .connection-layer-heading h3 { @apply text-[13px]; }
-.connection-layer-heading p { @apply text-[11px]; color: var(--ui-text-secondary); }
+.connection-layer-heading p { @apply text-[12px] leading-5; color: var(--ui-text-secondary); max-width: 75ch; }
 .connection-path { @apply grid overflow-hidden rounded-xl; grid-template-columns: repeat(4,minmax(0,1fr)); background: var(--ui-surface-primary); border: 1px solid var(--ui-border-default); }
 .connection-path-step { @apply relative min-h-36 border-r p-4 last:border-r-0; border-color: var(--ui-border-default); }
 .connection-path-step::after { content: ""; @apply absolute right-[-6px] top-[34px] z-10 size-3 rotate-45; background: var(--ui-surface-primary); border-right: 1px solid var(--ui-border-default); border-top: 1px solid var(--ui-border-default); }
@@ -54,7 +54,7 @@
 .connection-path-step.warn .connection-layer-dot { background: var(--ui-status-warning-foreground); }
 .connection-path-step.bad .connection-layer-dot { background: var(--ui-status-danger-foreground); }
 .connection-layer-card-head h4 { @apply text-[12px]; }
-.connection-layer-state { @apply mt-1 block text-[11px] font-semibold; color: var(--ui-text-secondary); }
+.connection-layer-state { @apply mt-1 block text-[12px] font-semibold; color: var(--ui-text-secondary); }
 .connection-layer-state.ok { color: var(--ui-status-success-foreground); }
 .connection-layer-state.working { color: var(--ui-status-info-foreground); }
 .connection-layer-state.warn { color: var(--ui-status-warning-foreground); }
@@ -85,7 +85,25 @@
 .diagnostic-log-row.warning { box-shadow: inset 2px 0 var(--ui-status-warning-foreground); }
 .diagnostic-log-row.error { box-shadow: inset 2px 0 var(--ui-status-danger-foreground); }
 .diagnostic-log-row.debug { opacity: .82; }
-.diagnostic-maintenance-row { @apply flex flex-wrap items-center justify-between gap-3 border-t py-3; border-color: var(--ui-border-subtle); }
+.diagnostic-doctor-card.warning { border-color: color-mix(in srgb, var(--ui-status-warning-foreground) 32%, var(--ui-border-default)); }
+.diagnostic-doctor-card .card-head p { @apply mt-1 text-[11px] leading-5; color: var(--ui-text-secondary); }
+.diagnostic-doctor-list { @apply grid gap-2; }
+.diagnostic-doctor-check { @apply grid min-w-0 gap-1 rounded-lg p-3 text-[11px]; background: var(--ui-surface-secondary); border: 1px solid var(--ui-border-subtle); }
+.diagnostic-doctor-check.pass { border-left: 3px solid var(--ui-status-success-foreground); }
+.diagnostic-doctor-check.fail { border-left: 3px solid var(--ui-status-danger-foreground); }
+.diagnostic-doctor-check.skip, .diagnostic-doctor-check.optional { border-left: 3px solid var(--ui-border-control); }
+.diagnostic-doctor-check.optional { background: var(--ui-surface-primary); }
+.diagnostic-doctor-check-head { @apply flex min-w-0 items-center justify-between gap-3; }
+.diagnostic-doctor-check-head code { @apply min-w-0 break-words; }
+.diagnostic-doctor-check-head strong { @apply shrink-0 text-[10px] uppercase tracking-[.04em]; }
+.diagnostic-doctor-check.pass .diagnostic-doctor-check-head strong { color: var(--ui-status-success-foreground); }
+.diagnostic-doctor-check.fail .diagnostic-doctor-check-head strong { color: var(--ui-status-danger-foreground); }
+.diagnostic-doctor-check.skip .diagnostic-doctor-check-head strong, .diagnostic-doctor-check.optional .diagnostic-doctor-check-head strong { color: var(--ui-text-tertiary); }
+.diagnostic-doctor-check p, .diagnostic-doctor-check ul { @apply m-0 leading-5; color: var(--ui-text-secondary); }
+.diagnostic-doctor-check ul { @apply pl-5; }
+.diagnostic-doctor-optional-setup { @apply mt-1 text-[11px]; color: var(--ui-text-secondary); }
+.diagnostic-doctor-optional-setup summary { @apply w-fit cursor-pointer font-semibold; color: var(--ui-text-tertiary); }
+.diagnostic-doctor-optional-setup[open] summary { @apply mb-1; }
 
 .connection-controls-section { @apply mt-2 grid gap-3 border-t pt-4; border-color: var(--ui-border-default); }
 .copy-box { @apply min-h-24 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 text-[11px] leading-5; background: var(--ui-canvas); border: 1px solid var(--ui-border-default); color: var(--ui-text-primary); }
@@ -116,7 +134,7 @@
 .diagnostic-context-row { @apply grid items-center gap-3 border-b px-3 py-2 last:border-b-0; grid-template-columns: auto auto minmax(0,1fr); border-color: var(--ui-border-subtle); }
 .diagnostic-context-row code, .diagnostic-context-row span, .diagnostic-context-row small { @apply text-[11px]; }
 .diagnostic-context-row small { @apply truncate; color: var(--ui-text-secondary); }
-.diagnostic-log-card .card-head p, .diagnostic-maintenance .card-head p { @apply mt-1 text-[11px] leading-5; color: var(--ui-text-secondary); }
+.diagnostic-log-card .card-head p { @apply mt-1 text-[11px] leading-5; color: var(--ui-text-secondary); }
 .diagnostic-log-list { @apply flex max-h-[520px] flex-col gap-2 overflow-auto; }
 .diagnostic-log-row > summary::-webkit-details-marker { display: none; }
 .diagnostic-log-summary { @apply grid min-h-11 cursor-pointer items-center gap-2 px-3 py-2; grid-template-columns: auto auto minmax(90px,auto) minmax(0,1fr) auto; }
@@ -135,14 +153,6 @@
 .diagnostic-clear { @apply flex flex-col gap-1 rounded-xl p-4; background: var(--ui-status-success-background); border: 1px solid color-mix(in srgb, var(--ui-status-success-foreground) 28%, transparent); }
 .diagnostic-clear span { @apply text-[11px]; color: var(--ui-text-secondary); }
 .diagnostic-unavailable { background: var(--ui-status-warning-background); border-color: color-mix(in srgb, var(--ui-status-warning-foreground) 28%, transparent); }
-.diagnostic-maintenance-list { @apply p-0; }
-.diagnostic-maintenance-row { @apply px-4 py-3; }
-.diagnostic-maintenance-row > div { @apply min-w-0; }
-.diagnostic-maintenance-row strong { @apply block text-[12px]; }
-.diagnostic-maintenance-row span { @apply mt-1 block text-[11px] leading-5; color: var(--ui-text-secondary); }
-.diagnostic-reset-form { @apply flex flex-col gap-4; }
-.diagnostic-reset-warning { @apply flex flex-col gap-2 rounded-xl p-4; background: var(--ui-status-danger-background); border: 1px solid color-mix(in srgb, var(--ui-status-danger-foreground) 32%, transparent); }
-.diagnostic-reset-warning span { @apply text-[11px] leading-5; color: var(--ui-text-secondary); }
 }
 
 @media (max-width: 980px) {

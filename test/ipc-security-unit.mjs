@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { MAX_CLIPBOARD_TEXT_BYTES, registerIpcHandlers } from '../electron/ipc-handlers.js';
-import { createWindowGuards } from '../electron/ipc-security.js';
+import { createContractIpcRegistrar, createWindowGuards } from '../electron/ipc-security.js';
 
 const handles = new Map();
 const listeners = new Map();
 const wizard = { id: 'wizard' };
 const fallback = { id: 'fallback' };
 const dashboard = { id: 'dashboard' };
+const pulse = { id: 'pulse' };
 const other = { id: 'other' };
 const calls = [];
 let clipboardText = '';
@@ -23,6 +24,8 @@ const deps = {
   closeWizard: options => calls.push(['closeWizard', options]),
   getFallbackWindow: () => fallback,
   getDashboardWindow: () => dashboard,
+  getPulseWindow: () => pulse,
+  setPulseExpanded: expanded => { calls.push(['pulseExpanded', expanded]); return expanded; },
   getRecoveryConfig: () => ({ ok: true }),
   openRecoverySetup: () => ({ ok: true }),
   startServer: () => ({ ok: true, started: true }),
@@ -32,7 +35,7 @@ const deps = {
   relaunchApplication: async () => { relaunchCalls += 1; return { ok: true }; },
   quitApplication: async () => { quitCalls += 1; return { ok: true }; },
   openSettingsWindow: () => ({ ok: true }),
-  openDashboardWindow: () => ({ ok: true }),
+  openDashboardWindow: routeHash => { calls.push(['openDashboard', routeHash || '']); return { ok: true }; },
   getDesktopSettings: () => ({ ok: true }),
   saveDesktopSettings: settings => ({ ok: true, settings }),
   getLocalUsage: month => ({ ok: true, month }),
@@ -59,9 +62,27 @@ assert.ok(Number.isSafeInteger(MAX_CLIPBOARD_TEXT_BYTES) && MAX_CLIPBOARD_TEXT_B
 const guards = createWindowGuards(deps.BrowserWindow);
 assert.equal(guards.windowOnly(eventFor(dashboard), () => dashboard, 'Dashboard', () => 'allowed'), 'allowed');
 assert.throws(() => guards.windowOnly(eventFor(other), () => dashboard, 'Dashboard', () => 'denied'), /not available/);
+const registrar = createContractIpcRegistrar({
+  ipcMain: { handle() {}, on() {} },
+  BrowserWindow: deps.BrowserWindow,
+  contract: {
+    'test:handle': { mode: 'handle', windows: ['dashboard'], failure: 'reject' },
+    'test:on': { mode: 'on', windows: ['dashboard'], failure: 'ignore' }
+  },
+  windowGetters: { dashboard: () => dashboard }
+});
+assert.throws(() => registrar.on('test:handle', 'Test', () => {}), /must register with ipcMain\.handle/);
+assert.throws(() => registrar.handle('missing:channel', 'Test', () => {}), /missing from the input contract/);
 assert.equal([...handles.keys()].some(channel => channel.startsWith('desktop:cloud:')), false);
 assert.equal([...handles.keys()].some(channel => /ngrok|gateway|approval/i.test(channel)), false);
 assert.throws(() => handles.get('desktop:settings:get')(eventFor(other)), /not available/);
+assert.throws(() => handles.get('url:open-dashboard')(eventFor(other), '#tasks'), /not available/);
+assert.deepEqual(handles.get('url:open-dashboard')(eventFor(pulse), '#tasks?workspace=repo&task=task-1'), { ok: true });
+assert.ok(calls.some(entry => entry[0] === 'openDashboard' && entry[1] === '#tasks?workspace=repo&task=task-1'), 'Pulse may deep-link only through the existing dashboard opener');
+assert.deepEqual(handles.get('pulse:set-expanded')(eventFor(pulse), true), { ok: true, expanded: true });
+assert.ok(calls.some(entry => entry[0] === 'pulseExpanded' && entry[1] === true), 'Pulse may request only its own display geometry');
+assert.throws(() => handles.get('pulse:set-expanded')(eventFor(dashboard), true), /not available/);
+assert.throws(() => handles.get('pulse:set-expanded')(eventFor(pulse), 'yes'), /must be a boolean/);
 assert.throws(() => handles.get('desktop:code:get')(eventFor(other), { taskId: 'task-1' }), /not available/);
 assert.deepEqual(handles.get('desktop:code:get')(eventFor(dashboard), { taskId: 'task-1' }), { ok: true, payload: { taskId: 'task-1' } });
 assert.equal(handles.has('desktop:code:write'), false, 'the Changes surface must not expose a renderer file-write channel');

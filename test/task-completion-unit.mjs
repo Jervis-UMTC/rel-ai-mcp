@@ -2,11 +2,13 @@ import { callTool as rawCallTool } from "../src/tools.js";
 import { getToolActivity, resetToolActivity } from "../src/toolActivity.js";
 import { readConfig } from "../src/config.js";
 import { flushAuditWrites, getAuditPath, readAudit } from "../src/audit.js";
-import { flushLocalAnalytics } from "../src/localAnalytics.js";
+import { flushLocalAnalytics, readLocalUsageSnapshot } from "../src/localAnalytics.js";
 import { repositoryIntelligence } from "../src/repository/intelligence/service.js";
-import { resetTaskHistoryCaches } from "../src/taskHistoryStorage.js";
-import { flushTaskHistoryPersistence } from "../src/taskHistoryStore.js";
+import { resetTaskHistoryCaches } from "../src/taskHistoryStorage.ts";
+import { flushTaskHistoryPersistence } from "../src/taskHistoryStore.ts";
 import { resolvePolicy } from "../src/policyResolver.js";
+import { readTaskIntegrity } from '../src/taskIntegrity.ts';
+import { withStateDatabase } from '../src/stateDatabase.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -127,12 +129,13 @@ try {
   );
 
   resetToolActivity();
-  const integrityTasksDir = path.join(stateDir, 'task-integrity', 'tasks');
-  const authorityBefore = new Set(fs.existsSync(integrityTasksDir) ? fs.readdirSync(integrityTasksDir) : []);
   const missingAuthorityTask = await startTask('missing-authority-fail-closed');
-  const createdAuthorityFiles = fs.readdirSync(integrityTasksDir).filter(name => !authorityBefore.has(name));
-  assert.equal(createdAuthorityFiles.length, 1);
-  fs.rmSync(path.join(integrityTasksDir, createdAuthorityFiles[0]), { force: true });
+  const runtimeConfig = readConfig();
+  assert.ok(readTaskIntegrity(runtimeConfig, missingAuthorityTask, 'app'), 'task start must create authoritative integrity state');
+  withStateDatabase(runtimeConfig, db => {
+    db.prepare('DELETE FROM task_integrity_tasks WHERE task_id=?').run(missingAuthorityTask);
+  }, { transaction: true });
+  assert.equal(readTaskIntegrity(runtimeConfig, missingAuthorityTask, 'app'), null, 'test sabotage must remove authoritative integrity state');
   const blockedMutationPath = path.join(workspace, 'src', 'missing-authority-mutation.js');
   await assert.rejects(
     () => callTool('relai_edit', {
@@ -312,6 +315,9 @@ try {
   assert.equal(validation.validationStatus, 'passed');
   assert.match(validation.nextAction, /recorded|repository state/i);
 
+  const analyticsMonth = new Date().toISOString().slice(0, 7);
+  const completedTasksBefore = readLocalUsageSnapshot(readConfig(), analyticsMonth).taskIntents.reduce((sum, row) => sum + Number(row.tasks || 0), 0);
+
   const completion = await callTool('relai_work', { action: 'finish',
     workspace: 'app',
     work_id: taskId,
@@ -322,6 +328,8 @@ try {
   assert.equal(completion.completionKnown, true);
   assert.equal(completion.endReason, 'explicit_completion');
   assert.equal(completion.validationStatus, 'passed');
+  const completedTasksAfter = readLocalUsageSnapshot(readConfig(), analyticsMonth).taskIntents.reduce((sum, row) => sum + Number(row.tasks || 0), 0);
+  assert.equal(completedTasksAfter, completedTasksBefore + 1, 'accepted task completion must increment local work-type analytics exactly once');
   assert.equal(resolvePolicy({ alias: 'app', path: workspace }, readConfig()).sessionActive, false, 'explicit completion must clear only this task ownership state');
 
   const status = getToolActivity();
@@ -348,6 +356,8 @@ try {
   assert.equal(duplicateCompletion.work_id, taskId);
   assert.equal(duplicateCompletion.duplicate, true);
   assert.equal(duplicateCompletion.summary, 'Implemented and validated the requested code changes.');
+  const completedTasksAfterDuplicate = readLocalUsageSnapshot(readConfig(), analyticsMonth).taskIntents.reduce((sum, row) => sum + Number(row.tasks || 0), 0);
+  assert.equal(completedTasksAfterDuplicate, completedTasksAfter, 'duplicate completion must not inflate work-type analytics');
 
   resetToolActivity();
   const rotatedValidationContext = { publicHttpOnly: true };

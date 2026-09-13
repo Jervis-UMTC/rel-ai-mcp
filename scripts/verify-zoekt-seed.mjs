@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { normalizeTargetArch } from './platform-architecture.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = path.join(root, 'vendor', 'zoekt', 'manifest.json');
@@ -44,8 +45,6 @@ for (const key of ['search', 'index']) {
 console.log(`[verify-zoekt-seed] OK: Zoekt ${manifest.upstream.commit} ${platform}/${spec.architecture}, patch=${manifest.upstream.patchSet}.`);
 
 function normalizeArch(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (['x64', 'amd64', 'x86_64'].includes(normalized)) return 'x64';
-  if (['arm64', 'aarch64'].includes(normalized)) return 'arm64';
-  fail(`Unsupported architecture: ${normalized || '(empty)'}.`);
+  try { return normalizeTargetArch(value); }
+  catch (error) { fail(error instanceof Error ? error.message : String(error)); }
 }

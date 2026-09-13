@@ -90,7 +90,7 @@ function completedValidationUnits(results) {
 
 function checkResultStatus(summary) {
   if (summary.cancelled) return 'cancelled';
-  if (summary.timedOut) return 'timed_out';
+  if (summary.timedOut || summary.queueTimedOut) return 'timed_out';
   return summary.ok ? 'passed' : 'failed';
 }
 

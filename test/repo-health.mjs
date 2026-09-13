@@ -29,6 +29,13 @@ const ciWorkflowPath = path.join(ciDir, 'ci.yml');
 if (fs.existsSync(ciWorkflowPath) && Number.isSafeInteger(minimumNodeMajor)) {
   const ciWorkflow = fs.readFileSync(ciWorkflowPath, 'utf8');
   const configuredNodeMajors = [...ciWorkflow.matchAll(/node-version:\s*['"]?(\d+)/g)].map(match => Number(match[1]));
+  for (const match of ciWorkflow.matchAll(/node-version-file:\s*['"]?([^\s'"]+)/g)) {
+    try {
+      const configuredVersion = fs.readFileSync(path.join(root, match[1]), 'utf8').trim();
+      const configuredMajor = Number(/^v?(\d+)/.exec(configuredVersion)?.[1]);
+      if (Number.isSafeInteger(configuredMajor)) configuredNodeMajors.push(configuredMajor);
+    } catch {}
+  }
   if (!configuredNodeMajors.some(major => major >= minimumNodeMajor)) {
     failures.push(`CI must test a Node.js major that satisfies the declared minimum ${nodeEngine}.`);
   }
@@ -62,7 +69,7 @@ for (const file of walk(ciDir)) {
 }
 
 const allowedSynchronousProcessDiscovery = new Set([
-  'src/bridge/exec.js',
+  'src/executionInvocation.js',
   'src/release.js',
   'src/webAutomationManager.js'
 ]);

@@ -4,6 +4,7 @@ import * as activityModel from '../src/ui/features/activity/model.js';
 import {
   activityAbsoluteTime,
   activityActionLabel,
+  activityFileLocation,
   activityFilterTransition,
   activityMessage,
   activityStatusGroup,
@@ -72,6 +73,20 @@ test('activity search can match a resolved work-session title', () => {
   const results = filterActivityEntries([entry({ taskId: 'task-1' })], base, NOW, {
     sessionTitle: item => activitySessionView(item, sessions).title
   });
+  assert.equal(results.length, 1);
+});
+
+test('activity exposes and searches canonical local file destinations', () => {
+  const downloaded = entry({
+    tool: 'relai_browser',
+    title: 'Download file',
+    result: { ok: true, path: 'reports/September/report.pdf' }
+  });
+  assert.equal(activityFileLocation(downloaded), 'reports/September/report.pdf');
+  assert.equal(activityFileLocation(entry({ result: { ok: true } })), '');
+  const results = filterActivityEntries([downloaded], {
+    search: 'september/report.pdf', timeRange: 'all', workspace: '', tool: '', status: '', task: ''
+  }, NOW);
   assert.equal(results.length, 1);
 });
 

@@ -38,13 +38,13 @@ Execution mode is selected from the current request's `io.modelcontextprotocol/t
 | HTTP or stdio | Not advertised | Within synchronous limits | Bounded direct result |
 | HTTP or stdio | Not advertised | Outside the safe direct-response window | Running work-session result; continue under the same `work_id` |
 
-Rel.AI advertises server support on both HTTP and stdio. It returns a native task handle only when the current request advertises the capability and the operation is not safely bounded for direct execution. Malformed capability objects are rejected as invalid parameters and are never treated as capability absence.
+Rel.AI advertises server support on both HTTP and stdio. It returns a native task handle only when the current request advertises the capability and the operation is not safely bounded for direct execution. The non-Tasks work-session continuation path remains required for current clients that use modern MCP without advertising the Tasks extension. Malformed capability objects are rejected as invalid parameters and are never treated as capability absence.
 
 Persistent interactive commands use `relai_process_*` and return a `processId`; they do not become native task identity.
 
 ## Protocol boundary
 
-Rel.AI's modern HTTP and stdio protocol is MCP `2026-07-28`. HTTP also accepts ChatGPT's SDK-supported stateless `2025-11-25` initialize flow; stdio remains modern-only. Native Tasks are available only on requests that negotiate the modern Tasks extension. Custom Tasks extension routing preserves the same boundary behavior as SDK-dispatched modern requests:
+Rel.AI's modern HTTP and stdio protocol is MCP `2026-07-28`. HTTP retains only ChatGPT's SDK-supported stateless `2025-11-25` startup lifecycle (`initialize` and `notifications/initialized`); all ordinary MCP operations are modern-only and stdio remains modern-only. Native Tasks are available only on requests that negotiate the modern Tasks extension. Custom Tasks extension routing preserves the same boundary behavior as SDK-dispatched modern requests:
 
 - no response is emitted for JSON-RPC notifications;
 - every MCP 2026 result includes server identity metadata;

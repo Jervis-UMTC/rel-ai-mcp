@@ -11,7 +11,7 @@ import {
   writeSessionPolicy,
   SESSION_TOUCH_PERSIST_INTERVAL_MS
 } from '../src/policyResolver.js';
-import { withStateDatabase } from '../src/stateDatabase.js';
+import { withStateDatabase } from '../src/stateDatabase.ts';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-policy-store-'));
 const config = { stateDir: path.join(root, 'state') };

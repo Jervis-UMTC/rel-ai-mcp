@@ -1,7 +1,7 @@
 
 import * as crypto from 'node:crypto';
 import { commandDisplayForInvocation, redactCommandForDisplay } from './commandDisplay.js';
-import { TERMINAL_TASK_STATUSES, normalizeHistoricalTaskStatus } from './taskState.js';
+import { normalizeHistoricalTaskStatus } from './taskState.js';
 import { OPERATION_IDS as OP } from './tools/operationIds.js';
 const TASK_MODEL_VERSION = 3;
 const MAX_TITLE_LENGTH = 100;
@@ -9,7 +9,6 @@ const MAX_OBJECTIVE_LENGTH = 500;
 const MAX_SUMMARY_LENGTH = 500;
 const MAX_METADATA_STRING = 500;
 const MAX_METADATA_ITEMS = 100;
-const TERMINAL_STATUSES = TERMINAL_TASK_STATUSES;
 const ALLOWED_METADATA_KEYS = new Set([
   'waitMs', 'queueMode', 'queued', 'pathCount', 'matchCount', 'returnedFileCount', 'returnedRangeCount',
   'returnedBytes', 'changedFileCount', 'changedFiles', 'validationStatus', 'validationLevel', 'validationLevelReason',
@@ -178,11 +177,12 @@ function normalizeTaskProgress(progress, status) {
     if (Number.isFinite(Number(progress.percentage))) {
       normalized.percentage = Math.min(normalized.percentage, Math.max(0, Math.round(Number(progress.percentage))));
     }
-    if (['failed', 'cancelled', 'inactive'].includes(status) && normalized.percentage >= 100) normalized.percentage = 99;
+    if (normalized.percentage >= 100) normalized.percentage = 99;
     return normalized;
   }
-  if (progress?.mode === 'complete' && status === 'inactive') return { mode: 'indeterminate', label: cleanText(progress.label || 'Inactive', 120) };
-  if (progress?.mode === 'complete' && !TERMINAL_STATUSES.has(status)) return completeProgress(progress.label);
+  if (progress?.mode === 'complete') {
+    return { mode: 'indeterminate', ...(progress?.label ? { label: cleanText(progress.label, 120) } : {}) };
+  }
   return { mode: 'indeterminate', ...(progress?.label ? { label: cleanText(progress.label, 120) } : {}) };
 }
 

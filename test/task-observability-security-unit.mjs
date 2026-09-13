@@ -13,8 +13,9 @@ const {
   getTaskHistoryDir,
   readTaskHistorySession,
   recordTaskActivityEvent
-} = await import('../src/taskHistoryStore.js');
-const { mergeDashboardActivity } = await import('../src/http/dashboardData.js');
+} = await import('../src/taskHistoryStore.ts');
+const { mergeDashboardActivity } = await import('../src/core/dashboard-data.ts');
+const { withStateDatabase } = await import('../src/stateDatabase.ts');
 
 const syntheticSecrets = [
   'Authorization: Bearer relai_test_bearer_123456',
@@ -80,15 +81,17 @@ try {
   assert.equal(inspected.includes(originalSecret), false, inspected);
   assert.match(inspected, /redacted/i);
 
-  const rawHistory = fs.readdirSync(getTaskHistoryDir(config))
-    .filter(name => name.endsWith('.json'))
-    .map(name => fs.readFileSync(path.join(getTaskHistoryDir(config), name), 'utf8'))
-    .join('\n');
+  const rawHistory = withStateDatabase(config, db => db.prepare('SELECT payload FROM task_history').all()
+    .map(row => String(row.payload || ''))
+    .join('\n'));
   assert.equal(rawHistory.includes(originalSecret), false, rawHistory);
 
   const historicalTaskId = 'historical-unsafe-task';
+  const legacyConfig = { stateDir: path.join(sandbox, 'legacy-state'), auditLogPath: path.join(sandbox, 'legacy-audit.jsonl') };
+  const legacyHistoryDir = getTaskHistoryDir(legacyConfig);
+  fs.mkdirSync(legacyHistoryDir, { recursive: true });
   const historicalFile = path.join(
-    getTaskHistoryDir(config),
+    legacyHistoryDir,
     `${crypto.createHash('sha256').update(historicalTaskId).digest('hex')}.json`
   );
   fs.writeFileSync(historicalFile, JSON.stringify({
@@ -100,7 +103,7 @@ try {
     endedAt: new Date().toISOString(),
     events: [{ eventId: 'legacy-event', summary: `password=${originalSecret}` }]
   }));
-  const historical = readTaskHistorySession(config, historicalTaskId);
+  const historical = readTaskHistorySession(legacyConfig, historicalTaskId);
   assert.equal(historical, null, 'hard cutover must not load unsupported pre-v3 task-history records');
   assert.equal(fs.existsSync(historicalFile), false, 'unsupported secret-bearing task history must be removed during hard cutover');
 } finally {

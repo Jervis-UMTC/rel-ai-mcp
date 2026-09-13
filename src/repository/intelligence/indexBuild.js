@@ -28,6 +28,7 @@ import { rebuildZoektIndex } from './zoekt.js';
 const DEFAULT_MAX_INDEX_FILES = 100000;
 const MAX_INDEXED_FILE_BYTES = 1024 * 1024;
 const WRITE_BATCH_SIZE = 100;
+const PARSE_CONCURRENCY = 8;
 
 async function executeRepositoryIndexJob(job, signal) {
   const kind = normalizeJobKind(job?.kind);
@@ -39,12 +40,9 @@ async function executeRepositoryIndexJob(job, signal) {
     const result = await refreshRepositoryIndex({ ...job, kind, paths: null }, signal);
     return { ...result, rebuilt: true, recovered: true };
   }
-  if (kind === 'rebuild') {
-    const result = await refreshRepositoryIndex({ ...job, kind, paths: null }, signal);
-    return { ...result, rebuilt: true, recovered: false };
-  }
   try {
-    return await refreshRepositoryIndex(job, signal);
+    const result = await refreshRepositoryIndex(job, signal);
+    return kind === 'rebuild' ? { ...result, rebuilt: true, recovered: false } : result;
   } catch (error) {
     if (!isRecoverableIndexError(error)) throw error;
     const recoveryReason = boundedErrorMessage(error);
@@ -125,6 +123,11 @@ async function refreshRepositoryIndex(job, signal) {
     const parserVersionChanged = manifest.some(item => item.parserVersion !== PARSER_VERSION);
     const runtimeProducerVersion = intelligenceRuntimeFingerprint();
     const producerVersionChanged = Boolean(previousGeneration && indexProducerVersion(db) !== runtimeProducerVersion);
+    if (producerVersionChanged) {
+      const error = new Error('Repository Intelligence producer changed; rebuild the derived index from source.');
+      error.code = 'INDEX_PRODUCER_CHANGED';
+      throw error;
+    }
     const requestedPaths = normalizeRequestedPaths(job?.paths);
     let scan = previousGeneration && requestedPaths.length && !parserVersionChanged && !producerVersionChanged
       ? scanSelectedPaths(workspace, requestedPaths)
@@ -167,9 +170,11 @@ async function refreshRepositoryIndex(job, signal) {
       const batch = changed.slice(offset, offset + WRITE_BATCH_SIZE);
       const parsedBatch = [];
       const failedPaths = [];
-      for (const candidate of batch) {
+      const parsedResults = await mapWithConcurrency(batch, PARSE_CONCURRENCY, async candidate => {
         throwIfAborted(signal);
-        const parsedResult = await parseCandidate(candidate);
+        return { candidate, result: await parseCandidate(candidate) };
+      });
+      for (const { candidate, result: parsedResult } of parsedResults) {
         if (parsedResult.parsed) {
           const parsed = parsedResult.parsed;
           parsedBatch.push({ candidate, parsed });
@@ -262,6 +267,16 @@ async function attachZoektMetadata(metadata, job, workspace, databaseFile, scan,
         reason: scan.truncated
           ? 'Zoekt rebuild skipped because the repository scan was truncated.'
           : 'Zoekt rebuild skipped because source reads were incomplete.'
+      }
+    };
+  }
+  if (job?.kind === 'refresh') {
+    return {
+      ...metadata,
+      zoekt: {
+        available: true,
+        current: false,
+        reason: 'Zoekt refresh is deferred until after the graph index is ready.'
       }
     };
   }
@@ -437,6 +452,7 @@ function discardRepositoryIndex(databaseFile) {
 
 function isRecoverableIndexError(error) {
   if (!error || error.code === 'INDEX_ABORTED' || error.code === 'INDEX_SCHEMA_FUTURE') return false;
+  if (error.code === 'INDEX_PRODUCER_CHANGED') return true;
   if (error.code === 'INDEX_INTEGRITY_FAILED') return true;
   return /(?:database disk image is malformed|database is malformed|file is not a database|database corrupt|sqlite_corrupt|sqlite_notadb)/.test(boundedErrorMessage(error).toLowerCase());
 }
@@ -493,6 +509,19 @@ function throwIfAborted(signal) {
 
 function boundedErrorMessage(error) {
   return String(error instanceof Error ? error.message : error || 'Unknown error').slice(0, 2000);
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 export { DEFAULT_MAX_INDEX_FILES, MAX_INDEXED_FILE_BYTES, discardRepositoryIndex, executeRepositoryIndexJob, isRecoverableIndexError, scanWorkspace };

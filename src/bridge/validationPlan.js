@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { writeJsonAtomic } from '../durableState.js';
+import { writeJsonAtomic } from '../durableState.ts';
 import { getStateDir } from '../statePaths.js';
 import { workspaceGitStatus } from '../repo/gitOps.js';
 import { relaiCodeInspect } from './codeIntelligence.js';

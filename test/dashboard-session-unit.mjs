@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
-import { isDashboardAuthorized } from '../src/http/auth.js';
-import { clearDashboardSessions, createDashboardBootstrap } from '../src/http/dashboardSessions.js';
+import { isDashboardAuthorized } from '../src/http/auth.ts';
+import { clearDashboardSessions, createDashboardBootstrap } from '../src/http/dashboardSessions.ts';
 
 const token = 'dashboard-session-test-token';
 
@@ -107,6 +107,22 @@ try {
   const computerStatus = await api.fetchJson('/api/computer', { cache: 'no-store' });
   assert.deepEqual(computerStatus.status, { available: true }, 'dashboard payload status fields must not be replaced by the HTTP status code');
   assert.equal(computerStatus.httpStatus, 200);
+
+  const pendingResponses = [];
+  let cacheFetches = 0;
+  globalThis.fetch = () => {
+    cacheFetches += 1;
+    return new Promise(resolve => pendingResponses.push(resolve));
+  };
+  const oldRequest = api.fetchJson(api.DASHBOARD_DATA_URL);
+  api.invalidateCache(api.DASHBOARD_DATA_URL);
+  const refreshedRequest = api.fetchJson(api.DASHBOARD_DATA_URL);
+  pendingResponses[1]({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, revision: 2 }) });
+  assert.equal((await refreshedRequest).revision, 2);
+  pendingResponses[0]({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, revision: 1 }) });
+  assert.equal((await oldRequest).revision, 1);
+  assert.equal((await api.fetchJson(api.DASHBOARD_DATA_URL)).revision, 2, 'an older request must not repopulate cache after invalidation');
+  assert.equal(cacheFetches, 2, 'the refreshed response should remain cached after the stale request completes');
 } finally {
   if (originalFetch === undefined) delete globalThis.fetch; else globalThis.fetch = originalFetch;
   if (originalWindow === undefined) delete globalThis.window; else globalThis.window = originalWindow;

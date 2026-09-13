@@ -9,7 +9,7 @@ import { slimCompactPublicResult } from '../src/tools/compactResult.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const baseline = Object.freeze({ publicTools: 30, discoverySchemaBytes: 30524, estimatedDiscoveryTokens: 7631, globalInstructionBytes: 1471 });
-const budget = Object.freeze({ discoverySchemaBytes: 40000, globalInstructionBytes: baseline.globalInstructionBytes });
+const budget = Object.freeze({ discoverySchemaBytes: 32000, globalInstructionBytes: 1200 });
 
 function measure() {
   const config = { workspaces: {} };
@@ -19,7 +19,15 @@ function measure() {
     publicTools: tools.length,
     discoverySchemaBytes,
     estimatedDiscoveryTokens: Math.ceil(discoverySchemaBytes / 4),
-    globalInstructionBytes: bytes(connectorInstructions(config))
+    globalInstructionBytes: bytes(connectorInstructions(config)),
+    perTool: tools.map(tool => ({
+      name: tool.name,
+      totalBytes: bytes(tool),
+      descriptionBytes: bytes(tool.description || ''),
+      inputSchemaBytes: bytes(tool.inputSchema || {}),
+      outputSchemaBytes: bytes(tool.outputSchema || {}),
+      propertyCount: Object.keys(tool.inputSchema?.properties || {}).length
+    }))
   };
 }
 

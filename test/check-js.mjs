@@ -16,7 +16,7 @@ function isJavaScriptFile(name) {
 function hasModuleSyntax(source) {
   return String(source || '').split(/\r?\n/).some((line) => {
     const trimmed = line.trimStart();
-    return trimmed.startsWith('import ') || trimmed.startsWith('export ');
+    return /^(?:import(?:\s|\{|\*|['"]|$)|export(?:\s|\{|\*|$))/.test(trimmed);
   });
 }
 
@@ -70,7 +70,8 @@ const parse = canParseInProcess ? parseInProcess : parseInSubprocess;
 for (const file of files) {
   const relative = path.relative(root, file);
   const source = fs.readFileSync(file, 'utf8');
-  const parseAsModule = file.endsWith('.mjs') || hasModuleSyntax(source);
+  const normalizedRelative = relative.replaceAll('\\', '/');
+  const parseAsModule = file.endsWith('.mjs') || normalizedRelative.startsWith('public/dashboard-chunks/') || hasModuleSyntax(source);
   try {
     parse(file, source, parseAsModule);
   } catch (error) {

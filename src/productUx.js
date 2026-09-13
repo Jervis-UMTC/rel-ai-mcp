@@ -211,15 +211,20 @@ function writableJsonPath(rawPath, label, baseDir = process.cwd()) {
   return path.join(realParent, path.basename(relativePath));
 }
 
+const STATE_EXPORT_VERSION = 2;
+
 function stateExport(config, args = {}) {
   if (config.productUx?.enableStateExport === false) {
     throw new Error("State export is disabled (productUx.enableStateExport=false).");
   }
   const stateDir = getStateDir(config);
   const maxFiles = clampNumber(args.maxFiles || 2000, 1, 20000);
+  const maxFileBytes = args.maxFileBytes == null
+    ? Number.POSITIVE_INFINITY
+    : clampNumber(args.maxFileBytes, 1000, 10 * 1024 * 1024);
   const files = [];
-  walkState(stateDir, stateDir, files, maxFiles, clampNumber(args.maxFileBytes || 1024 * 1024, 1000, 10 * 1024 * 1024));
-  const payload = { version: 2, exportedAt: new Date().toISOString(), stateDir, files };
+  walkState(stateDir, stateDir, files, maxFiles, maxFileBytes);
+  const payload = { version: STATE_EXPORT_VERSION, exportedAt: new Date().toISOString(), stateDir, files };
   if (args.outputPath) {
     const out = writableJsonPath(args.outputPath, "outputPath");
     fs.mkdirSync(path.dirname(out), { recursive: true });
@@ -237,23 +242,64 @@ function stateImport(config, args = {}) {
     payload = safeReadJson(inputPath);
     if (!payload) throw new Error(`State import file is corrupted or empty: ${inputPath}`);
   }
-  if (!Array.isArray(payload?.files)) throw new Error("State import payload must contain a files array.");
-  const stateDir = getStateDir(config);
-  fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  const stateBase = canonicalBaseDir(stateDir);
-  const written = [];
-  for (const item of payload.files) {
-    if (!item?.path || typeof item.content !== "string") continue;
-    const relative = validateRelativePath(String(item.path));
-    const target = path.join(stateBase, relative);
-    const parent = path.dirname(target);
-    fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
-    const realParent = fs.realpathSync(parent);
-    if (!realParent.startsWith(stateBase)) throw new Error(`Unsafe state path: ${relative}`);
-    fs.writeFileSync(path.join(realParent, path.basename(relative)), decodeStateFile(item), { mode: 0o600 });
-    written.push(relative);
+  if (payload?.version !== STATE_EXPORT_VERSION) {
+    throw new Error(`Unsupported state import version: ${payload?.version ?? "missing"}. Expected ${STATE_EXPORT_VERSION}.`);
   }
+  if (!Array.isArray(payload.files)) throw new Error("State import payload must contain a files array.");
+
+  const entries = payload.files.map((item, index) => {
+    if (!item?.path || typeof item.content !== "string") {
+      throw new Error(`State import file entry ${index + 1} is invalid.`);
+    }
+    return {
+      relative: validateRelativePath(String(item.path)),
+      content: decodeStateFile(item)
+    };
+  });
+
+  const stateDir = getStateDir(config);
+  const stateParent = path.dirname(stateDir);
+  const stateName = path.basename(stateDir);
+  fs.mkdirSync(stateParent, { recursive: true, mode: 0o700 });
+  const stagingDir = fs.mkdtempSync(path.join(stateParent, `.${stateName}.import-`));
+  const backupDir = path.join(stateParent, `.${stateName}.backup-${process.pid}-${Date.now()}`);
+  let existingMoved = false;
+  let promoted = false;
+
+  try {
+    if (fs.existsSync(stateDir)) fs.cpSync(stateDir, stagingDir, { recursive: true, force: true });
+    for (const entry of entries) {
+      const target = path.resolve(stagingDir, entry.relative);
+      const parent = path.dirname(target);
+      fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+      const realParent = fs.realpathSync(parent);
+      if (!isPathContained(stagingDir, realParent)) throw new Error(`Unsafe state path: ${entry.relative}`);
+      fs.writeFileSync(path.join(realParent, path.basename(entry.relative)), entry.content, { mode: 0o600 });
+    }
+
+    if (fs.existsSync(stateDir)) {
+      fs.renameSync(stateDir, backupDir);
+      existingMoved = true;
+    }
+    try {
+      fs.renameSync(stagingDir, stateDir);
+      promoted = true;
+    } catch (error) {
+      if (existingMoved && !fs.existsSync(stateDir)) fs.renameSync(backupDir, stateDir);
+      throw error;
+    }
+    if (existingMoved) fs.rmSync(backupDir, { recursive: true, force: true });
+  } finally {
+    if (!promoted) fs.rmSync(stagingDir, { recursive: true, force: true });
+  }
+
+  const written = entries.map(entry => entry.relative);
   return { ok: true, stateDir, writtenCount: written.length, written: written.slice(0, 200) };
+}
+
+function isPathContained(baseDir, candidate) {
+  const relative = path.relative(fs.realpathSync(baseDir), candidate);
+  return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
 }
 
 function checkDir(findings, name, dir, createSuggested) {
@@ -276,22 +322,26 @@ function checkFile(findings, name, file, optional) {
 // older than the cutoff (e.g. abandoned staged-edit payload dirs).
 
 function walkState(root, current, files, maxFiles, maxFileBytes) {
-  if (!fs.existsSync(current) || files.length >= maxFiles) return;
+  if (!fs.existsSync(current)) return;
   for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-    if (files.length >= maxFiles) break;
     const full = path.join(current, entry.name);
-    if (entry.isDirectory()) walkState(root, full, files, maxFiles, maxFileBytes);
-    else {
-      const stat = fs.statSync(full);
-      if (stat.size > maxFileBytes) continue;
-      const relative = path.relative(root, full).replaceAll(path.win32.sep, "/");
-      const bytes = fs.readFileSync(full);
-      const text = bytes.toString("utf8");
-      const utf8 = Buffer.from(text, "utf8").equals(bytes);
-      files.push(utf8
-        ? { path: relative, modifiedAt: stat.mtime.toISOString(), content: text }
-        : { path: relative, modifiedAt: stat.mtime.toISOString(), encoding: "base64", content: bytes.toString("base64") });
+    const relative = path.relative(root, full).replaceAll(path.win32.sep, "/");
+    if (entry.isSymbolicLink()) throw new Error(`State export does not support symbolic links: ${relative}`);
+    if (entry.isDirectory()) {
+      walkState(root, full, files, maxFiles, maxFileBytes);
+      continue;
     }
+    if (files.length >= maxFiles) throw new Error(`State export exceeds the maximum file count of ${maxFiles}.`);
+    const stat = fs.statSync(full);
+    if (stat.size > maxFileBytes) {
+      throw new Error(`State export file exceeds the maximum size of ${maxFileBytes} bytes: ${relative}`);
+    }
+    const bytes = fs.readFileSync(full);
+    const text = bytes.toString("utf8");
+    const utf8 = Buffer.from(text, "utf8").equals(bytes);
+    files.push(utf8
+      ? { path: relative, modifiedAt: stat.mtime.toISOString(), content: text }
+      : { path: relative, modifiedAt: stat.mtime.toISOString(), encoding: "base64", content: bytes.toString("base64") });
   }
 }
 

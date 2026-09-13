@@ -19,6 +19,16 @@ if (surface === 'dashboard') {
     minimizeWindow: () => ipcRenderer.invoke('desktop:window:minimize'),
     toggleMaximizeWindow: () => ipcRenderer.invoke('desktop:window:toggle-maximize'),
     closeWindow: () => ipcRenderer.invoke('desktop:window:close'),
+    browser: {
+      getState: () => ipcRenderer.invoke('desktop:browser:get-state'),
+      setBounds: bounds => ipcRenderer.invoke('desktop:browser:set-bounds', bounds),
+      setControl: owner => ipcRenderer.invoke('desktop:browser:set-control', owner),
+      selectSession: nativeSessionId => ipcRenderer.invoke('desktop:browser:select-session', nativeSessionId),
+      selectTab: nativePageId => ipcRenderer.invoke('desktop:browser:select-tab', nativePageId),
+      closeTab: nativePageId => ipcRenderer.invoke('desktop:browser:close-tab', nativePageId),
+      stop: () => ipcRenderer.invoke('desktop:browser:stop'),
+      onState: callback => subscribe('desktop:browser-state', callback, 'Browser-state')
+    },
     copyText: text => ipcRenderer.invoke('url:copy', text),
     openSettings: () => ipcRenderer.invoke('desktop:open-settings'),
     getSettings: () => ipcRenderer.invoke('desktop:settings:get'),
@@ -38,6 +48,7 @@ if (surface === 'dashboard') {
     setNotificationPreferences: patch => ipcRenderer.invoke('desktop:notification-preferences:set', patch),
     exportDiagnosticState: report => ipcRenderer.invoke('desktop:diagnostics:export', report),
     openDiagnosticsFolder: () => ipcRenderer.invoke('desktop:diagnostics:open-folder'),
+    runTunnelDoctor: () => ipcRenderer.invoke('desktop:diagnostics:tunnel-doctor'),
     getLocalDataUsage: () => ipcRenderer.invoke('desktop:local-data:get'),
     clearTemporaryLocalData: () => ipcRenderer.invoke('desktop:local-data:clear-temporary'),
     openLocalDataFolder: () => ipcRenderer.invoke('desktop:local-data:open-folder'),
@@ -50,11 +61,18 @@ if (surface === 'dashboard') {
     restartConnection: () => ipcRenderer.invoke('desktop:restart-connection'),
     reloadDashboard: routeHash => ipcRenderer.invoke('desktop:reload-dashboard', routeHash),
     relaunchApp: () => ipcRenderer.invoke('desktop:relaunch'),
+    logout: clearData => ipcRenderer.invoke('desktop:logout', { clearData: clearData === true }),
     quitApp: () => ipcRenderer.invoke('desktop:quit'),
     stopService: () => ipcRenderer.send('desktop:stop-service'),
     onStatus: callback => subscribe('server:status', callback, 'Status'),
     onWindowState: callback => subscribe('desktop:window-state', callback, 'Window-state'),
     onUpdateStatus: callback => subscribe('desktop:update-status', callback, 'Update-status')
+  });
+} else if (surface === 'pulse') {
+  contextBridge.exposeInMainWorld('relaiPulse', {
+    openDashboard: () => ipcRenderer.invoke('url:open-dashboard'),
+    setExpanded: expanded => ipcRenderer.invoke('pulse:set-expanded', expanded === true),
+    onState: callback => subscribe('pulse:update', callback, 'Pulse-state')
   });
 } else {
   contextBridge.exposeInMainWorld('electronAPI', {

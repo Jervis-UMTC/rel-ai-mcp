@@ -23,18 +23,39 @@ app.whenReady().then(async () => {
   win.webContents.on('console-message', (_event, _level, message) => {
     if (/content security policy|refused to apply inline style/i.test(String(message || ''))) cspErrors.push(String(message));
   });
+  win.webContents.session.webRequest.onBeforeRequest((details, callback) => {
+    callback({ cancel: new URL(details.url).pathname === '/public/dashboard.js' });
+  });
 
   try {
     await win.loadURL(targetUrl);
     const result = await win.webContents.executeJavaScript(`(async () => {
       const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-      history.replaceState(null, '', '#code?task=probe-task');
+      history.replaceState(null, '', '#code?task=probe-task&file=src%2Fnew.js');
       const host = document.createElement('div');
       document.body.replaceChildren(host);
-      const module = await import('/public/ui/features/code/index.js');
-      const data = { tasks: [{ work_id: 'probe-task', title: 'Changes viewer probe', status: 'running', workspace: 'app' }] };
-      await module.mountCode(host, data);
-      for (let attempt = 0; attempt < 50 && !document.querySelector('.monaco-editor .view-lines'); attempt += 1) await wait(50);
+      const module = await import('/public/dashboard-react.js');
+      let snapshot = {
+        tasks: [
+          { work_id: 'probe-task', title: 'Changes viewer probe', status: 'running', workspace: 'app', changedFiles: ['src/example.js', 'src/new.js'] },
+          { work_id: 'no-change-task', title: 'No changes', status: 'completed', workspace: 'app', changedFiles: [] },
+          { work_id: 'support-only-task', title: 'Support only', status: 'completed', workspace: 'app', changedFiles: ['tools/helper.jar'] }
+        ],
+        live: { revisions: { task: 1 } }
+      };
+      const listeners = new Set();
+      const store = {
+        getSnapshot: () => snapshot,
+        subscribe: listener => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        }
+      };
+      module.mountReactFoundation(host, store);
+      window.dispatchEvent(new CustomEvent('relai:route-change', {
+        detail: { section: 'code', path: 'code', params: new URLSearchParams('task=probe-task') }
+      }));
+      for (let attempt = 0; attempt < 50 && (!document.querySelector('.monaco-editor .view-lines') || typeof window.monaco?.editor?.colorize !== 'function'); attempt += 1) await wait(50);
       await wait(300);
       const editorBefore = document.querySelector('.monaco-diff-editor');
       const editors = window.monaco?.editor?.getEditors?.() || [];
@@ -43,10 +64,6 @@ app.whenReady().then(async () => {
       const readOnly = liveEditor?.getOption?.(window.monaco.editor.EditorOption.readOnly) === true;
       const modelLanguage = model?.getLanguageId?.() || '';
       const modelValue = model?.getValue?.() || '';
-      const tokenized = typeof window.monaco?.editor?.tokenize === 'function'
-        ? window.monaco.editor.tokenize(modelValue, modelLanguage)
-        : [];
-      const tokenTypes = [...new Set(tokenized.flatMap(line => line.map(token => token.type)).filter(Boolean))];
       const editorHtml = editorBefore?.innerHTML || '';
       const theme = document.documentElement.dataset.theme === 'light' ? 'vs' : 'vs-dark';
       const colorizedHtml = await window.monaco.editor.colorize(modelValue, modelLanguage, { theme });
@@ -69,15 +86,23 @@ app.whenReady().then(async () => {
         const box = document.querySelector(selector)?.getBoundingClientRect();
         return box ? { width: box.width, height: box.height, top: box.top, left: box.left } : null;
       };
-      module.updateCodeLiveState(host, data);
+      snapshot = {
+        ...snapshot,
+        tasks: snapshot.tasks.map(task => ({ ...task, updatedAt: '2026-09-06T03:20:00.000Z' })),
+        live: { revisions: { task: 2 } }
+      };
+      listeners.forEach(listener => listener());
       await wait(150);
       const positionAfterLiveUpdate = liveEditor?.getPosition?.() || null;
-      return {
+      const result = {
         editorPresent: Boolean(editorBefore),
         inlineDiffEditor: Boolean(document.querySelector('.monaco-diff-editor')),
         readOnly,
         saveButtonPresent: Boolean(document.querySelector('[data-code-save]')),
         changedFileRows: [...document.querySelectorAll('[data-code-file]')].map(button => button.dataset.codeFile || ''),
+        taskOptions: [...document.querySelectorAll('[data-code-task] option')].map(option => option.value),
+        taskReturnHref: document.querySelector('[data-code-task-link]')?.getAttribute('href') || '',
+        selectedFileHeading: document.querySelector('[data-code-file-heading]')?.textContent.trim() || '',
         statusBadges: [...document.querySelectorAll('[data-code-file]')].map(button => {
           const marker = button.querySelector('.code-file-marker');
           const style = marker ? getComputedStyle(marker) : null;
@@ -94,7 +119,6 @@ app.whenReady().then(async () => {
         sameEditorAfterLiveUpdate: editorBefore === document.querySelector('.monaco-diff-editor'),
         modelLanguage,
         modelValue,
-        tokenTypes,
         tokenColors,
         lineHeight,
         lineTops,
@@ -108,6 +132,16 @@ app.whenReady().then(async () => {
           monaco: rectFor('.monaco-editor:not(.gutter)')
         }
       };
+      location.hash = '#tasks?task=probe-task';
+      for (let attempt = 0; attempt < 20 && !document.querySelector('[data-task-id="probe-task"]'); attempt += 1) await wait(25);
+      document.querySelector('[data-task-id="probe-task"]')?.click();
+      for (let attempt = 0; attempt < 20 && !document.querySelector('.task-file-link'); attempt += 1) await wait(25);
+      result.taskFileHrefs = [...document.querySelectorAll('.task-file-link')].map(link => link.getAttribute('href') || '');
+      result.editorCountAfterUnmount = window.monaco?.editor?.getEditors?.().length || 0;
+      result.modelCountAfterUnmount = window.monaco?.editor?.getModels?.().length || 0;
+      location.hash = '#home';
+      await wait(50);
+      return result;
     })()`);
     result.cspErrors = cspErrors;
     fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));

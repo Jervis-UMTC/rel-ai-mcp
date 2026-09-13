@@ -34,10 +34,10 @@ function copyFixture() {
     'src/packageMetadata.js',
     'src/version.js',
     'scripts/release-check.mjs',
+    'scripts/platform-architecture.mjs',
     'scripts/release-bump.mjs',
     'scripts/release-surfaces.mjs',
     'scripts/check-generated.mjs',
-    'scripts/dashboard-css.mjs',
     'scripts/electron-package.mjs',
     'scripts/electron-platform.mjs',
     'scripts/release-artifacts.mjs',
@@ -54,6 +54,11 @@ function copyFixture() {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.copyFileSync(source, destination);
   }
+
+  const semverSource = path.join(root, 'node_modules', 'semver');
+  const semverDestination = path.join(tmp, 'node_modules', 'semver');
+  fs.mkdirSync(path.dirname(semverDestination), { recursive: true });
+  fs.cpSync(semverSource, semverDestination, { recursive: true });
 
   const seedPath = path.join(tmp, 'vendor', 'tunnel-client', 'win32', 'tunnel-client.exe');
   const seedBytes = Buffer.alloc(5 * 1024 * 1024);
@@ -77,13 +82,17 @@ function verifyReleaseBump() {
   run('release-check.mjs');
   const changelogPath = path.join(tmp, 'CHANGELOG.md');
   fs.writeFileSync(changelogPath, fs.readFileSync(changelogPath, 'utf8').replace(/\r?\n/g, '\r\n'));
-  run('release-bump.mjs', ['0.98.0', '--date', '2099-01-01', '--no-changelog']);
-  assert.equal(readJson('release-manifest.json').applicationVersion, '0.98.0',
+  const [major, minor, patch] = readJson('package.json').version.split('.').map(Number);
+  const deferredVersion = `${major}.${minor}.${patch + 1}`;
+  const changelogVersion = `${major}.${minor}.${patch + 2}`;
+
+  run('release-bump.mjs', [deferredVersion, '--date', '2099-01-01', '--no-changelog']);
+  assert.equal(readJson('release-manifest.json').applicationVersion, deferredVersion,
     'release manifest must follow the requested bump even when changelog insertion is intentionally deferred');
-  assert.doesNotMatch(fs.readFileSync(changelogPath, 'utf8'), /^## \[0\.98\.0\]/m);
+  assert.equal(fs.readFileSync(changelogPath, 'utf8').includes(`## [${deferredVersion}]`), false);
 
   run('release-bump.mjs', [
-    '0.99.0',
+    changelogVersion,
     '--date', '2099-01-02',
     '--headline', 'Release workflow automation',
     '--note', 'Version files update together',
@@ -91,12 +100,12 @@ function verifyReleaseBump() {
   ]);
   run('release-check.mjs');
 
-  assert.equal(readJson('package.json').version, '0.99.0');
-  assert.equal(readJson('package-lock.json').packages[''].version, '0.99.0');
-  assert.equal(readJson('electron/package.json').version, '0.99.0');
-  assert.equal(readJson('electron/package-lock.json').packages[''].version, '0.99.0');
-  assert.equal(readJson('release-manifest.json').applicationVersion, '0.99.0');
-  assert.match(fs.readFileSync(changelogPath, 'utf8'), /^## \[0\.99\.0\] — 2099-01-02/m);
+  assert.equal(readJson('package.json').version, changelogVersion);
+  assert.equal(readJson('package-lock.json').packages[''].version, changelogVersion);
+  assert.equal(readJson('electron/package.json').version, changelogVersion);
+  assert.equal(readJson('electron/package-lock.json').packages[''].version, changelogVersion);
+  assert.equal(readJson('release-manifest.json').applicationVersion, changelogVersion);
+  assert.ok(fs.readFileSync(changelogPath, 'utf8').includes(`## [${changelogVersion}] — 2099-01-02`));
 }
 
 function verifyPackageContracts() {
@@ -115,24 +124,37 @@ function verifyPackageContracts() {
   assert.deepEqual(electronLockRoot.devDependencies || {}, electronPackage.devDependencies || {}, 'Electron development dependencies must stay synchronized with the lockfile');
   assert.equal(rootPackage.allowScripts?.['node-pty@1.1.0'], true, 'root installs must explicitly approve the pinned node-pty native build under npm 12');
   assert.equal(electronPackage.allowScripts?.['node-pty@1.1.0'], true, 'Electron installs must explicitly approve the pinned node-pty native build under npm 12');
-  assert.match(String(rootPackage.scripts['test:all'] || ''), /verify:node-pty[\s\S]*verify:generated/, 'the full test gate must verify the native PTY runtime before the long suite');
+  assert.match(String(rootPackage.scripts.check || ''), /verify:node-pty[\s\S]*verify:generated/, 'the static parent gate must verify the native PTY runtime before generated assets');
+  assert.match(String(rootPackage.scripts['test:all'] || ''), /npm run check[\s\S]*npm run test:security[\s\S]*npm run test:electron[\s\S]*npm run test:integration[\s\S]*npm run test:unit/, 'the aggregate source gate must preserve static, security, Electron, integration, and everyday regression parents');
+  assert.match(String(rootPackage.scripts['test:integration'] || ''), /test:native-tasks-release-gate[\s\S]*run-repository-intelligence-tests\.mjs/, 'the integration parent must preserve native Tasks and Repository Intelligence coverage');
+  assert.match(String(rootPackage.scripts['test:release'] || ''), /test:all[\s\S]*release-workflow-smoke\.mjs[\s\S]*knip:production[\s\S]*audit:production[\s\S]*audit:packaging/, 'the release source parent must preserve source, workflow, production reachability, and dependency audit gates');
+  assert.doesNotMatch(String(rootPackage.scripts['test:release'] || ''), /release:check/, 'finalized release metadata belongs to the dedicated preflight gate and must not be rerun by the source release parent');
+  assert.deepEqual(
+    electronPackage.build.extraResources.find(resource => resource.to === 'src')?.filter,
+    ['**/*.js', '**/*.ts'],
+    'Electron packaging must include both legacy JavaScript and migrated TypeScript backend modules'
+  );
+  const packagedNodeModules = electronPackage.build.extraResources.find(resource => resource.to === 'node_modules')?.filter || [];
+  assert.ok(packagedNodeModules.includes('yallist/**'), 'Electron packaging must include yallist because the bundled semver dependency resolves it through lru-cache at runtime');
 
   for (const name of ['electron:build', 'electron:build:linux', 'electron:build:mac', 'electron:dist', 'electron:dist:linux', 'electron:dist:mac']) {
     assert.match(String(rootPackage.scripts[name] || ''), /scripts\/electron-package\.mjs/, `${name} must use the shared cross-platform packager`);
   }
-  for (const name of ['electron:size', 'electron:size:linux']) {
+  for (const name of ['electron:size', 'electron:size:windows', 'electron:size:linux']) {
     const command = String(rootPackage.scripts[name] || '');
     assert.match(command, /scripts\/electron-package-size\.mjs/, `${name} must keep package-size reporting available`);
     assert.doesNotMatch(command, /--strict\b/, `${name} must not turn ordinary measured growth into a release blocker`);
   }
   assert.equal(rootPackage.scripts['test:installed'], undefined);
   assert.match(String(rootPackage.scripts['release:check'] || ''), /verify:generated[\s\S]*release-check\.mjs/, 'release preflight must reject stale generated assets before packaging starts');
-  assert.match(String(rootPackage.scripts['build:css'] || ''), /dashboard-css\.mjs\b/, 'normal CSS builds must use the shared dashboard generator');
-  assert.match(String(rootPackage.scripts['watch:css'] || ''), /dashboard-css\.mjs\b[\s\S]*--watch\b/, 'CSS watch mode must use the same shared generator contract as normal builds');
+  assert.match(String(rootPackage.scripts['build:frontend'] || ''), /vite build[\s\S]*write-dashboard-generated-manifest\.mjs/, 'normal frontend builds must use Vite and record generated-asset integrity');
+  assert.match(String(rootPackage.scripts['dev:frontend'] || ''), /\bvite\b/, 'frontend development must expose Vite HMR');
+  assert.equal(rootPackage.scripts['build:css'], undefined, 'the obsolete standalone CSS generator must be removed');
+  assert.equal(rootPackage.scripts['build:js'], undefined, 'the obsolete standalone JavaScript generator must be removed');
 
   const generatedCheck = fs.readFileSync(path.join(tmp, 'scripts', 'check-generated.mjs'), 'utf8');
-  assert.match(generatedCheck, /verifyGeneratedAssets/, 'generated-asset verification must use the non-destructive shared verifier');
-  assert.doesNotMatch(generatedCheck, /build:css|git\s+diff|runNpm/, 'generated-asset verification must not repair tracked files before reporting staleness');
+  assert.match(generatedCheck, /verifyDashboardGeneratedState/, 'generated-asset verification must use the platform-independent source and output integrity manifest');
+  assert.doesNotMatch(generatedCheck, /mergeConfig|viteConfig|git\s+diff|runNpm/, 'generated-asset verification must not rebuild or repair tracked files before reporting staleness');
 
   assert.equal(electronPackage.build.electronUpdaterCompatibility, '>=2.16');
   assert.deepEqual(electronPackage.build.electronLanguages, ['en-US']);
@@ -176,13 +198,11 @@ function verifyPackageContracts() {
 
 function verifyWorkflowContracts() {
   const workflow = fs.readFileSync(path.join(tmp, '.github', 'workflows', 'release.yml'), 'utf8');
-  const productionAuditIndex = workflow.indexOf('npm run audit:production');
-  const packagingAuditIndex = workflow.indexOf('npm run audit:packaging');
+  const releaseSourceGateIndex = workflow.indexOf('npm run test:release');
   const windowsBuildIndex = workflow.indexOf('npm run electron:dist:windows');
 
-  assert.ok(productionAuditIndex >= 0);
-  assert.ok(packagingAuditIndex > productionAuditIndex);
-  assert.ok(packagingAuditIndex < windowsBuildIndex);
+  assert.ok(releaseSourceGateIndex >= 0);
+  assert.ok(releaseSourceGateIndex < windowsBuildIndex);
   assert.doesNotMatch(workflow, /Install gateway test dependencies|gateway\/package\.json/i, 'public release workflow must not depend on the private gateway workspace');
   assert.doesNotMatch(workflow, /scripts\/fetch-(?:tunnel-client|zoekt)/, 'platform workflows must let the shared packager provision pinned runtime binaries');
   assert.match(workflow, /preflight:[\s\S]*Verify release consistency[\s\S]*npm run release:check/, 'release preflight must run generated-asset and version consistency checks before platform packaging jobs');
@@ -231,7 +251,8 @@ function verifyWorkflowContracts() {
     /REL_AI_INSTALLER_TEST_ISOLATED:\s*'1'/,
     /REL_AI_ALLOW_PRODUCTION_INSTALLER_TEST:\s*'1'/,
     /latest-linux\.yml/,
-    /electron-size-report-linux\.json/,
+    /npm run electron:size:windows/,
+    /npm run electron:size:linux/,
     /actions\/download-artifact@/,
     /merge-multiple: true/,
     /npm run prepare:release-assets/,
@@ -247,12 +268,14 @@ function verifyWorkflowContracts() {
     /CSC_IDENTITY_AUTO_DISCOVERY:\s*'false'/,
     /verify-macos-release\.mjs --unpacked/,
     /System Settings → Privacy & Security → Open Anyway/,
-    /verify-tunnel-client\.mjs/,
-    /npm run test:observability-browser/,
-    /npm run test:native-tasks-release-gate/
+    /npm run test:frontend/,
+    /npm run test:release/
   ]) assert.match(workflow, pattern);
 
   assert.doesNotMatch(workflow, /test:installed|REL_AI_SMOKE_INSTALLER|release-evidence-check|uninstall/i);
+  assert.doesNotMatch(workflow, /electron-size-report(?:-linux)?\.json/, 'package-size budgets must be checked without generating disposable release report files');
+  assert.doesNotMatch(workflow, /run:\s*npm run verify:color-tokens/, 'platform packaging jobs must rely on the shared packager color-token check instead of pre-running it');
+  assert.doesNotMatch(workflow, /run:\s*node scripts\/verify-tunnel-client\.mjs/, 'platform release orchestration must rely on the shared packager provenance verification instead of rerunning it directly');
   assert.doesNotMatch(workflow, /status[^\n]*-ne 124|timeout --signal=TERM[^\n]*xvfb-run/, 'Linux smoke validation must not treat forced timeout as a successful shutdown.');
   const macVerifier = fs.readFileSync(path.join(tmp, 'scripts', 'verify-macos-release.mjs'), 'utf8');
   for (const pattern of [

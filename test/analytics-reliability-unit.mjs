@@ -4,16 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { OUTCOME_CLASSES, classifyAnalyticsOutcome } from '../src/analyticsOutcome.js';
-import { withStateDatabase } from '../src/stateDatabase.js';
+import { withStateDatabase } from '../src/stateDatabase.ts';
 import { flushLocalAnalytics, recordLocalToolOutcome, readLocalUsageSnapshot } from '../src/localAnalytics.js';
 import { analyticsBounds, analyticsRangeScope, normalizeUsageSnapshot } from '../src/ui/features/usage/range-model.js';
-import { renderUsage } from '../src/ui/features/usage/render.js';
+import { analyticsMetrics } from '../src/ui/features/usage/render.js';
 
 assert.equal(classifyAnalyticsOutcome({ ok: true }), OUTCOME_CLASSES.SUCCESS);
 assert.equal(classifyAnalyticsOutcome({ ok: false, operationName: 'relai_validate', errorMessage: 'test exited 1' }), OUTCOME_CLASSES.OPERATION_FAILURE);
 assert.equal(classifyAnalyticsOutcome({ ok: false, operationName: 'relai_edit', errorCode: 'EDIT_CONTEXT_MISMATCH' }), OUTCOME_CLASSES.RECOVERABLE_FAILURE);
-assert.equal(classifyAnalyticsOutcome({ ok: false, errorMessage: 'Path is a directory: node_modules' }), OUTCOME_CLASSES.INFRASTRUCTURE_FAILURE);
+assert.equal(classifyAnalyticsOutcome({ ok: false, errorMessage: 'Path is a directory: node_modules' }), OUTCOME_CLASSES.UNCLASSIFIED_FAILURE);
 assert.equal(classifyAnalyticsOutcome({ ok: false, errorMessage: 'ExceptionGroup: unhandled errors in a TaskGroup' }), OUTCOME_CLASSES.INFRASTRUCTURE_FAILURE);
+assert.equal(classifyAnalyticsOutcome({ ok: false, operationName: 'relai_validate', errorCode: 'ERR_MODULE_NOT_FOUND' }), OUTCOME_CLASSES.INFRASTRUCTURE_FAILURE, 'validator infrastructure crashes must not count as reliable operation failures');
 assert.equal(classifyAnalyticsOutcome({ ok: false, errorMessage: 'Operation cancelled.' }), OUTCOME_CLASSES.CANCELLED);
 
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-reliability-'));
@@ -27,9 +28,9 @@ try {
 
   const snapshot = readLocalUsageSnapshot(config, '2026-08');
   assert.equal(snapshot.totals.failures, 4, 'raw operation failures remain visible');
-  assert.equal(snapshot.totals.reliabilityCalls, 3, 'explicit cancellation is excluded from reliability denominator');
+  assert.equal(snapshot.totals.reliabilityCalls, 2, 'cancellations and unclassified failures are excluded from the reliability denominator');
   assert.equal(snapshot.totals.reliableCalls, 2, 'validation and recoverable edit failures still count as reliable tool behavior');
-  assert.equal(snapshot.totals.infrastructureFailures, 1);
+  assert.equal(snapshot.totals.infrastructureFailures, 0);
   assert.equal(snapshot.totals.operationFailures, 1);
   assert.equal(snapshot.totals.recoverableFailures, 1);
   assert.equal(snapshot.totals.cancellations, 1);
@@ -37,7 +38,7 @@ try {
   const model = normalizeUsageSnapshot(snapshot, '2026-08');
   const bounds = analyticsBounds('24h', { now: new Date('2026-08-15T03:00:00Z') });
   const scope = analyticsRangeScope([model], bounds);
-  assert.equal(scope.reliabilityRate.toFixed(2), '66.67');
+  assert.equal(scope.reliabilityRate.toFixed(2), '100.00');
   assert.equal(scope.operationSuccessRate, 0, 'all recorded operations in this fixture failed even though two failures were reliable tool behavior');
 
   const legacy = normalizeUsageSnapshot({
@@ -53,14 +54,10 @@ try {
   assert.equal(legacyScope.reliabilityRate, null, 'legacy analytics must not be guessed into the new reliability denominator');
   assert.equal(legacyScope.reliabilityCalls, 0);
 
-  const legacyContent = {
-    innerHTML: '',
-    querySelector: () => null,
-    querySelectorAll: () => []
-  };
-  renderUsage(legacyContent, { bounds, current: legacyScope, previous: analyticsRangeScope([], bounds) });
-  assert.match(legacyContent.innerHTML, /Measured after new actions run/);
-  assert.doesNotMatch(legacyContent.innerHTML, /Operation success/);
+  const legacyMetrics = analyticsMetrics(legacyScope, analyticsRangeScope([], bounds));
+  assert.equal(legacyMetrics.some(metric => metric.key === 'reliabilityRate'), false, 'Reliability classification must remain diagnostic rather than a normal metric tile');
+  assert.equal(legacyMetrics.some(metric => metric.key === 'infrastructureFailures'), false, 'Internal errors must remain exceptional rather than a normal metric tile');
+  assert.equal(legacyMetrics.some(metric => metric.label === 'Operation success'), false);
 
   const legacyStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-reliability-v1-'));
   try {
@@ -98,27 +95,94 @@ try {
     await flushLocalAnalytics({ stateDir: legacyStateDir });
     assert.equal(fs.existsSync(analyticsDir), false, 'legacy analytics JSON must be removed after SQLite migration');
     const migratedDocument = withStateDatabase({ stateDir: legacyStateDir }, db => JSON.parse(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08').payload));
-    assert.equal(migratedDocument.schemaVersion, 2);
+    assert.equal(migratedDocument.schemaVersion, 4);
     assert.equal(migratedDocument.totals.reliabilityCalls, 1);
   } finally {
     fs.rmSync(legacyStateDir, { recursive: true, force: true });
   }
 
-  const content = {
-    innerHTML: '',
-    querySelector: () => null,
-    querySelectorAll: () => []
-  };
-  renderUsage(content, { bounds, current: scope, previous: analyticsRangeScope([], bounds) });
-  assert.match(content.innerHTML, />Reliable (?:calls|actions)</);
-  assert.doesNotMatch(content.innerHTML, />Operation success</);
-  assert.match(content.innerHTML, />System errors</);
-  assert.match(content.innerHTML, /Rel\.AI internal errors only/);
-  assert.doesNotMatch(content.innerHTML, />Retryable errors</);
-  assert.match(content.innerHTML, /usage-side-by-side/);
-  const failureHeading = content.innerHTML.includes('What went wrong') ? 'What went wrong' : 'Failure categories';
-  const projectHeading = content.innerHTML.includes('Project activity') ? 'Project activity' : 'Workspace activity';
-  assert.ok(content.innerHTML.indexOf(failureHeading) < content.innerHTML.indexOf(projectHeading), 'failure categories should sit beside project activity in the compact final row');
+  const previousStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-reliability-v2-'));
+  try {
+    const previousAggregate = {
+      requests: 10, toolCalls: 10, successes: 9, failures: 1, executionMs: 100,
+      reliabilityCalls: 10, reliableCalls: 9, infrastructureFailures: 1,
+      operationFailures: 0, recoverableFailures: 0, cancellations: 0
+    };
+    const previousDocument = {
+      schemaVersion: 2,
+      month: '2026-08',
+      totals: previousAggregate,
+      tools: [], workspaces: [], workspaceTools: [],
+      failureCategories: [{ category: 'runtime', failures: 1 }], workspaceFailureCategories: [],
+      performancePhases: {},
+      hours: [{
+        hour: '2026-08-15T02', ...previousAggregate,
+        tools: [], workspaces: [], workspaceTools: [],
+        failureCategories: [{ category: 'runtime', failures: 1 }], workspaceFailureCategories: [], performancePhases: {}
+      }]
+    };
+    withStateDatabase({ stateDir: previousStateDir }, db => {
+      db.prepare('INSERT INTO analytics_months(month,updated_at_ms,payload) VALUES(?,?,?)').run('2026-08', Date.now(), JSON.stringify(previousDocument));
+    });
+    const migrated = readLocalUsageSnapshot({ stateDir: previousStateDir }, '2026-08');
+    assert.equal(migrated.totals.successes, 9, 'schema-v2 raw successes must be preserved');
+    assert.equal(migrated.totals.failures, 1, 'schema-v2 raw failures must be preserved');
+    assert.equal(migrated.totals.reliabilityCalls, 0, 'schema-v2 reliability counters are ambiguous under the stricter classifier and must be reset');
+    assert.equal(migrated.totals.infrastructureFailures, 0, 'schema-v2 internal-error counts must not be relabeled as confirmed failures');
+    recordLocalToolOutcome({ stateDir: previousStateDir }, { tool: 'relai_read', workspace: 'repo', ok: true, durationMs: 5, at: '2026-08-15T02:30:00Z' });
+    const persistedDocument = withStateDatabase({ stateDir: previousStateDir }, db => JSON.parse(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08').payload));
+    assert.equal(persistedDocument.schemaVersion, 4);
+    assert.equal(persistedDocument.totals.successes, 10);
+    assert.equal(persistedDocument.totals.failures, 1);
+    assert.equal(persistedDocument.totals.reliabilityCalls, 1);
+  } finally {
+    fs.rmSync(previousStateDir, { recursive: true, force: true });
+  }
+
+  const v3StateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relai-reliability-v3-'));
+  try {
+    const v3Aggregate = {
+      requests: 10, toolCalls: 10, successes: 9, failures: 1, executionMs: 100,
+      reliabilityCalls: 10, reliableCalls: 9, infrastructureFailures: 0,
+      operationFailures: 1, recoverableFailures: 0, cancellations: 0
+    };
+    const v3Document = {
+      schemaVersion: 3,
+      month: '2026-08',
+      totals: v3Aggregate,
+      tools: [], workspaces: [], workspaceTools: [],
+      failureCategories: [{ category: 'process', failures: 1 }], workspaceFailureCategories: [],
+      performancePhases: {},
+      hours: [{
+        hour: '2026-08-15T02', ...v3Aggregate,
+        tools: [], workspaces: [], workspaceTools: [],
+        failureCategories: [{ category: 'process', failures: 1 }], workspaceFailureCategories: [], performancePhases: {}
+      }]
+    };
+    withStateDatabase({ stateDir: v3StateDir }, db => {
+      db.prepare('INSERT INTO analytics_months(month,updated_at_ms,payload) VALUES(?,?,?)').run('2026-08', Date.now(), JSON.stringify(v3Document));
+    });
+    const migrated = readLocalUsageSnapshot({ stateDir: v3StateDir }, '2026-08');
+    assert.equal(migrated.totals.reliabilityCalls, 10, 'schema-v3 reliability counters must survive the v4 migration');
+    assert.equal(migrated.totals.reliableCalls, 9);
+    assert.equal(migrated.totals.operationFailures, 1);
+    recordLocalToolOutcome({ stateDir: v3StateDir }, { tool: 'relai_read', operationName: 'read', taskIntent: 'investigation', workspace: 'repo', ok: true, durationMs: 5, at: '2026-08-15T02:30:00Z' });
+    const persistedDocument = withStateDatabase({ stateDir: v3StateDir }, db => JSON.parse(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08').payload));
+    assert.equal(persistedDocument.schemaVersion, 4);
+    assert.equal(persistedDocument.totals.reliabilityCalls, 11);
+    assert.equal(persistedDocument.totals.reliableCalls, 10);
+    assert.equal(persistedDocument.activityMatrix.find(row => row.intent === 'investigation' && row.useCase === 'explore')?.toolCalls, 1);
+  } finally {
+    fs.rmSync(v3StateDir, { recursive: true, force: true });
+  }
+
+  const metrics = analyticsMetrics(scope, analyticsRangeScope([], bounds));
+  assert.equal(metrics.some(metric => metric.label === 'Reliable actions'), false);
+  assert.equal(metrics.some(metric => metric.label === 'Internal errors'), false);
+  assert.equal(metrics.some(metric => metric.label === 'Successful actions'), true);
+  assert.equal(metrics.some(metric => metric.label === 'Retryable problems'), true);
+  assert.equal(metrics.some(metric => metric.label === 'Operation success'), false);
+  assert.equal(metrics.some(metric => metric.label === 'Retryable errors'), false);
 
   await flushLocalAnalytics(config);
   const persisted = withStateDatabase(config, db => String(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08')?.payload || ''));

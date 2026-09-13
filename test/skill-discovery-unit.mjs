@@ -25,16 +25,22 @@ try {
   writeSkill(userRoot, 'release-user', 'release-check', 'User fallback release checks.', 'User version.');
   writeSkill(userRoot, 'review', 'code-review', 'Review repository changes.', 'Read only.');
   writeSkill(userRoot, 'debug', 'debug-runtime', 'Debug runtime failures and timeout problems.', 'Trace the failure.');
+  writeSkill(userRoot, 'find', 'find-skills', 'Helps users discover skills and existing functionality.', 'Find relevant skills.');
   writeSkill(userRoot, 'general', 'general-helper', 'General guidance and repository assistance.', 'Generic help.');
 
   const discovered = discoverSkills(workspace, { userRoot });
-  assert.deepEqual(discovered.map(item => item.name), ['code-review', 'debug-runtime', 'general-helper', 'release-check']);
+  assert.deepEqual(discovered.map(item => item.name), ['code-review', 'debug-runtime', 'find-skills', 'general-helper', 'release-check']);
   assert.equal(discovered.find(item => item.name === 'release-check').source, 'project', 'project skills must override user skills with the same name');
   assert.equal(discovered.find(item => item.name === 'code-review').path, 'user:code-review', 'user skill discovery must not disclose the home path');
   const suggested = selectRelevantSkills(discovered, 'Fix the runtime timeout and debug the failing connection.', { limit: 10 });
   assert.equal(suggested[0].name, 'debug-runtime', 'task wording should rank the most relevant discovered skill first');
   assert.match(suggested[0].reason, /runtime|debug|timeout/i);
   assert.equal(suggested.some(item => item.name === 'general-helper'), false, 'common function words must not make an unrelated skill relevant');
+
+  const genericDiscovery = selectRelevantSkills(discovered, 'Optimize the skill discovery context and remove generic matches.', { limit: 10 });
+  assert.equal(genericDiscovery.some(item => item.name === 'find-skills'), false, 'generic skill/discovery vocabulary must not inject an unrelated skill');
+  const explicitDiscovery = selectRelevantSkills(discovered, 'Find a skill for database migrations.', { limit: 10 });
+  assert.equal(explicitDiscovery[0]?.name, 'find-skills', 'an explicit multi-term skill-name intent must still discover the matching skill');
 
   const userSkill = readDiscoveredSkill(workspace, 'code-review', { userRoot });
   assert.match(userSkill.content, /Read only/);

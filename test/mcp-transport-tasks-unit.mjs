@@ -10,9 +10,9 @@ import {
   CLIENT_INFO_META_KEY,
   PROTOCOL_VERSION_META_KEY
 } from '@modelcontextprotocol/server';
-import { DEFAULT_MAX_BODY_BYTES, normalizeMaxBodyBytes, readRawBody, sendJson } from '../src/http/io.js';
-import { createHttpRequestAbortScope, expectedMcpName } from '../src/http/mcpTransport.js';
-import { resolveHttpRequestTimeoutMs } from '../src/httpServer.js';
+import { DEFAULT_MAX_BODY_BYTES, normalizeMaxBodyBytes, readRawBody, sendJson } from '../src/http/io.ts';
+import { createHttpRequestAbortScope, expectedMcpName } from '../src/http/mcpTransport.ts';
+import { resolveHttpRequestTimeoutMs } from '../src/httpServer.ts';
 import {
   createNativeTask,
   getNativeTask,

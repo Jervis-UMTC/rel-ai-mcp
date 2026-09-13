@@ -1,10 +1,32 @@
 const MAX_DIAGNOSTICS_PER_WORKSPACE = 32;
 const diagnosticsByWorkspace = new Map();
 
+function repositoryIndexSnapshot(status = {}) {
+  const metadata = status?.metadata;
+  return {
+    dirty: status?.dirty === true,
+    metadata: metadata ? {
+      generation: Number(metadata.generation || 0),
+      freshness: String(metadata.freshness || ''),
+      truncated: metadata.truncated === true,
+      needsReconcile: metadata.needsReconcile === true
+    } : null
+  };
+}
+
+function repositoryIndexChanged(status = {}, expectedGeneration = 0) {
+  const snapshot = repositoryIndexSnapshot(status);
+  const currentGeneration = Number(snapshot.metadata?.generation || 0);
+  const expected = Number(expectedGeneration || 0);
+  return snapshot.dirty
+    || (currentGeneration > 0 && expected > 0 && currentGeneration !== expected);
+}
+
 function repositoryFreshness(status = {}, generation = null) {
-  const metadata = status?.metadata || {};
+  const snapshot = repositoryIndexSnapshot(status);
+  const metadata = snapshot.metadata || {};
   if (metadata.freshness === 'partial' || metadata.truncated === true) return 'partial';
-  if (status?.dirty === true || metadata.needsReconcile === true || ['stale', 'runtime-stale'].includes(metadata.freshness)) return 'stale';
+  if (snapshot.dirty || metadata.needsReconcile === true || ['stale', 'runtime-stale'].includes(metadata.freshness)) return 'stale';
   const verifiedGeneration = Number(metadata.generation || 0);
   const requestedGeneration = Number(generation?.id || generation || 0);
   if (verifiedGeneration > 0 && (!requestedGeneration || verifiedGeneration === requestedGeneration)) return 'current';
@@ -34,4 +56,10 @@ function workspaceAlias(workspace) {
   return String(typeof workspace === 'string' ? workspace : workspace?.alias || '').trim();
 }
 
-export { recentIntelligenceDiagnostics, recordIntelligenceDiagnostic, repositoryFreshness };
+export {
+  recentIntelligenceDiagnostics,
+  recordIntelligenceDiagnostic,
+  repositoryFreshness,
+  repositoryIndexChanged,
+  repositoryIndexSnapshot
+};

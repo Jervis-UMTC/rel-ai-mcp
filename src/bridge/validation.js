@@ -4,8 +4,8 @@ import { selectValidationLevel } from '../validationStrategy.js';
 import { resolvePolicy } from '../policyResolver.js';
 import { clampNumber } from './limits.js';
 import { getCurrentTaskAbortSignal, getCurrentToolActivityContext } from '../toolActivity.js';
-import { readTaskIntegrity, readWorkspaceIntegrity, taskOwnedChangedFiles } from '../taskIntegrity.js';
-import { readRecentWorkflowEvidence, recordWorkflowEvidenceBatch } from '../taskHistoryStore.js';
+import { readTaskIntegrity, readWorkspaceIntegrity, taskOwnedChangedFiles } from '../taskIntegrity.ts';
+import { readRecentWorkflowEvidence, recordWorkflowEvidenceBatch } from '../taskHistoryStore.ts';
 import { buildWorkflowEvidenceReceipt, checkEvidenceReusable } from '../workflow/evidence.js';
 import { sanitizeDisplayText } from '../taskObservability.js';
 import { combineAbortSignals } from '../abortSignals.js';
@@ -179,6 +179,8 @@ async function relaiVerify(workspace, config, args = {}, context = {}) {
           commandString: command,
           timeout: clampNumber(args.timeoutMs, 1000, 24 * 60 * 60 * 1000, 120000),
           signal,
+          resourceClass: 'heavy',
+          resourceOwner: workspace.alias,
           ...(fullOutput ? { maxOutputBytes: 16 * 1024 * 1024 } : {})
         }, config));
         } finally {

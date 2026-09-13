@@ -1,0 +1,8 @@
+{
+  "name": "@rel-ai/contracts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./*.ts"
+  }
+}

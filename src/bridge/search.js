@@ -100,7 +100,7 @@ async function runWorkspaceSearch(workspace, gitArgs, args, maxResults, signal) 
   for (const source of sources) {
     if (signal?.aborted) throw searchAbortError(signal);
     const scoped = sourceWorkspace(workspace, source);
-    const remaining = Math.max(1, maxResults - matches.length + 1);
+    const remaining = Math.max(0, maxResults - matches.length);
     let result = await runGitGrep(scoped, gitArgs, remaining, signal);
     if (result.exitCode !== 0 && result.exitCode !== 1) {
       const failure = String(result.stderr || result.error || '');

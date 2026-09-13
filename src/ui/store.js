@@ -1,10 +1,19 @@
 // Canonical dashboard client state. Aggregate refreshes replace the whole state;
 // typed domain deltas update only their owned projection and are ordered by revision.
-let _state = {};
+import { createStore } from 'zustand/vanilla';
+import { DASHBOARD_LIVE_EVENTS, createEmptyDashboardRevisions } from './generated/events-contract.js';
+
+const dashboardStore = createStore(() => ({}));
+let _state = dashboardStore.getState();
 let _streamId = '';
 let _revisions = emptyRevisions();
 
-export function get() { return _state; }
+export function getSnapshot() { return dashboardStore.getState(); }
+
+export function subscribe(listener) {
+  if (typeof listener !== 'function') return () => {};
+  return dashboardStore.subscribe(listener);
+}
 
 export function init(initial) {
   const next = initial || {};
@@ -13,14 +22,21 @@ export function init(initial) {
     _streamId = String(incomingLive.streamId || '');
     _revisions = { ...emptyRevisions(), ...(incomingLive.revisions || {}) };
   }
-  _state = next;
-  syncLiveMetadata();
+  _state = { ...next };
+  commit();
+  return _state;
 }
 
 export function patchLocalConnection(patch = {}) {
-  if (Object.hasOwn(patch, 'desktopStatus')) _state.desktopStatus = patch.desktopStatus;
-  if (Object.hasOwn(patch, 'connectionState')) _state.connectionState = patch.connectionState;
-  syncLiveMetadata();
+  const hasDesktopStatus = Object.hasOwn(patch, 'desktopStatus');
+  const hasConnectionState = Object.hasOwn(patch, 'connectionState');
+  const changed = (hasDesktopStatus && _state.desktopStatus !== patch.desktopStatus)
+    || (hasConnectionState && _state.connectionState !== patch.connectionState);
+  if (!changed) return _state;
+  _state = { ..._state };
+  if (hasDesktopStatus) _state.desktopStatus = patch.desktopStatus;
+  if (hasConnectionState) _state.connectionState = patch.connectionState;
+  commit();
   return _state;
 }
 
@@ -29,18 +45,20 @@ export function applyLiveEvent(type, payload = {}) {
   if (!domain) return { accepted: false, state: _state, domain: '' };
   const streamId = String(payload.streamId || '');
   if (_streamId && streamId && streamId !== _streamId) return { accepted: false, state: _state, domain };
-  if (!_streamId && streamId) _streamId = streamId;
 
   const revision = Math.max(0, Number(payload.revision || 0));
   if (revision <= Number(_revisions[domain] || 0)) return { accepted: false, state: _state, domain };
-  _revisions[domain] = revision;
+
+  if (!_streamId && streamId) _streamId = streamId;
+  _revisions = { ..._revisions, [domain]: revision };
+  _state = { ..._state };
 
   if (type === 'task.updated') applyTaskDelta(payload);
   else if (type === 'connection.updated') applyConnectionDelta(payload);
   else if (type === 'workspace.updated') applyWorkspaceDelta(payload);
   else if (type === 'process.updated') _state.managedProcesses = Array.isArray(payload.managedProcesses) ? payload.managedProcesses : [];
 
-  syncLiveMetadata();
+  commit();
   return { accepted: true, state: _state, domain };
 }
 
@@ -75,7 +93,7 @@ function mergeTaskUpdates(updates) {
 }
 
 function mergeActiveTaskUpdates(updates) {
-  const activity = _state.taskActivity || {};
+  const activity = { ...(_state.taskActivity || {}) };
   const byId = new Map();
   for (const task of Array.isArray(activity.tasks) ? activity.tasks : []) {
     const id = taskIdentity(task);
@@ -205,11 +223,19 @@ function applyWorkspaceDelta(payload) {
 
 function syncWorkspaceOperationalStates(states) {
   if (!Array.isArray(_state.config?.workspaces)) return;
-  _state.config.workspaces = _state.config.workspaces.map(workspace => (
-    states[workspace.alias]
-      ? { ...workspace, operational: states[workspace.alias] }
-      : workspace
-  ));
+  _state.config = {
+    ..._state.config,
+    workspaces: _state.config.workspaces.map(workspace => (
+      states[workspace.alias]
+        ? { ...workspace, operational: states[workspace.alias] }
+        : workspace
+    ))
+  };
+}
+
+function commit() {
+  syncLiveMetadata();
+  dashboardStore.setState(_state, true);
 }
 
 function syncLiveMetadata() {
@@ -221,14 +247,14 @@ function syncLiveMetadata() {
 }
 
 function domainForEvent(type) {
-  if (type === 'task.updated') return 'task';
-  if (type === 'connection.updated') return 'connection';
-  if (type === 'workspace.updated') return 'workspace';
-  if (type === 'process.updated') return 'process';
-  if (type === 'diagnostics.updated') return 'diagnostics';
+  if (type === DASHBOARD_LIVE_EVENTS.TASK_UPDATED) return 'task';
+  if (type === DASHBOARD_LIVE_EVENTS.CONNECTION_UPDATED) return 'connection';
+  if (type === DASHBOARD_LIVE_EVENTS.WORKSPACE_UPDATED) return 'workspace';
+  if (type === DASHBOARD_LIVE_EVENTS.PROCESS_UPDATED) return 'process';
+  if (type === DASHBOARD_LIVE_EVENTS.DIAGNOSTICS_UPDATED) return 'diagnostics';
   return '';
 }
 
 function emptyRevisions() {
-  return { task: 0, connection: 0, workspace: 0, process: 0, diagnostics: 0, config: 0, analytics: 0 };
+  return { ...createEmptyDashboardRevisions(), config: 0, analytics: 0 };
 }

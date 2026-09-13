@@ -8,6 +8,9 @@ import {
 } from '../src/ui/colorTokens.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const outputRoot = process.env.REL_AI_COLOR_OUTPUT_ROOT
+  ? path.resolve(process.env.REL_AI_COLOR_OUTPUT_ROOT)
+  : root;
 const outputs = [
   ['src/ui/styles/color-tokens.css', renderDashboardTokenCss()],
   ['electron/renderer/color-tokens.css', renderElectronTokenCss()],
@@ -16,7 +19,7 @@ const outputs = [
 const check = process.argv.includes('--check');
 const failures = [];
 for (const [relativePath, content] of outputs) {
-  const target = path.join(root, relativePath);
+  const target = path.join(outputRoot, relativePath);
   if (check) {
     const current = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
     if (current !== content) failures.push(relativePath);

@@ -20,6 +20,16 @@ try {
   assert.equal(reused.reused, true);
   assert.equal(reused.readiness?.verified, true);
 
+  const concurrentArgs = { command, kind: 'service', purpose: 'concurrent reuse fixture', startupWaitMs: 25 };
+  const [concurrentFirst, concurrentSecond] = await Promise.all([
+    startManagedProcess(workspace, config, concurrentArgs, { taskId: 'task-concurrent', principal: 'principal-a' }),
+    startManagedProcess(workspace, config, concurrentArgs, { taskId: 'task-concurrent', principal: 'principal-a' })
+  ]);
+  started.push(concurrentFirst.processId, concurrentSecond.processId);
+  assert.equal(concurrentSecond.processId, concurrentFirst.processId, 'simultaneous identical starts must converge on one managed process');
+  assert.equal([concurrentFirst, concurrentSecond].filter(result => result.reused === true).length, 1,
+    'exactly one simultaneous caller must observe reuse after the initial process starts');
+
   const otherTask = await startManagedProcess(workspace, config, { command, kind: 'service', purpose: 'reuse fixture', startupWaitMs: 25 }, { taskId: 'task-b', principal: 'principal-a' });
   started.push(otherTask.processId);
   assert.notEqual(otherTask.processId, first.processId, 'processes must never be reused across logical tasks');
@@ -38,6 +48,10 @@ try {
   const changedEnvKeys = await startManagedProcess(workspace, config, { command, kind: 'service', purpose: 'reuse fixture', env: { RELAI_REUSE_KEY: 'one' }, startupWaitMs: 25 }, { taskId: 'task-a', principal: 'principal-a' });
   started.push(changedEnvKeys.processId);
   assert.notEqual(changedEnvKeys.processId, first.processId, 'changed environment key sets must not reuse a process');
+
+  const changedEnvValue = await startManagedProcess(workspace, config, { command, kind: 'service', purpose: 'reuse fixture', env: { RELAI_REUSE_KEY: 'two' }, startupWaitMs: 25 }, { taskId: 'task-a', principal: 'principal-a' });
+  started.push(changedEnvValue.processId);
+  assert.notEqual(changedEnvValue.processId, changedEnvKeys.processId, 'changed environment values must not reuse a process started with stale configuration');
 } finally {
   for (const processId of [...new Set(started)]) {
     try { await stopManagedProcess(config, { processId, graceMs: 50 }, { internal: true }); } catch {}

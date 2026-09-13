@@ -1,31 +1,37 @@
 #!/usr/bin/env node
-import { startHttpServer } from "../src/httpServer.js";
+import { Command, InvalidArgumentError } from 'commander';
+import { startHttpServer } from '../src/httpServer.ts';
 
-function parseArgs(argv) {
-  const options = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === "--host") options.host = argv[++i];
-    else if (arg === "--port") options.port = Number(argv[++i]);
-    else if (arg === "--token") options.token = argv[++i];
-    else if (arg === "--allow-no-auth") options.allowNoAuth = true;
-    else if (arg === "--no-profile-write") options.writeProfile = false;
-    else if (arg === "--help" || arg === "-h") {
-      printHelp();
-      process.exit(0);
-    } else {
-      throw new Error(`Unknown argument: ${arg}`);
-    }
+function parsePort(value) {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new InvalidArgumentError('Port must be an integer from 0 to 65535.');
   }
-  return options;
+  return port;
 }
 
-function printHelp() {
-  console.log(`rel-ai-mcp-http\n\nUsage:\n  REL_AI_MCP_TOKEN=... rel-ai-mcp-http --host 127.0.0.1 --port 3333\n\nOptions:\n  --host <host>          Bind host. Default: 127.0.0.1\n  --port <port>          Bind port. Default: 3333\n  --token <token>        Bearer token. Prefer REL_AI_MCP_TOKEN.\n  --allow-no-auth        Disable auth for local testing only.\n  --no-profile-write     Do not update the saved connector profile (connection.json).\n`);
-}
+const program = new Command()
+  .name('rel-ai-mcp-http')
+  .description('Start the Rel.AI MCP local HTTP server.')
+  .option('--host <host>', 'Bind host. Default: 127.0.0.1')
+  .option('--port <port>', 'Bind port. Default: 3333', parsePort)
+  .option('--token <token>', 'Bearer token. Prefer REL_AI_MCP_TOKEN.')
+  .option('--allow-no-auth', 'Disable auth for local testing only.')
+  .option('--no-profile-write', 'Do not update the saved connector profile (connection.json).')
+  .showHelpAfterError();
 
+program.addHelpText('after', '\nExample:\n  REL_AI_MCP_TOKEN=... rel-ai-mcp-http --host 127.0.0.1 --port 3333');
+program.parse(process.argv);
+
+const parsed = program.opts();
 try {
-  startHttpServer(parseArgs(process.argv.slice(2)));
+  startHttpServer({
+    ...(parsed.host ? { host: parsed.host } : {}),
+    ...(parsed.port != null ? { port: parsed.port } : {}),
+    ...(parsed.token ? { token: parsed.token } : {}),
+    allowNoAuth: parsed.allowNoAuth === true,
+    writeProfile: parsed.profileWrite !== false
+  });
 } catch (error) {
   console.error(`[rel-ai-mcp-http] fatal: ${error instanceof Error ? error.stack || error.message : String(error)}`);
   process.exit(1);

@@ -1,6 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { combineAbortSignals } from './abortSignals.js';
 import { appendOperation, makeOperationId } from './journal.js';
 import { resolveSafePath } from './safety.js';
 
@@ -11,7 +12,8 @@ const OPENAI_FILE_HOSTS = new Set(['files.oaiusercontent.com']);
 const OPENAI_REGIONAL_BLOB_HOST = /^oaisdmntpr[a-z0-9]+\.blob\.core\.windows\.net$/u;
 const OPENAI_FILE_KEYS = new Set(['download_url', 'file_id', 'mime_type', 'file_name', 'name', 'size']);
 
-async function importNativeArtifact(workspace, config, args = {}) {
+async function importNativeArtifact(workspace, config, args = {}, options = {}) {
+  options.signal?.throwIfAborted?.();
   const reference = normalizeReference(args.file);
   const safe = resolveSafePath(workspace.path, args.path, { operation: 'write', label: 'Artifact destination' });
   if (fs.existsSync(safe.absolutePath)) throw new Error(`Artifact destination already exists: ${safe.relativePath}`);
@@ -36,9 +38,11 @@ async function importNativeArtifact(workspace, config, args = {}) {
   let response;
   let downloadUrl = validateDownloadUrl(reference.download_url);
   for (let redirects = 0; redirects <= REDIRECT_LIMIT; redirects += 1) {
+    const signal = combineAbortSignals(options.signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS));
     try {
-      response = await fetch(downloadUrl, { redirect: 'manual', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+      response = await fetch(downloadUrl, { redirect: 'manual', signal });
     } catch (error) {
+      options.signal?.throwIfAborted?.();
       throw new Error('ChatGPT artifact could not be downloaded.', { cause: error });
     }
     if (![301, 302, 303, 307, 308].includes(response.status)) break;
@@ -63,12 +67,14 @@ async function importNativeArtifact(workspace, config, args = {}) {
   }
 
   let handle;
+  let reader;
   let bytes = 0;
   const hash = crypto.createHash('sha256');
   try {
     handle = await fs.promises.open(verified.absolutePath, 'wx', 0o600);
-    const reader = response.body.getReader();
+    reader = response.body.getReader();
     while (true) {
+      options.signal?.throwIfAborted?.();
       const { done, value } = await reader.read();
       if (done) break;
       if (!value?.byteLength) continue;
@@ -77,12 +83,14 @@ async function importNativeArtifact(workspace, config, args = {}) {
       hash.update(value);
       await writeAll(handle, value);
     }
+    options.signal?.throwIfAborted?.();
     if (reference.size !== undefined && bytes !== reference.size) throw new Error('ChatGPT artifact metadata did not match the downloaded byte size.');
     if (declaredLength && bytes !== declaredLength) throw new Error('Downloaded artifact length did not match the HTTP response.');
     await handle.sync();
     await handle.close();
     handle = null;
   } catch (error) {
+    try { await reader?.cancel(error); } catch {}
     try { await handle?.close(); } catch {}
     try { await fs.promises.rm(verified.absolutePath, { force: true }); } catch {}
     throw error;

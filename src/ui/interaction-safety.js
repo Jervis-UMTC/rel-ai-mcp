@@ -28,10 +28,6 @@ export function clearUnsavedChanges(root = globalThis.document) {
   });
 }
 
-export function hasActiveOverlay() {
-  return Boolean(document.querySelector('#__relai-modal-backdrop, #__relai-drawer-backdrop'));
-}
-
 function isElement(value) {
   return typeof globalThis.HTMLElement === 'function' && value instanceof globalThis.HTMLElement;
 }

@@ -32,8 +32,8 @@ process.env.REL_AI_MCP_CONFIG = configPath;
 
 const { flushAuditWrites } = await import('../src/audit.js');
 const { flushLocalAnalytics } = await import('../src/localAnalytics.js');
-const { flushTaskHistoryPersistence } = await import('../src/taskHistoryStore.js');
-const { resetTaskHistoryCaches } = await import('../src/taskHistoryStorage.js');
+const { flushTaskHistoryPersistence } = await import('../src/taskHistoryStore.ts');
+const { resetTaskHistoryCaches } = await import('../src/taskHistoryStorage.ts');
 const { callTool: rawCallTool } = await import('../src/tools.js');
 const { resetToolActivity } = await import('../src/toolActivity.js');
 const { toolResult } = await import('../src/mcp/results.js');
@@ -122,7 +122,7 @@ try {
   assert.equal(aggregate.truncated, true);
 
   const { relaiReadAsync } = await import('../src/localRepoBridge.js');
-  const partial = await relaiReadAsync({ alias: 'repo', path: wsRoot }, {}, {
+  const partial = await relaiReadAsync({ alias: 'repo', path: wsRoot }, { stateDir }, {
     paths: ['big.txt', 'does-not-exist.txt'], guidanceMode: 'none'
   }, { connector: true });
   assert.equal(partial.ok, true);
@@ -131,7 +131,7 @@ try {
   assert.equal(partial.returnedCount, 1);
   assert.equal(partial.skipped.length, 1);
 
-  const skippedOnly = await relaiReadAsync({ alias: 'repo', path: wsRoot }, {}, {
+  const skippedOnly = await relaiReadAsync({ alias: 'repo', path: wsRoot }, { stateDir }, {
     paths: ['does-not-exist.txt'], guidanceMode: 'none'
   }, { connector: true });
   assert.equal(skippedOnly.ok, false, 'all-skipped reads must not claim success');

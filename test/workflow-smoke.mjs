@@ -98,7 +98,7 @@ try {
     throw new Error(`Code intelligence dispatch failed: ${JSON.stringify(codeInspect)}`);
   }
 
-  taskCall(17, 'relai_exec', { workspace: 'smoke', command: 'node exec-smoke.js' });
+  taskCall(17, 'relai_exec', { workspace: 'smoke', command: 'node exec-smoke.js', timeoutMs: 5000 });
   const executed = structuredContentOf(await client.waitFor(17));
   if (!executed.ok || executed.exitCode !== 0 || executed.stdout !== 'exec-smoke-ok') throw new Error('One-shot command failed.');
   if (executed.changedFiles.length) throw new Error('Read-only command reported workspace mutations.');
@@ -119,7 +119,7 @@ try {
     dryRun: true
   });
   const dryWrite = structuredContentOf(await client.waitFor(6));
-  if (!dryWrite.dryRun || !dryWrite.changedFiles.includes('README.md')) throw new Error('Dry content edit failed.');
+  if (!dryWrite.dryRun || dryWrite.changedFiles.length !== 0 || dryWrite.result?.path !== 'README.md' || dryWrite.result?.changed !== true) throw new Error('Dry content edit failed.');
 
   taskCall(7, 'relai_edit', {
     workspace: 'smoke',
@@ -153,7 +153,7 @@ try {
     throw new Error('Structured delete failed.');
   }
 
-  taskCall(18, 'relai_exec', { workspace: 'smoke', command: 'node create-artifact.js' });
+  taskCall(18, 'relai_exec', { workspace: 'smoke', command: 'node create-artifact.js', timeoutMs: 5000 });
   const artifactExec = structuredContentOf(await client.waitFor(18));
   if (!artifactExec.changedFiles?.includes('session-artifact.txt')) throw new Error('Task-owned exec did not attribute its untracked artifact.');
   taskCall(10, 'relai_work', { action: 'status', workspace: 'smoke' });

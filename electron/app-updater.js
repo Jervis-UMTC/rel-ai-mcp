@@ -1,6 +1,7 @@
 
 
-import { AUTO_CHECK_INTERVAL_MS, AUTO_CHECK_DELAY_MS, cleanText, createLogger, createUpdateStateStore, detectUpdateSupport, isoNow, normalizeStatus, progressPayload } from "./app-updater-state.js";
+import { AUTO_CHECK_INTERVAL_MS, AUTO_CHECK_DELAY_MS, createLogger, createUpdateStateStore, detectUpdateSupport } from './app-updater-state.js';
+import { cleanText, isoNow, normalizeStatus, progressPayload } from './app-updater-status.js';
 import { importResourceModule } from './resource-path.js';
 
 const { runtimeMetadata } = await importResourceModule('src/runtimeCompatibility.js');
@@ -35,7 +36,9 @@ function createAppUpdater(options = {}) {
     clearTimer = clearTimeout,
     getTaskActivity = () => ({}),
     onStatusChange = () => {},
-    onBeforeInstall = () => {},
+    onBeforeInstall = async () => {},
+    onInstallCommit = async () => {},
+    onInstallFailed = async () => {},
     retryDelay = delay => new Promise(resolve => setTimer(resolve, delay)),
     onLog = () => {},
     errorCodes = {},
@@ -68,6 +71,7 @@ function createAppUpdater(options = {}) {
   let lastReleaseDiscoveryAt = 0;
   let retryingOperation = '';
   let started = false;
+  let lifecycleGeneration = 0;
   let status = normalizeStatus({
     state: support.supported ? 'idle' : 'unsupported',
     supported: support.supported,
@@ -79,6 +83,7 @@ function createAppUpdater(options = {}) {
   function start() {
     if (started) return snapshot();
     started = true;
+    lifecycleGeneration += 1;
     if (!support.supported) {
       emit({ state: 'unsupported' });
       return snapshot();
@@ -86,6 +91,7 @@ function createAppUpdater(options = {}) {
     if (platform !== 'darwin') {
       autoUpdater.autoDownload = false;
       autoUpdater.autoInstallOnAppQuit = false;
+      autoUpdater.disableDifferentialDownload = false;
       autoUpdater.allowPrerelease = false;
       autoUpdater.logger = createLogger(onLog);
       bindUpdaterEvents({
@@ -118,6 +124,7 @@ function createAppUpdater(options = {}) {
     releaseDiscoveryTimer = null;
     for (const [eventName, handler] of handlers.splice(0)) autoUpdater.removeListener?.(eventName, handler);
     started = false;
+    lifecycleGeneration += 1;
   }
 
   async function checkForUpdates() {
@@ -166,31 +173,35 @@ function createAppUpdater(options = {}) {
     }
   }
 
-  function installUpdate() {
+  async function installUpdate() {
     if (!support.supported) return failure(codes.unsupported, support.reason, false);
     if (status.state !== 'downloaded' || status.integrityVerified !== true) {
       const guidance = platform === 'darwin'
         ? 'Download and verify the update before opening the macOS installer.'
-        : 'Download and verify the update before restarting to install it.';
+        : 'Download and verify the update before installing it.';
       return failure(codes.busy, guidance, false);
     }
     if (platform === 'darwin') return openMacUpdate();
-    const taskBlock = taskActivityBlockReason(getTaskActivity(), 'restarting to install the update');
+    const taskBlock = taskActivityBlockReason(getTaskActivity(), 'installing the update');
     if (taskBlock) return failure(codes.blocked, taskBlock, true);
     emit({ state: 'installing', error: '', errorCode: '' });
-    log(`Restarting to install Rel.AI MCP ${status.availableVersion || 'update'}.`);
-    let preparation;
+    log(`Closing Rel.AI MCP to install ${status.availableVersion || 'update'}. The app will reopen automatically when the update is done.`);
     try {
-      preparation = Promise.resolve(onBeforeInstall());
+      await onBeforeInstall();
+      await onInstallCommit();
+      autoUpdater.quitAndInstall(true, true);
+      return { ok: true, installing: true, status: snapshot() };
     } catch (error) {
-      preparation = Promise.reject(error);
+      try {
+        await onInstallFailed(error);
+      } catch (recoveryError) {
+        log(`Update recovery failed: ${cleanText(recoveryError?.message || recoveryError, 400)}`, {
+          level: 'warning',
+          code: codes.failed
+        });
+      }
+      return handleInstallPreparationError(error);
     }
-    setTimer(() => {
-      preparation.then(() => {
-        autoUpdater.quitAndInstall(false, true);
-      }).catch(handleError);
-    }, 50);
-    return { ok: true, installing: true, status: snapshot() };
   }
 
   async function openMacUpdate() {
@@ -256,9 +267,13 @@ function createAppUpdater(options = {}) {
     }
     if (releaseDiscoveryPromise) return releaseDiscoveryPromise;
     lastReleaseDiscoveryAt = discoveryAt;
+    const discoveryGeneration = lifecycleGeneration;
     releaseDiscoveryPromise = (async () => {
       try {
         const latestVersion = await fetchLatestReleaseVersion(fetchImpl);
+        if (!started || lifecycleGeneration !== discoveryGeneration) {
+          return { ok: true, skipped: true, status: snapshot() };
+        }
         if (!isStableVersion(status.currentVersion)) {
           throw new Error('The installed application version is invalid, so release discovery cannot compare versions.');
         }
@@ -338,6 +353,14 @@ function createAppUpdater(options = {}) {
     const message = updateRecoveryMessage(error);
     log(technicalMessage, { level: 'error', code: codes.failed });
     emit({ state: 'error', errorCode: codes.failed, error: message, progress: null, integrityVerified: false });
+    return failure(codes.failed, message, true);
+  }
+
+  function handleInstallPreparationError(error) {
+    const technicalMessage = cleanText(error instanceof Error ? error.message : error, 600) || 'The application update could not be prepared.';
+    const message = 'Rel.AI could not prepare the update safely. The current version was not replaced. Try again.';
+    log(technicalMessage, { level: 'error', code: codes.failed });
+    emit({ state: 'downloaded', errorCode: codes.failed, error: message, integrityVerified: true });
     return failure(codes.failed, message, true);
   }
 

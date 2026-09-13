@@ -2,20 +2,20 @@
 
 ## Version boundary
 
-- Modern MCP protocol: `2026-07-28`.
-- Stateless ChatGPT HTTP compatibility: `2025-11-25`.
+- Modern MCP protocol for ordinary requests: `2026-07-28`.
+- Stateless ChatGPT HTTP startup compatibility: `2025-11-25` (`initialize` and `notifications/initialized` only).
 - Release/tool schema version: `7`.
 
-The HTTP compatibility path exists because supported ChatGPT clients may use the SDK-supported stateless initialize lifecycle before ordinary tool and resource requests. Authentication, principal construction, request budgets, telemetry, tool policy, workspace ownership, and explicit work-session identity remain shared with the modern transport.
+The HTTP compatibility path exists because supported ChatGPT clients may still use the SDK-supported stateless startup lifecycle before ordinary MCP requests. Only `initialize` and `notifications/initialized` remain on that path. Authentication, principal construction, request budgets, telemetry, tool policy, workspace ownership, and explicit work-session identity remain shared with the modern transport.
 
-Compatibility is protected by the HTTP/ChatGPT smoke tests, while stdio tests verify that stdio remains modern-only. Strict modern headers and request envelopes are protected separately.
+The startup shim is protected by the HTTP/ChatGPT smoke tests, while stdio tests verify that stdio remains modern-only. Strict modern headers and ordinary-request cutover behavior are protected separately.
 
-**Removal condition:** remove the `2025-11-25` HTTP compatibility adapter only after supported ChatGPT clients no longer require it and packaged connector acceptance proves the modern flow end to end.
+**Removal condition:** remove the remaining `2025-11-25` startup lifecycle shim only after supported ChatGPT clients no longer require it and packaged connector acceptance proves modern startup end to end.
 
 ## Supported model
 
 - Stateless `server/discover` negotiation for modern HTTP and stdio clients.
-- Stateless HTTP `initialize` and `notifications/initialized` compatibility for ChatGPT.
+- Stateless HTTP `initialize` and `notifications/initialized` compatibility for ChatGPT startup only. All tool, resource, prompt, and task operations require modern MCP `2026-07-28` requests.
 - Stdio through the MCP SDK.
 - Bearer-authenticated private HTTP MCP at `POST /mcp`.
 - `MCP-Protocol-Version`, `Mcp-Method`, and matching per-request `_meta` on modern requests.
@@ -60,9 +60,10 @@ A transport reconnect may restore connectivity but may not replay an ambiguous m
 - Removed tool aliases.
 - Transport- or conversation-derived repository work identity.
 - Native task handles without explicit per-request Tasks capability negotiation.
+- Legacy `2025-11-25` tool, resource, prompt, or task operations; the retained compatibility surface is startup lifecycle only.
 - Responses to JSON-RPC notifications.
 
-Unsupported protocol versions and modern-envelope mismatches fail closed. The HTTP compatibility path serves `2025-11-25` directly through the SDK rather than rewriting it into a `2026-07-28` envelope.
+Unsupported protocol versions and modern-envelope mismatches fail closed. The HTTP compatibility path serves only `2025-11-25` `initialize` and `notifications/initialized` directly through the SDK rather than rewriting them into a `2026-07-28` envelope. Every other MCP method requires the modern request model.
 
 ## Version changes
 
