@@ -32,8 +32,12 @@ try {
   const buildingGeneration = await waitForBuildingGeneration(databaseFile);
   assert.ok(buildingGeneration > 0, 'the test must observe a live worker generation before terminating it');
 
+  const rejectedBuild = assert.rejects(
+    build,
+    error => error?.name === 'AbortError' || error?.code === 'INDEX_ABORTED'
+  );
   await repositoryIntelligence.shutdown();
-  await assert.rejects(build, error => error?.name === 'AbortError' || error?.code === 'INDEX_ABORTED');
+  await rejectedBuild;
 
   const db = openIndexDatabase(databaseFile, { readonly: true });
   try {

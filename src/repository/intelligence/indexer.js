@@ -15,7 +15,10 @@ const FALLBACK_RECONCILE_INTERVAL_MS = 5 * 60_000;
 const ZOEKT_RECONCILE_DELAY_MS = 1500;
 const MAX_INCREMENTAL_PATHS = 1000;
 const MAX_COALESCED_PASSES = 3;
-const WORKER_CANCEL_GRACE_MS = 250;
+// Index workers can own runProcess() children such as zoekt-index. Give the
+// child's bounded cancellation path (1s graceful + 2s forced wait) time to
+// finish its finally cleanup before the worker thread itself is terminated.
+const WORKER_CANCEL_GRACE_MS = 5000;
 const WORKER_IDLE_EVICT_MS = 60_000;
 const INDEX_INCREMENTAL_TIMEOUT_MS = 60_000;
 const INDEX_FULL_TIMEOUT_MS = 300_000;
