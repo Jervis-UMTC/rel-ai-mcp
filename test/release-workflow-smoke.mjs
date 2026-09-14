@@ -31,6 +31,10 @@ function copyFixture() {
     'electron/build/installer-icon.ico',
     'electron/renderer/status.html',
     'electron/scripts/verify-fuses.js',
+    'src/contracts/package.json',
+    'src/core/package.json',
+    'src/repository/intelligence/package.json',
+    'src/ui/package.json',
     'src/packageMetadata.js',
     'src/version.js',
     'scripts/release-check.mjs',
@@ -102,7 +106,12 @@ function verifyReleaseBump() {
   run('release-check.mjs');
 
   assert.equal(readJson('package.json').version, changelogVersion);
-  assert.equal(readJson('package-lock.json').packages[''].version, changelogVersion);
+  const rootLock = readJson('package-lock.json');
+  assert.equal(rootLock.packages[''].version, changelogVersion);
+  for (const workspacePath of ['src/contracts', 'src/core', 'src/repository/intelligence', 'src/ui']) {
+    assert.equal(readJson(`${workspacePath}/package.json`).version, changelogVersion);
+    assert.equal(rootLock.packages[workspacePath].version, changelogVersion);
+  }
   assert.equal(readJson('electron/package.json').version, changelogVersion);
   assert.equal(readJson('electron/package-lock.json').packages[''].version, changelogVersion);
   assert.equal(readJson('release-manifest.json').applicationVersion, changelogVersion);

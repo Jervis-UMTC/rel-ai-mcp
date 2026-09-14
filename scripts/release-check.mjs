@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import semver from 'semver';
 import { normalizeTargetArch } from './platform-architecture.mjs';
-import { VERSION_JSON_FILES } from './release-surfaces.mjs';
+import { VERSION_JSON_FILES, WORKSPACE_PACKAGE_FILES } from './release-surfaces.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(process.env.REL_AI_RELEASE_ROOT || path.join(__dirname, '..'));
@@ -50,6 +50,12 @@ function assertJsonVersion(relativePath, version) {
   expectEqual(json.version, version, `${relativePath} version`);
   if (json.packages?.['']) {
     expectEqual(json.packages[''].version, version, `${relativePath} packages[""].version`);
+  }
+  if (relativePath === 'package-lock.json') {
+    for (const workspaceFile of WORKSPACE_PACKAGE_FILES) {
+      const workspacePath = workspaceFile.slice(0, -'/package.json'.length);
+      expectEqual(json.packages?.[workspacePath]?.version, version, `${relativePath} packages["${workspacePath}"].version`);
+    }
   }
 }
 

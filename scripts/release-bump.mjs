@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import semver from 'semver';
-import { VERSION_JSON_FILES } from './release-surfaces.mjs';
+import { VERSION_JSON_FILES, WORKSPACE_PACKAGE_FILES } from './release-surfaces.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(process.env.REL_AI_RELEASE_ROOT || path.join(__dirname, '..'));
@@ -66,6 +66,12 @@ function updateJsonVersion(relativePath, nextVersion) {
   const json = readJson(relativePath);
   json.version = nextVersion;
   if (json.packages?.['']) json.packages[''].version = nextVersion;
+  if (relativePath === 'package-lock.json') {
+    for (const workspaceFile of WORKSPACE_PACKAGE_FILES) {
+      const workspacePath = workspaceFile.slice(0, -'/package.json'.length);
+      if (json.packages?.[workspacePath]) json.packages[workspacePath].version = nextVersion;
+    }
+  }
   writeJson(relativePath, json);
 }
 
