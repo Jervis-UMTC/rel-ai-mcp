@@ -115,7 +115,7 @@ function buildDashboardTaskDelta(
     if (task && taskId) {
       const existing = taskUpdates.get(taskId);
       if (!existing || Number(activity.revision || 0) >= existing.revision) {
-        taskUpdates.set(taskId, { revision: Number(activity.revision || 0), task: summarizeDashboardTask(task) });
+        taskUpdates.set(taskId, { revision: Number(activity.revision || 0), task });
       }
     }
     if (!activity.activityEvent) continue;
@@ -131,7 +131,7 @@ function buildDashboardTaskDelta(
   }
   return {
     taskActivity: liveTaskActivityDelta(latest),
-    taskUpdates: [...taskUpdates.values()].map(item => item.task),
+    taskUpdates: [...taskUpdates.values()].map(item => summarizeDashboardTask(item.task)),
     activityEntries: [...activityEntries.values()].sort((left, right) => eventTimestampMs(left) - eventTimestampMs(right))
   };
 }

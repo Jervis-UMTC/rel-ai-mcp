@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { statePath } from './stateLayout.js';
-import { setStateMeta, stateMetaValue, withStateDatabase } from './stateDatabase.ts';
+import { openStateDatabase, setStateMeta, stateMetaValue, withStateDatabase } from './stateDatabase.ts';
 import { failureCategoryFromCode, normalizeFailureCategory } from './analyticsFailureCategory.ts';
 import {
   analyticsUseCaseForOperation,
@@ -34,6 +34,7 @@ const RETENTION_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const LEGACY_MIGRATION_KEY = 'local_analytics_legacy_migrated_v1';
 const retentionPruneTimes = new Map<string, number>();
 const retentionPruneTimers = new Map<string, { timer: NodeJS.Timeout; config: AnalyticsConfig }>();
+const analyticsWriteDatabases = new Map<string, StateDatabase>();
 
 interface AnalyticsConfig extends TelemetryConfig {
   stateDir?: string;
@@ -143,7 +144,7 @@ function recordLocalToolOutcome(config: AnalyticsConfig = {}, event: LocalToolOu
     const performancePhases = sanitizePerformancePhases(event.timings?.phaseMs || event.performancePhases);
     const reliability = reliabilityCountersForOutcome(outcome);
     let migratedLegacy = false;
-    withStateDatabase(config, (db: StateDatabase) => {
+    withAnalyticsWriteDatabase(config, (db: StateDatabase) => {
       migratedLegacy = migrateLegacyLocalAnalyticsInDatabase(db, config);
       const document = readDocumentFromDatabase(db, month);
       incrementTotals(document.totals, success, failure, durationMs, reliability);
@@ -188,7 +189,7 @@ function recordLocalToolOutcome(config: AnalyticsConfig = {}, event: LocalToolOu
         if (workspace) incrementWorkspaceFailureCategory(hourly.workspaceFailureCategories, workspace, category);
       }
       upsertDocument(db, document);
-    }, { transaction: true });
+    });
     if (migratedLegacy) removeLegacyAnalyticsDirectory(config);
     scheduleRetentionPrune(config);
     return true;
@@ -348,6 +349,7 @@ function projectLocalUsageSnapshot(config: AnalyticsConfig, month: string, docum
 }
 
 function readDocument(config: AnalyticsConfig, month: string): AnalyticsDocument {
+  closeAnalyticsWriteDatabases(config);
   migrateLegacyLocalAnalytics(config);
   return withStateDatabase(config, (db: StateDatabase) => readDocumentFromDatabase(db, month)) as AnalyticsDocument;
 }
@@ -413,15 +415,47 @@ function migrateLegacyLocalAnalyticsInDatabase(db: StateDatabase, config: Analyt
   return true;
 }
 
-async function flushLocalAnalytics(): Promise<{ ok: true; failed: 0; pending: 0 }> {
+async function flushLocalAnalytics(config?: AnalyticsConfig): Promise<{ ok: true; failed: 0; pending: 0 }> {
   const pending = [...retentionPruneTimers.values()];
   retentionPruneTimers.clear();
-  for (const { timer, config } of pending) {
+  for (const { timer, config: pendingConfig } of pending) {
     clearTimeout(timer);
-    try { await pruneLocalAnalytics(config); }
+    try { await pruneLocalAnalytics(pendingConfig); }
     catch (error) { if (process.env.REL_AI_MCP_DEBUG) console.error('[rel-ai-mcp] local analytics retention prune flush:', error); }
   }
+  closeAnalyticsWriteDatabases(config);
   return { ok: true, failed: 0, pending: 0 };
+}
+
+function withAnalyticsWriteDatabase<TResult>(config: AnalyticsConfig, operation: (db: StateDatabase) => TResult): TResult {
+  const key = statePath(config, 'durable-state.sqlite');
+  let db = analyticsWriteDatabases.get(key);
+  if (!db) {
+    const opened = openStateDatabase(config);
+    if (!opened) throw new Error('Local analytics database could not be opened.');
+    db = opened;
+    analyticsWriteDatabases.set(key, db);
+  }
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    const result = operation(db);
+    db.exec('COMMIT');
+    return result;
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    analyticsWriteDatabases.delete(key);
+    try { db.close(); } catch {}
+    throw error;
+  }
+}
+
+function closeAnalyticsWriteDatabases(config?: AnalyticsConfig): void {
+  const onlyKey = config ? statePath(config, 'durable-state.sqlite') : '';
+  for (const [key, db] of analyticsWriteDatabases) {
+    if (onlyKey && key !== onlyKey) continue;
+    analyticsWriteDatabases.delete(key);
+    try { db.close(); } catch {}
+  }
 }
 
 function scheduleRetentionPrune(config: AnalyticsConfig = {}): boolean {
@@ -539,6 +573,7 @@ function removeWorkspaceLocalAnalytics(config: AnalyticsConfig = {}, workspaceVa
 }
 
 async function clearLocalAnalytics(config: AnalyticsConfig = {}): Promise<{ ok: true; removedFiles: number; removedBytes: number }> {
+  closeAnalyticsWriteDatabases(config);
   migrateLegacyLocalAnalytics(config);
   const result = withStateDatabase(config, (db: StateDatabase) => {
     const rows = db.prepare('SELECT payload FROM analytics_months').all() as Array<{ payload?: unknown }>;

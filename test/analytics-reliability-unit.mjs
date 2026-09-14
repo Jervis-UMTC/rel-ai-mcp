@@ -136,6 +136,7 @@ try {
     assert.equal(persistedDocument.totals.failures, 1);
     assert.equal(persistedDocument.totals.reliabilityCalls, 1);
   } finally {
+    await flushLocalAnalytics({ stateDir: previousStateDir });
     fs.rmSync(previousStateDir, { recursive: true, force: true });
   }
 
@@ -173,6 +174,7 @@ try {
     assert.equal(persistedDocument.totals.reliableCalls, 10);
     assert.equal(persistedDocument.activityMatrix.find(row => row.intent === 'investigation' && row.useCase === 'explore')?.toolCalls, 1);
   } finally {
+    await flushLocalAnalytics({ stateDir: v3StateDir });
     fs.rmSync(v3StateDir, { recursive: true, force: true });
   }
 
