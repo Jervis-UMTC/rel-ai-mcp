@@ -35,6 +35,7 @@ const LEGACY_MIGRATION_KEY = 'local_analytics_legacy_migrated_v1';
 const retentionPruneTimes = new Map<string, number>();
 const retentionPruneTimers = new Map<string, { timer: NodeJS.Timeout; config: AnalyticsConfig }>();
 const analyticsWriteDatabases = new Map<string, StateDatabase>();
+const analyticsWriteCloseScheduled = new Set<string>();
 
 interface AnalyticsConfig extends TelemetryConfig {
   stateDir?: string;
@@ -440,6 +441,7 @@ function withAnalyticsWriteDatabase<TResult>(config: AnalyticsConfig, operation:
     db.exec('BEGIN IMMEDIATE');
     const result = operation(db);
     db.exec('COMMIT');
+    scheduleAnalyticsWriteDatabaseClose(key);
     return result;
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch {}
@@ -449,12 +451,27 @@ function withAnalyticsWriteDatabase<TResult>(config: AnalyticsConfig, operation:
   }
 }
 
+function scheduleAnalyticsWriteDatabaseClose(key: string): void {
+  if (analyticsWriteCloseScheduled.has(key)) return;
+  analyticsWriteCloseScheduled.add(key);
+  queueMicrotask(() => {
+    analyticsWriteCloseScheduled.delete(key);
+    closeAnalyticsWriteDatabase(key);
+  });
+}
+
+function closeAnalyticsWriteDatabase(key: string): void {
+  const db = analyticsWriteDatabases.get(key);
+  if (!db) return;
+  analyticsWriteDatabases.delete(key);
+  try { db.close(); } catch {}
+}
+
 function closeAnalyticsWriteDatabases(config?: AnalyticsConfig): void {
   const onlyKey = config ? statePath(config, 'durable-state.sqlite') : '';
-  for (const [key, db] of analyticsWriteDatabases) {
+  for (const key of analyticsWriteDatabases.keys()) {
     if (onlyKey && key !== onlyKey) continue;
-    analyticsWriteDatabases.delete(key);
-    try { db.close(); } catch {}
+    closeAnalyticsWriteDatabase(key);
   }
 }
 

@@ -172,19 +172,24 @@ function closeRepositoryWatcher(state) {
   });
 }
 
-function shutdownRepositoryIndexes() {
+async function shutdownRepositoryIndexes() {
   const shutdownError = abortError('Repository Intelligence is shutting down.');
-  for (const record of activeBuilds.values()) record.cancel(shutdownError.message);
-  const terminations = [...workerClients.values()].map(client => client.terminate(shutdownError));
+  const builds = [...activeBuilds.values()];
+  const watcherClosures = [];
   for (const state of runtimeStates.values()) {
     clearZoektReconcile(state);
-    try { state.watcher?.close(); } catch {}
-    state.watcher = null;
+    watcherClosures.push(closeRepositoryWatcher(state));
   }
+  for (const record of builds) record.cancel(shutdownError.message);
+  await Promise.allSettled([
+    ...builds.map(record => record.promise),
+    ...watcherClosures
+  ]);
+  const terminations = [...workerClients.values()].map(client => client.terminate(shutdownError));
+  await Promise.allSettled(terminations);
   runtimeStates.clear();
   activeBuilds.clear();
   workerClients.clear();
-  return Promise.allSettled(terminations);
 }
 
 async function runCoalescedIndexing(workspace, config, databaseFile, state, options) {
