@@ -9,13 +9,18 @@ import {
 
 import {
   DEFAULT_FALLBACK_GRACE_MS,
+  acknowledgeFallbackCompletionNotice,
   cancelFallbackExecution,
+  consumeFallbackCompletionNotices,
+  enableFallbackCompletionNotice,
   fallbackExecutionStatus,
   resetFallbackExecutions,
   startFallbackExecution
 } from '../src/mcp/fallbackExecutions.js';
 import { MCP_PROTOCOL_VERSION } from '../src/mcp/protocol.js';
 import { toolResult } from '../src/mcp/results.js';
+import { enrichWithFallbackCompletions } from '../src/mcp/toolInvocation.js';
+import { principalFingerprint } from '../src/mcp/principal.js';
 import { handleTransportTaskRequest } from '../src/mcp/transportTasks.js';
 import {
   readTaskHistorySessionRecord,
@@ -106,11 +111,12 @@ const slow = await handleTransportTaskRequest({}, message(2, slowWorkId), {
 });
 assert.equal(slow.body.result.isError, false);
 assert.equal(slow.body.result.structuredContent.status, 'running');
-assert.equal(slow.body.result.structuredContent.pollAfterMs, 1_000);
+assert.equal(slow.body.result.structuredContent.pollAfterMs, 30_000);
 assert.equal(slow.body.result.structuredContent.revision, 1);
 assert.ok(slow.body.result.structuredContent.operationId);
 assert.ok(slow.body.result.structuredContent.updatedAt);
-assert.match(slow.body.result.structuredContent.nextAction, /relai_work.*status/i);
+assert.match(slow.body.result.structuredContent.nextAction, /Continue independent work/i);
+assert.match(slow.body.result.structuredContent.nextAction, /completedOperations/i);
 assert.equal(executionCount, 1);
 
 requestAbort.abort(new Error('simulated connector disconnect'));
@@ -244,6 +250,118 @@ try {
   assert.equal(durableReplay.body.result.structuredContent.exitCode, 0);
   assert.equal(Object.hasOwn(durableReplay.body.result.structuredContent, 'stdout'), false, 'post-restart replay should use the sanitized durable result');
   assert.equal(durableExecutionCount, 1, 'completed work must remain idempotent after the in-memory fallback cache is lost');
+  assert.deepEqual(
+    consumeFallbackCompletionNotices(config, {
+      noticeScope: principalFingerprint('principal-a'),
+      workspace: 'app'
+    }),
+    [],
+    'terminal fallback replay must acknowledge the queued completion notice'
+  );
+
+  const noticeWorkId = 'work_completion_notice_test';
+  seedTask(config, noticeWorkId);
+  const noticePrincipal = 'principal-notice';
+  const noticeScope = principalFingerprint(noticePrincipal);
+  const noticeStarted = startFallbackExecution({
+    config,
+    workId: noticeWorkId,
+    noticeScope,
+    tool: 'relai_exec',
+    workspace: 'app',
+    signature: 'notice-signature',
+    run: async () => completedResult(noticeWorkId, 'raw-output-must-not-enter-notice')
+  });
+  enableFallbackCompletionNotice(config, noticeStarted.record);
+  await noticeStarted.record.promise;
+  assert.deepEqual(consumeFallbackCompletionNotices(config, { noticeScope: 'other-principal', workspace: 'app' }), [], 'completion notices must remain principal scoped');
+  assert.deepEqual(consumeFallbackCompletionNotices(config, { noticeScope, workspace: 'other-workspace' }), [], 'completion notices must remain workspace scoped');
+  const notices = consumeFallbackCompletionNotices(config, { noticeScope, workspace: 'app' });
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].work_id, noticeWorkId);
+  assert.equal(notices[0].exitCode, 0);
+  assert.equal(notices[0].commandSucceeded, true);
+  assert.match(notices[0].summary, /exit code 0/i);
+  assert.equal(JSON.stringify(notices).includes('raw-output-must-not-enter-notice'), false, 'completion notices must not carry raw stdout');
+  assert.deepEqual(consumeFallbackCompletionNotices(config, { noticeScope, workspace: 'app' }), [], 'completion notices must be delivered once');
+
+  const acknowledgedWorkId = 'work_acknowledged_notice_test';
+  seedTask(config, acknowledgedWorkId);
+  const acknowledgedStarted = startFallbackExecution({
+    config,
+    workId: acknowledgedWorkId,
+    noticeScope,
+    tool: 'relai_exec',
+    workspace: 'app',
+    signature: 'acknowledged-notice-signature',
+    run: async () => completedResult(acknowledgedWorkId, 'acknowledged')
+  });
+  enableFallbackCompletionNotice(config, acknowledgedStarted.record);
+  await acknowledgedStarted.record.promise;
+  assert.equal(acknowledgeFallbackCompletionNotice(config, acknowledgedWorkId, { noticeScope, workspace: 'app' }), true);
+  assert.deepEqual(consumeFallbackCompletionNotices(config, { noticeScope, workspace: 'app' }), [], 'explicit status acknowledgement must prevent duplicate piggyback delivery');
+
+  const piggybackWorkId = 'work_piggyback_notice_test';
+  seedTask(config, piggybackWorkId);
+  const piggybackStarted = startFallbackExecution({
+    config,
+    workId: piggybackWorkId,
+    noticeScope,
+    tool: 'relai_exec',
+    workspace: 'app',
+    signature: 'piggyback-notice-signature',
+    run: async () => completedResult(piggybackWorkId, 'piggyback')
+  });
+  enableFallbackCompletionNotice(config, piggybackStarted.record);
+  await piggybackStarted.record.promise;
+  const unrelated = enrichWithFallbackCompletions(
+    config,
+    'relai_read',
+    { workspace: 'app' },
+    { ok: true, workspace: 'app', items: [] },
+    { principal: noticePrincipal }
+  );
+  assert.equal(unrelated.completedOperations.length, 1, 'the next unrelated same-workspace Rel.AI result must carry the background completion');
+  assert.equal(unrelated.completedOperations[0].work_id, piggybackWorkId);
+  assert.match(toolResult(unrelated, false).content[0].text, /Background completion: .*exit code 0/i, 'the MCP text summary must make the piggybacked completion visible to the model');
+  const afterPiggyback = enrichWithFallbackCompletions(
+    config,
+    'relai_read',
+    { workspace: 'app' },
+    { ok: true, workspace: 'app', items: [] },
+    { principal: noticePrincipal }
+  );
+  assert.equal(Object.hasOwn(afterPiggyback, 'completedOperations'), false, 'a piggybacked completion must be consumed exactly once');
+
+  const directWorkId = 'work_direct_no_notice_test';
+  seedTask(config, directWorkId);
+  const directStarted = startFallbackExecution({
+    config,
+    workId: directWorkId,
+    noticeScope,
+    tool: 'relai_exec',
+    workspace: 'app',
+    signature: 'direct-no-notice-signature',
+    run: async () => completedResult(directWorkId, 'direct')
+  });
+  await directStarted.record.promise;
+  assert.deepEqual(consumeFallbackCompletionNotices(config, { noticeScope, workspace: 'app' }), [], 'an operation delivered directly must not create a later duplicate completion notice');
+
+  const nullExitWorkId = 'work_null_exit_notice_test';
+  seedTask(config, nullExitWorkId);
+  const nullExitStarted = startFallbackExecution({
+    config,
+    workId: nullExitWorkId,
+    noticeScope,
+    tool: 'relai_validate',
+    workspace: 'app',
+    signature: 'null-exit-notice-signature',
+    run: async () => toolResult({ ok: true, work_id: nullExitWorkId, exitCode: null, validationStatus: 'passed' }, false)
+  });
+  enableFallbackCompletionNotice(config, nullExitStarted.record);
+  await nullExitStarted.record.promise;
+  const nullExitNotices = consumeFallbackCompletionNotices(config, { noticeScope, workspace: 'app' });
+  assert.equal(Object.hasOwn(nullExitNotices[0], 'exitCode'), false, 'a null exit code must not be normalized to zero');
 
   const interruptedWorkId = 'work_interrupted_fallback_test';
   seedTask(config, interruptedWorkId);

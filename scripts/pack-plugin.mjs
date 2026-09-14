@@ -35,7 +35,7 @@ function packPlugin({ rootDir = repositoryRoot, destination = path.join(reposito
     ], {
       cwd: stagingRoot,
       encoding: 'utf8',
-      timeout: 120_000,
+      timeout: 10 * 60_000,
       maxBuffer: 16 * 1024 * 1024,
       shell: false,
       windowsHide: true

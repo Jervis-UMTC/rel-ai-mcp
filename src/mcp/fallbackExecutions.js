@@ -10,6 +10,7 @@ import { FALLBACK_EXECUTION_STATUS } from './contracts.ts';
 const DEFAULT_FALLBACK_GRACE_MS = 1_000;
 const FALLBACK_RECORD_TTL_MS = 15 * 60_000;
 const MAX_FALLBACK_RECORDS = 128;
+const MAX_COMPLETION_NOTICES = 16;
 const REPLAYABLE_FALLBACK_STATUSES = new Set([
   FALLBACK_EXECUTION_STATUS.COMPLETED,
   FALLBACK_EXECUTION_STATUS.FAILED,
@@ -18,7 +19,7 @@ const REPLAYABLE_FALLBACK_STATUSES = new Set([
 const executionsByWorkId = new Map();
 const executionsByOperationId = new Map();
 
-function startFallbackExecution({ config = null, workId = '', scopeId = '', tool, workspace = '', signature = '', run, now = Date.now }) {
+function startFallbackExecution({ config = null, workId = '', scopeId = '', noticeScope = '', tool, workspace = '', signature = '', run, now = Date.now }) {
   const work = String(workId || '').trim();
   const id = work || String(scopeId || '').trim();
   if (!id) throw new Error('Fallback execution requires a durable work_id or authorized workspace execution scope.');
@@ -50,6 +51,8 @@ function startFallbackExecution({ config = null, workId = '', scopeId = '', tool
     workId: work,
     tool: String(tool || ''),
     workspace: String(workspace || ''),
+    noticeScope: String(noticeScope || ''),
+    noticeEnabled: false,
     signature,
     status: FALLBACK_EXECUTION_STATUS.RUNNING,
     startedAt,
@@ -78,6 +81,7 @@ function startFallbackExecution({ config = null, workId = '', scopeId = '', tool
       record.result = result || null;
       record.isError = result?.isError === true;
       persistFallbackRecord(config, record);
+      if (record.noticeEnabled) enqueueFallbackCompletionNotice(config, record);
       return { ok: true, result };
     }, error => {
       if (controller.signal.aborted) {
@@ -88,6 +92,7 @@ function startFallbackExecution({ config = null, workId = '', scopeId = '', tool
       settleRecord(record, FALLBACK_EXECUTION_STATUS.FAILED, now);
       record.error = error instanceof Error ? error.message : String(error);
       persistFallbackRecord(config, record);
+      if (record.noticeEnabled) enqueueFallbackCompletionNotice(config, record);
       return { ok: false, error };
     });
 
@@ -125,7 +130,14 @@ function cancelFallbackExecution(workId, options = {}) {
   if (!record.controller.signal.aborted) record.controller.abort(reason);
   settleCancelledRecord(record, now, reason);
   persistFallbackRecord(options.config, record);
+  if (record.noticeEnabled) enqueueFallbackCompletionNotice(options.config, record);
   return { cancelled: true, duplicate: false, record: publicFallbackRecord(record, now) };
+}
+
+function enableFallbackCompletionNotice(config, record) {
+  if (!record) return;
+  record.noticeEnabled = true;
+  if (record.status !== FALLBACK_EXECUTION_STATUS.RUNNING) enqueueFallbackCompletionNotice(config, record);
 }
 
 function fallbackExecutionStatus(reference, options = {}) {
@@ -167,9 +179,115 @@ function fallbackPollAfterMs(record, now = Date.now) {
   const current = timeValue(now);
   const started = Number(record.startedAtMs || Date.parse(record.startedAt) || current);
   const elapsed = Math.max(0, current - started);
-  if (elapsed < 10_000) return 1_000;
-  if (elapsed < 60_000) return 2_000;
-  return 5_000;
+  if (elapsed < 60_000) return 30_000;
+  if (elapsed < 5 * 60_000) return 60_000;
+  return 120_000;
+}
+
+function consumeFallbackCompletionNotices(config, options = {}) {
+  const noticeScope = String(options.noticeScope || '').trim();
+  const workspace = String(options.workspace || '').trim();
+  if (!config || !noticeScope || !workspace) return [];
+  const file = completionNoticeFile(config, noticeScope, workspace);
+  const notices = readCompletionNoticeFile(file)
+    .filter(notice => completionNoticeFresh(notice, options.now || Date.now));
+  if (!notices.length) {
+    try { fs.rmSync(file, { force: true }); } catch {}
+    return [];
+  }
+  const limit = Math.min(MAX_COMPLETION_NOTICES, Math.max(1, Number(options.limit || MAX_COMPLETION_NOTICES)));
+  const delivered = notices.slice(0, limit);
+  const remaining = notices.slice(delivered.length);
+  if (remaining.length) writeCompletionNoticeFile(file, remaining);
+  else {
+    try { fs.rmSync(file, { force: true }); } catch {}
+  }
+  return delivered;
+}
+
+function acknowledgeFallbackCompletionNotice(config, reference, options = {}) {
+  const noticeScope = String(options.noticeScope || '').trim();
+  const workspace = String(options.workspace || '').trim();
+  const id = String(reference || '').trim();
+  if (!config || !noticeScope || !workspace || !id) return false;
+  const file = completionNoticeFile(config, noticeScope, workspace);
+  const notices = readCompletionNoticeFile(file);
+  const remaining = notices.filter(notice => notice.operationId !== id && notice.work_id !== id);
+  if (remaining.length === notices.length) return false;
+  if (remaining.length) writeCompletionNoticeFile(file, remaining);
+  else {
+    try { fs.rmSync(file, { force: true }); } catch {}
+  }
+  return true;
+}
+
+function enqueueFallbackCompletionNotice(config, record) {
+  if (!config || !record || record.status === FALLBACK_EXECUTION_STATUS.RUNNING) return;
+  const noticeScope = String(record.noticeScope || '').trim();
+  const workspace = String(record.workspace || '').trim();
+  if (!noticeScope || !workspace || !record.operationId) return;
+  const file = completionNoticeFile(config, noticeScope, workspace);
+  const existing = readCompletionNoticeFile(file)
+    .filter(notice => completionNoticeFresh(notice));
+  const notice = fallbackCompletionNotice(record);
+  const notices = [...existing.filter(item => item.operationId !== notice.operationId), notice]
+    .sort((left, right) => Date.parse(left.completedAt || '') - Date.parse(right.completedAt || ''))
+    .slice(-MAX_COMPLETION_NOTICES);
+  writeCompletionNoticeFile(file, notices);
+}
+
+function fallbackCompletionNotice(record) {
+  const result = record.result?.structuredContent || record.persistedResult || {};
+  const hasExitCode = result?.exitCode !== undefined && result?.exitCode !== null && result?.exitCode !== '';
+  const exitCode = hasExitCode && Number.isFinite(Number(result.exitCode)) ? Number(result.exitCode) : undefined;
+  const validationStatus = typeof result?.validationStatus === 'string' ? result.validationStatus : undefined;
+  const status = String(record.status || 'completed');
+  const summary = validationStatus
+    ? `${record.tool || 'Background operation'} ${status}: validation ${validationStatus}.`
+    : exitCode !== undefined
+      ? `${record.tool || 'Background operation'} ${status} with exit code ${exitCode}.`
+      : `${record.tool || 'Background operation'} ${status}.`;
+  return Object.fromEntries(Object.entries({
+    operationId: record.operationId,
+    work_id: record.workId || undefined,
+    tool: record.tool,
+    workspace: record.workspace,
+    status,
+    completedAt: record.completedAt || record.updatedAt,
+    revision: Math.max(1, Number(record.revision || 1)),
+    exitCode,
+    commandSucceeded: typeof result?.commandSucceeded === 'boolean' ? result.commandSucceeded : undefined,
+    validationStatus,
+    failedCheck: typeof result?.failedCheck === 'string' ? result.failedCheck : undefined,
+    durationMs: Number.isFinite(Number(result?.durationMs)) ? Number(result.durationMs) : undefined,
+    summary
+  }).filter(([, value]) => value !== undefined && value !== ''));
+}
+
+function completionNoticeFile(config, noticeScope, workspace) {
+  const key = crypto.createHash('sha256').update(`${noticeScope}\u0000${workspace}`).digest('base64url');
+  return path.join(getStateDir(config), 'fallback-completions', `${key}.json`);
+}
+
+function readCompletionNoticeFile(file) {
+  try {
+    const value = readJsonFile(file, {
+      validate: candidate => Boolean(candidate && typeof candidate === 'object' && Array.isArray(candidate.notices))
+    });
+    return Array.isArray(value?.notices) ? value.notices.filter(item => item && typeof item === 'object') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCompletionNoticeFile(file, notices) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  writeJsonAtomic(file, { version: 1, notices }, { mode: 0o600 });
+}
+
+function completionNoticeFresh(notice, now = Date.now) {
+  const completed = Date.parse(String(notice?.completedAt || ''));
+  return Number.isFinite(completed) && timeValue(now) - completed <= FALLBACK_RECORD_TTL_MS;
 }
 
 function recoverPersistedFallback(config, reference, now = Date.now) {
@@ -346,7 +464,10 @@ function resetFallbackExecutions() {
 
 export {
   DEFAULT_FALLBACK_GRACE_MS,
+  acknowledgeFallbackCompletionNotice,
   cancelFallbackExecution,
+  consumeFallbackCompletionNotices,
+  enableFallbackCompletionNotice,
   fallbackExecutionStatus,
   fallbackSignature,
   resetFallbackExecutions,

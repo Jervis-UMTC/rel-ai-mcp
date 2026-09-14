@@ -52,6 +52,27 @@ function taskCall(id, name, args) {
   });
 }
 
+let followupId = 1000;
+async function completedTaskCall(id, name, args) {
+  taskCall(id, name, args);
+  const initial = structuredContentOf(await client.waitFor(id));
+  if (initial.status !== 'running') return initial;
+
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const statusId = followupId++;
+    taskCall(statusId, 'relai_work', { action: 'status', workspace: 'smoke' });
+    const status = structuredContentOf(await client.waitFor(statusId));
+    const operation = status.backgroundOperation;
+    if (operation?.status && operation.status !== 'running') {
+      const replayId = followupId++;
+      taskCall(replayId, name, args);
+      return structuredContentOf(await client.waitFor(replayId));
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(`${name} fallback operation did not complete.`);
+}
+
 function repositoryGraphFiles() {
   const directory = path.join(stateDir, 'repository-intelligence');
   if (!fs.existsSync(directory)) return [];
@@ -167,8 +188,11 @@ try {
   const tidied = structuredContentOf(await client.waitFor(12));
   if (!tidied.changedFiles.includes('session-artifact.txt')) throw new Error('Tidy run failed.');
 
-  taskCall(13, 'relai_validate', { action: 'checks', workspace: 'smoke', level: 'standard' });
-  const checks = structuredContentOf(await client.waitFor(13));
+  const checks = await completedTaskCall(13, 'relai_validate', {
+    action: 'checks',
+    workspace: 'smoke',
+    level: 'standard'
+  });
   if (!checks.ok || !checks.checks.includes('npm run check')) throw new Error('Validation failed.');
 
   taskCall(14, 'relai_changes', { action: 'diff', workspace: 'smoke' });
@@ -184,14 +208,13 @@ try {
   const clean = structuredContentOf(await client.waitFor(16));
   if (clean.diff.trim()) throw new Error('Workspace diff should be clean after restore.');
 
-  taskCall(31, 'relai_validate', {
+  const completed = await completedTaskCall(31, 'relai_validate', {
     action: 'checks',
     workspace: 'smoke',
     level: 'standard',
     complete: true,
     summary: 'Completed and validated the public workflow smoke task.'
   });
-  const completed = structuredContentOf(await client.waitFor(31));
   if (!completed.ok || completed.completionKnown !== true || completed.completionSource !== 'relai_validate:checks') {
     throw new Error(`Atomic workflow completion failed: ${JSON.stringify(completed)}`);
   }
@@ -209,6 +232,11 @@ try {
 
   console.log('Public tool workflow smoke test passed.');
 } finally {
-  await client.close();
-  fs.rmSync(temp, { recursive: true, force: true });
+  await client.closeGracefully();
+  fs.rmSync(temp, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === 'win32' ? 20 : 5,
+    retryDelay: 100
+  });
 }

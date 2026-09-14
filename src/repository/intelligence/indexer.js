@@ -142,8 +142,7 @@ async function disposeRepositoryIndex(workspace, config = {}, options = {}) {
   const state = runtimeStates.get(databaseFile);
   if (state) {
     clearZoektReconcile(state);
-    try { state.watcher?.close(); } catch {}
-    state.watcher = null;
+    await closeRepositoryWatcher(state);
     runtimeStates.delete(databaseFile);
   }
   const client = workerClients.get(databaseFile);
@@ -154,6 +153,23 @@ async function disposeRepositoryIndex(workspace, config = {}, options = {}) {
     try { fs.rmSync(path.dirname(databaseFile), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch {}
   }
   return { detached: true, cacheRemoved: options.removeCache === true };
+}
+
+function closeRepositoryWatcher(state) {
+  const watcher = state?.watcher;
+  state.watcher = null;
+  if (!watcher) return Promise.resolve();
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      watcher.off('close', finish);
+      resolve();
+    };
+    watcher.once('close', finish);
+    try { watcher.close(); } catch { finish(); }
+  });
 }
 
 function shutdownRepositoryIndexes() {

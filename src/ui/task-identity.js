@@ -64,7 +64,7 @@ function clientCapabilityView(value = {}) {
       capabilityLabel: 'Native MCP Tasks: Not advertised by client',
       executionMode: mode,
       executionLabel: 'Eligible long work: Work-session continuation',
-      description: 'Short operations complete directly. Longer eligible operations can continue in the same work session. You can check them by work_id.',
+      description: 'Short operations complete directly. Longer eligible operations continue in the same work session. Keep doing independent work; later Rel.AI calls can surface completion automatically, or check by work_id when the result is needed.',
       pill: 'not advertised',
       pillClass: 'warn'
     };

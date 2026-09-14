@@ -28,7 +28,7 @@ The startup shim is protected by the HTTP/ChatGPT smoke tests, while stdio tests
 
 ### Native Tasks capability policy
 
-Rel.AI keeps one current tool surface regardless of whether a connected MCP client advertises the Tasks extension. Clients that do not advertise `io.modelcontextprotocol/tasks` receive direct results when the operation fits the safe response window; longer eligible operations continue under the same repository `work_id` and are retrieved through work-session status. There are no legacy tool aliases, compatibility operation names, or client-name heuristics.
+Rel.AI keeps one current tool surface regardless of whether a connected MCP client advertises the Tasks extension. Clients that do not advertise `io.modelcontextprotocol/tasks` receive direct results when the operation fits the safe response window; longer eligible operations continue under the same repository `work_id`. Their completion is persisted and may be delivered once as `completedOperations` on a later Rel.AI call from the same authorized principal/workspace, so agents should continue useful independent work instead of polling. Work-session status remains the explicit retrieval path when the result is needed. There are no legacy tool aliases, compatibility operation names, or client-name heuristics.
 
 Native Tasks activate only when the request explicitly advertises the supported Tasks capability. The eligibility metadata describes which current operations may use that execution mode. Protocol-version negotiation remains transport interoperability, not a second or legacy tool API.
 

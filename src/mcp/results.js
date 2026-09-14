@@ -97,12 +97,14 @@ function conciseToolResultText(payload, options = {}) {
   const success = payload.ok !== false && options.isError !== true;
   if (success) {
     const lines = ['Rel.AI operation succeeded.'];
+    appendCompletionNotices(lines, payload.completedOperations);
     if (options.structuredTruncated) {
       lines.push(`Structured result compacted from ${Number(options.originalBytes || 0)} bytes. Re-call with narrower limits for complete bounded data.`);
     }
     return lines.join('\n');
   }
   const lines = ['Rel.AI operation failed.'];
+  appendCompletionNotices(lines, payload.completedOperations);
   appendField(lines, 'Workspace', scalarText(payload.workspace));
   appendField(lines, 'Work session', scalarText(payload.work_id));
   appendField(lines, 'Process', scalarText(payload.processId));
@@ -117,6 +119,14 @@ function conciseToolResultText(payload, options = {}) {
     lines.push(`Structured result compacted from ${Number(options.originalBytes || 0)} bytes. Re-call with narrower limits for complete bounded data.`);
   }
   return lines.join('\n');
+}
+
+function appendCompletionNotices(lines, notices) {
+  if (!Array.isArray(notices) || notices.length === 0) return;
+  for (const notice of notices.slice(0, 5)) {
+    const summary = displayText(notice?.summary, 500);
+    if (summary) lines.push(`Background completion: ${summary}`);
+  }
 }
 
 function appendField(lines, label, value) {
@@ -177,7 +187,8 @@ function compactToolResult(payload, originalBytes) {
     nextAction: displayText(payload.nextAction, 2000),
     stdout: tailText(payload.stdout, 2000),
     stderr: tailText(payload.stderr, 4000),
-    results: compactDiagnosticResults(payload.results)
+    results: compactDiagnosticResults(payload.results),
+    completedOperations: Array.isArray(payload.completedOperations) ? payload.completedOperations.slice(0, 5) : undefined
   };
   return Object.fromEntries(Object.entries(compact).filter(([, value]) => value != null));
 }

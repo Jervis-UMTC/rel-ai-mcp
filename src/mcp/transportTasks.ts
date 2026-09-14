@@ -9,6 +9,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { combineAbortSignals } from '../abortSignals.js';
 import {
   DEFAULT_FALLBACK_GRACE_MS,
+  acknowledgeFallbackCompletionNotice,
+  enableFallbackCompletionNotice,
   fallbackExecutionStatus,
   fallbackSignature,
   startFallbackExecution
@@ -48,7 +50,7 @@ import { toolResult } from './results.js';
 import { catalogApprovalRequirement, getToolActionCatalog, resolveToolOperation } from '../tools/actionCatalog.js';
 import { getToolSchemas } from '../tools/schema.js';
 import { validateToolOutput } from '../tools/outputValidation.js';
-import { principalIdentity } from './principal.js';
+import { principalFingerprint, principalIdentity } from './principal.js';
 import { MCP_SERVER_INFO } from '../mcpServer.js';
 import { MCP_RESULT_TYPE, TRANSPORT_OPERATION } from './contracts.ts';
 
@@ -200,11 +202,13 @@ async function runFallbackToolExecution(config: any, message: any, args: any, op
       config,
       workId,
       scopeId,
+      noticeScope: principalFingerprint(options.principal),
       tool: name,
       workspace: String(args.workspace || ''),
       signature,
       run: (signal: any) => options.execute(config, name, args, {
         ...options,
+        backgroundFallbackExecution: true,
         signal,
         requestId: `fallback:${workId || scopeId}`,
         message
@@ -223,6 +227,10 @@ async function runFallbackToolExecution(config: any, message: any, args: any, op
   }
 
   if (started.reused && started.record.status !== 'running') {
+    acknowledgeFallbackCompletionNotice(config, workId || started.record.operationId, {
+      noticeScope: principalFingerprint(options.principal),
+      workspace: String(args.workspace || '')
+    });
     return replayFallbackResult(message.id, workId, started.record);
   }
 
@@ -239,7 +247,15 @@ async function runFallbackToolExecution(config: any, message: any, args: any, op
     }
   }
 
+  enableFallbackCompletionNotice(config, started.record);
   const operation = fallbackExecutionStatus(workId || started.record.operationId, { config }) || {};
+  if (operation.status && operation.status !== 'running') {
+    acknowledgeFallbackCompletionNotice(config, workId || started.record.operationId, {
+      noticeScope: principalFingerprint(options.principal),
+      workspace: String(args.workspace || '')
+    });
+    return replayFallbackResult(message.id, workId, started.record);
+  }
   return successResponse(message.id, toolResult({
     ok: true,
     workspace: String(args.workspace || ''),
@@ -249,10 +265,10 @@ async function runFallbackToolExecution(config: any, message: any, args: any, op
     updatedAt: operation.updatedAt,
     revision: operation.revision,
     pollAfterMs: operation.pollAfterMs,
-    message: `${name} is still running safely after this request returns.`,
+    message: `${name} is still running safely in the background after this request returns. Continue independent work instead of polling when useful work remains.`,
     nextAction: workId
-      ? `Call relai_work with action "status" and work_id "${workId}" after about ${Math.max(1, Math.round(Number(operation.pollAfterMs || 1000) / 1000))} second(s) to get the result.`
-      : `Call relai_work with action "status", workspace "${String(args.workspace || '')}", and operationId "${operation.operationId}" to get the result.`
+      ? `Continue independent work. Later Rel.AI calls in this workspace may report this completion under completedOperations. Call relai_work with action "status" and work_id "${workId}" only when you need the result or no other useful independent work remains.`
+      : `Continue independent work. Later Rel.AI calls in this workspace may report this completion under completedOperations. Call relai_work with action "status", workspace "${String(args.workspace || '')}", and operationId "${operation.operationId}" only when you need the result.`
   }, false));
 }
 
@@ -469,6 +485,7 @@ function transportToolContext(options: any) {
     principal: options.principal || principalIdentity(options.principal),
     signal: options.signal,
     nativeTaskId: options.nativeTaskId,
+    backgroundFallbackExecution: options.backgroundFallbackExecution === true,
     mcp: {
       envelope: meta,
       method: TRANSPORT_OPERATION.TOOL_CALL,

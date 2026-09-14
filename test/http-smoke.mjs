@@ -412,7 +412,12 @@ try {
   if (client) await client.close().catch(() => {});
   await stopHttpTestServer(child);
   assert.equal(fs.readFileSync(profile, 'utf8'), originalProfile);
-  fs.rmSync(stateDir, { recursive: true, force: true });
+  fs.rmSync(stateDir, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === 'win32' ? 20 : 5,
+    retryDelay: 100
+  });
 }
 
 console.log('HTTP MCP 2026-07-28 discovery, stateless tools, resources, dashboard, and POST-only lifecycle smoke test passed.');

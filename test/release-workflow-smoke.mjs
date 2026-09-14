@@ -47,6 +47,7 @@ function copyFixture() {
     'scripts/verify-macos-release.mjs',
     'scripts/current-unpacked.mjs',
     'scripts/active-controller-guard.mjs',
+    '.github/workflows/ci.yml',
     '.github/workflows/release.yml'
   ]) {
     const source = path.join(root, relativePath);
@@ -197,10 +198,19 @@ function verifyPackageContracts() {
 }
 
 function verifyWorkflowContracts() {
+  const ciWorkflow = fs.readFileSync(path.join(tmp, '.github', 'workflows', 'ci.yml'), 'utf8');
   const workflow = fs.readFileSync(path.join(tmp, '.github', 'workflows', 'release.yml'), 'utf8');
+  const windowsCiStart = ciWorkflow.indexOf('packaged-windows:');
+  const windowsCiEnd = ciWorkflow.indexOf('\n  packaged-linux:', windowsCiStart);
+  const windowsCi = ciWorkflow.slice(windowsCiStart, windowsCiEnd);
+  const windowsSourceGateIndex = windowsCi.indexOf('npm run test:all');
+  const windowsPackageIndex = windowsCi.indexOf('npm run electron:build:windows');
   const releaseSourceGateIndex = workflow.indexOf('npm run test:release');
   const windowsBuildIndex = workflow.indexOf('npm run electron:dist:windows');
 
+  assert.ok(windowsCiStart >= 0 && windowsCiEnd > windowsCiStart, 'normal CI must keep a dedicated Windows packaging job');
+  assert.ok(windowsSourceGateIndex >= 0, 'normal Windows CI must run the complete source gate before release/CD');
+  assert.ok(windowsSourceGateIndex < windowsPackageIndex, 'normal Windows CI must fail source regressions before spending time packaging');
   assert.ok(releaseSourceGateIndex >= 0);
   assert.ok(releaseSourceGateIndex < windowsBuildIndex);
   assert.doesNotMatch(workflow, /Install gateway test dependencies|gateway\/package\.json/i, 'public release workflow must not depend on the private gateway workspace');
