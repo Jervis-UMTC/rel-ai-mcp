@@ -7,6 +7,7 @@
 - **Preserve browser automation and takeover semantics while fitting the live view.** Real Electron coverage now verifies bottom-right visibility and interaction, independent scrolling, user takeover through the fitted presentation, and full-resolution AI screenshots that remain at the canonical viewport size.
 
 ### Desktop and Pulse
+- **Give every Electron package a source-derived build ID alongside its semantic version.** Builds now record the exact tracked and untracked non-ignored file snapshot and surface identities such as `v1.0.1 (e3f601287248)`, so two local builds of the same release version are visibly distinct. Packaging still refuses to promote a package if its source changes while the build is running.
 - **Suppress split-second Pulse flashes from unlinked tool calls without hiding sustained activity.** A new 300 ms visibility delay applies only when Rel.AI is about to show Pulse for working activity that has no bound task; activity that ends inside the delay is discarded, while longer unlinked calls still surface normally and existing visible/task-bound Pulse behavior is unchanged.
 
 ### Repository Intelligence and parser assets

@@ -57,6 +57,7 @@ const files = [
   'audit-production-unit.mjs',
   'color-token-staleness-unit.mjs',
   'generated-assets-check-unit.mjs',
+  'build-provenance-unit.mjs',
   'http-auth-smoke.mjs',
   'mcp-app-ui-unit.mjs',
   'search-filesystem-fallback-unit.mjs',

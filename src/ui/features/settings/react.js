@@ -41,7 +41,7 @@ export function SettingsView({ data = {}, subPage = '' }) {
     connection: h(ConnectionPage, { data }),
     preferences: h(PreferencesPage),
     application: h(ApplicationPage, { computerControl: data.config?.computerControl }),
-    about: h(AboutPage, { metadata: data.application || {} })
+    about: h(AboutPage, { metadata: data.application || {}, buildStatus: data.desktopStatus?.buildStatus })
   }[page] || h(PreferencesPage);
   return h('div', { id: '__settings-content', className: 'settings-content', 'data-settings-react': page }, content);
 }
@@ -556,11 +556,14 @@ function normalizeNotificationPreferences(value = {}) {
 
 function ApplicationPage({ computerControl }) {
   const [lifecycle, setLifecycle] = useState(undefined);
+  const [desktopStatus, setDesktopStatus] = useState(undefined);
   const desktop = window.relaiDesktop;
   useEffect(() => {
     let active = true;
-    if (typeof desktop?.getLifecycleStatus !== 'function') { setLifecycle(null); return undefined; }
-    void desktop.getLifecycleStatus().then(status => { if (active) setLifecycle(status); }).catch(() => { if (active) setLifecycle(null); });
+    if (typeof desktop?.getLifecycleStatus !== 'function') setLifecycle(null);
+    else void desktop.getLifecycleStatus().then(status => { if (active) setLifecycle(status); }).catch(() => { if (active) setLifecycle(null); });
+    if (typeof desktop?.getStatus !== 'function') setDesktopStatus(null);
+    else void desktop.getStatus().then(status => { if (active) setDesktopStatus(status); }).catch(() => { if (active) setDesktopStatus(null); });
     return () => { active = false; };
   }, [desktop]);
   return h(React.Fragment, null,
@@ -568,7 +571,7 @@ function ApplicationPage({ computerControl }) {
     lifecycle === undefined ? h('div', { className: 'settings-loading', role: 'status' }, 'Loading app settings…') : h(React.Fragment, null,
       h(StartupSettings, { initial: lifecycle }),
       h(ComputerControlSettings, { initial: computerControl }),
-      h(ApplicationUpdates, { lifecycle }),
+      h(ApplicationUpdates, { lifecycle, buildStatus: desktopStatus?.buildStatus }),
       h(LocalDataSettings),
       typeof desktop?.quitApp === 'function' || typeof desktop?.logout === 'function'
         ? h(Card, { title: 'Application controls' },
@@ -664,7 +667,7 @@ function ComputerControlSettings({ initial = {} }) {
   }));
 }
 
-function ApplicationUpdates({ lifecycle }) {
+function ApplicationUpdates({ lifecycle, buildStatus }) {
   const bridge = window.relaiDesktop;
   const supported = Boolean(bridge?.getUpdateStatus && bridge?.checkForUpdates && bridge?.downloadUpdate && bridge?.installUpdate);
   const [status, setStatus] = useState(null);
@@ -725,7 +728,7 @@ function ApplicationUpdates({ lifecycle }) {
     }),
     h('div', { className: 'application-update-status', 'data-auto-download-updates': String(autoDownload) },
       h('div', { className: 'application-update-summary' },
-        h('div', null, h('span', { className: 'application-update-label' }, 'Installed version'), h('strong', null, current.currentVersion ? `v${current.currentVersion}` : 'Unknown version')),
+        h('div', null, h('span', { className: 'application-update-label' }, 'Installed version'), h('strong', null, current.currentVersion ? `v${versionWithBuildId(current.currentVersion, buildStatus)}` : 'Unknown version')),
         h(StatusPill, { label: view.label, tone: view.tone })
       ),
       h('p', { className: 'muted application-update-copy' }, view.description),
@@ -741,6 +744,12 @@ function ApplicationUpdates({ lifecycle }) {
       )
     )
   );
+}
+
+function versionWithBuildId(version, buildStatus = {}) {
+  if (!version) return 'Unknown version';
+  const buildId = String(buildStatus?.buildId || '').trim();
+  return buildId ? `${String(version)} (${buildId})` : String(version);
 }
 
 function updateView(status = {}, autoDownload = false) {
@@ -974,7 +983,7 @@ function QuitRow() {
   );
 }
 
-function AboutPage({ metadata }) {
+function AboutPage({ metadata, buildStatus = {} }) {
   const repositoryUrl = validatedGitHubUrl(metadata.repositoryUrl);
   const developer = metadata.developer || {};
   const developerUrl = validatedGitHubUrl(developer.profileUrl);
@@ -987,7 +996,7 @@ function AboutPage({ metadata }) {
   return h(React.Fragment, null,
     h(SettingsHeader, { title: 'About Rel.AI', description: 'Rel.AI keeps your projects local and shares bounded tool results through your configured ChatGPT connection when a task needs them.' }),
     h(Card, { title: 'Application information' },
-      h('div', { className: 'about-product' }, h('img', { src: '/public/assets/relai-logo.png', width: 193, height: 187, alt: '', 'aria-hidden': 'true' }), h('div', null, h('h4', null, metadata.name || 'Rel.AI MCP'), h('p', null, `Version ${metadata.version || ''}`))),
+      h('div', { className: 'about-product' }, h('img', { src: '/public/assets/relai-logo.png', width: 193, height: 187, alt: '', 'aria-hidden': 'true' }), h('div', null, h('h4', null, metadata.name || 'Rel.AI MCP'), h('p', null, `Version ${versionWithBuildId(metadata.version || '', buildStatus)}`))),
       h(AboutRow, { label: 'Developer' }, h('span', { className: 'about-detail-value' }, 'Developed by ', developerUrl ? h('a', { className: 'settings-external-link about-detail-value', href: developerUrl, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `${developer.name} on GitHub (@${developer.username})` }, developer.name) : developer.name, developer.username ? ` (@${developer.username})` : '')),
       h(AboutRow, { label: 'Source code' }, repositoryUrl ? h('a', { className: 'settings-external-link about-detail-value', href: repositoryUrl, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Rel.AI MCP source code on GitHub' }, repositoryLabel(repositoryUrl)) : h('span', { className: 'about-detail-value' }, metadata.repositoryUrl || '')),
       h(AboutRow, { label: 'License' }, documentLink('LICENSE', String(metadata.license || 'Apache-2.0')))

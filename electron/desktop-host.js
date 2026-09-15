@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createAppUpdater } from './app-updater.js';
 import { createBrowserSurfaceHost } from './browser-surface-host.js';
+import { readBuildStatus } from './build-provenance.js';
 import { createDashboardWindowManager } from './dashboard-window.js';
 import { createDesktopLifecycleManager } from './desktop-lifecycle.js';
 import { createDesktopLocalDataManager } from './desktop-local-data.js';
@@ -92,7 +93,8 @@ async function createDesktopHost(options = {}) {
   let lastServiceContextKey = '';
   let startPromise = null;
   let eventsBound = false;
-  let currentStatus = initialDesktopStatus(app.getVersion());
+  const buildStatus = readBuildStatus({ app });
+  let currentStatus = initialDesktopStatus(app.getVersion(), buildStatus);
 
   const diagnosticFiles = createDiagnosticFiles({ app, shell });
   const runtimeLogs = createRuntimeLogBuffer({ filePath: () => diagnosticFiles.serviceLogPath() });
@@ -259,6 +261,7 @@ async function createDesktopHost(options = {}) {
     runtimeLogs,
     secureTunnelRuntime,
     tunnelCredentials,
+    buildStatus,
     errorCodes: ERROR_CODES,
     getCurrentStatus: () => currentStatus,
     setStatus,
@@ -380,7 +383,7 @@ async function createDesktopHost(options = {}) {
     getLocalDataUsage: desktopLocalData.getUsage,
     clearTemporaryLocalData: desktopLocalData.clearTemporary,
     openLocalDataFolder: desktopLocalData.openDataFolder,
-    getCurrentStatus: () => currentStatus,
+    getCurrentStatus: currentDashboardStatus,
     getNotificationsEnabled: () => desktopNotifications.getPreferences().enabled,
     setNotificationsEnabled: desktopNotifications.setEnabled,
     getNotificationPreferences: desktopNotifications.getPreferences,
@@ -559,6 +562,10 @@ async function createDesktopHost(options = {}) {
       return;
     }
     void openDashboardWindow().catch(() => recoveryWindowManager.show());
+  }
+
+  function currentDashboardStatus() {
+    return normalizeDesktopStatus({ ...currentStatus, buildStatus });
   }
 
   function pushStatus(statusOptions = {}) {

@@ -9,6 +9,7 @@ import { electronPlatformSpec, normalizeElectronArch, normalizeElectronPlatform 
 import { invalidateDerivedReleaseEvidence, releaseArtifactNames } from './release-artifacts.mjs';
 import { writeWindowsUpdaterConfig } from './electron-updater-config.mjs';
 import { assertInstalledElectronDependencies } from './electron-package-dependencies.mjs';
+import { buildIdFromFingerprint, createBuildProvenance, readRepositoryBuildState } from '../src/buildProvenance.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electronRoot = path.join(root, 'electron');
@@ -49,6 +50,12 @@ runNode('OpenAI tunnel-client verification', verifyTunnelClient, [], { env: { ..
 ensureZoekt(platform, targetArch);
 runNode('Zoekt seed verification', verifyZoekt, [], { env: platformEnvironment });
 
+const buildProvenance = await createBuildProvenance(root, { version: readVersion() });
+const serializedBuildProvenance = JSON.stringify(buildProvenance);
+platformEnvironment.REL_AI_BUILD_PROVENANCE = serializedBuildProvenance;
+process.env.REL_AI_BUILD_PROVENANCE = serializedBuildProvenance;
+console.log(`[electron-package] Build v${buildProvenance.version} (${buildIdFromFingerprint(buildProvenance.sourceFingerprint)})${buildProvenance.dirty ? ' with local changes' : ''}.`);
+
 if (mode === 'unpacked') {
   runNode(`Electron ${platform} unpacked packaging`, electronBuilderCli, [
     platformSpec.builderFlag,
@@ -63,6 +70,12 @@ if (mode === 'unpacked') {
     const unpackedDirectory = path.join(target, platformSpec.unpackedDirectory);
     writeWindowsUpdaterConfig({ appDirectory: unpackedDirectory, manifest: electronManifest });
     assertWindowsUpdaterConfig(unpackedDirectory);
+  }
+  try {
+    await assertBuildSourceUnchanged(buildProvenance);
+  } catch (error) {
+    removeDirectory(target);
+    throw error;
   }
 } else {
   await packageRelease(electronBuilderCli, options.builderArgs, platformSpec);
@@ -144,7 +157,7 @@ async function packageWindowsRelease(electronBuilder, builderArgs, spec) {
     collectArtifactFiles(portableOutput, stagingRoot, [canonical.portable]);
     removeDirectory(targetRoot);
 
-    const promoted = promoteReleaseOutput({
+    const promoted = await promoteReleaseOutput({
       stagingRoot,
       destinationRoot: path.join(root, 'dist'),
       spec,
@@ -200,7 +213,7 @@ async function packageLinuxRelease(electronBuilder, builderArgs, spec) {
     collectArtifactFiles(artifactOutput, stagingRoot, requiredArtifacts);
     removeDirectory(path.join(stagingRoot, '.artifact-targets'));
 
-    const promoted = promoteReleaseOutput({
+    const promoted = await promoteReleaseOutput({
       stagingRoot,
       destinationRoot: path.join(root, 'dist'),
       spec,
@@ -265,7 +278,7 @@ async function packageMacRelease(electronBuilder, builderArgs, spec) {
     collectArtifactFiles(artifactOutput, stagingRoot, requiredArtifacts);
     removeDirectory(path.join(stagingRoot, '.artifact-targets'));
 
-    const promoted = promoteReleaseOutput({
+    const promoted = await promoteReleaseOutput({
       stagingRoot,
       destinationRoot: path.join(root, 'dist'),
       spec,
@@ -313,7 +326,8 @@ function releaseOutputSafetyTargets(destinationRoot, spec) {
   return [...targets];
 }
 
-function promoteReleaseOutput({ stagingRoot, destinationRoot, spec, requiredArtifacts }) {
+async function promoteReleaseOutput({ stagingRoot, destinationRoot, spec, requiredArtifacts }) {
+  await assertBuildSourceUnchanged(buildProvenance);
   const prepackaged = path.join(stagingRoot, spec.unpackedDirectory);
   assertPrepackagedApp(prepackaged, spec);
   const stagingFileEntries = fs.readdirSync(stagingRoot, { withFileTypes: true })
@@ -505,6 +519,12 @@ function architectureArgs(spec) {
 
 function readVersion() {
   return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+}
+
+async function assertBuildSourceUnchanged(expected) {
+  const current = await readRepositoryBuildState(root);
+  if (current.sourceFingerprint === expected.sourceFingerprint) return;
+  throw new Error('Rel.AI source changed while the Electron package was being built. Re-run the build so the package includes the current source.');
 }
 
 function ensureTunnelClient(targetPlatform, architecture) {

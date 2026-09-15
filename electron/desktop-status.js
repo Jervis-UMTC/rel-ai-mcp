@@ -4,7 +4,7 @@ const { deriveConnectionState } = await importResourceModule('src/desktopUxContr
 const { createEmptyTaskActivity } = await importResourceModule('src/contracts/tasks.ts');
 const { classifyTaskActivity } = await importResourceModule('src/taskActivityPresentation.js');
 
-function initialDesktopStatus(version = '') {
+function initialDesktopStatus(version = '', buildStatus = {}) {
   return normalizeDesktopStatus({
     serverRunning: false,
     tunnelStatus: 'stopped',
@@ -16,6 +16,7 @@ function initialDesktopStatus(version = '') {
     errorCode: '',
     localUrl: '',
     version,
+    buildStatus: normalizeBuildStatus(buildStatus),
     taskActivity: createEmptyTaskActivity()
   });
 }
@@ -34,6 +35,13 @@ function normalizeDesktopStatus(status = {}) {
       reason: task.reason
     }
   };
+}
+
+function normalizeBuildStatus(value = {}) {
+  const state = ['recorded', 'development', 'unavailable'].includes(value?.state)
+    ? value.state
+    : 'unavailable';
+  return { ...value, state };
 }
 
 function desktopStatusFailure(errorCode, error, next = {}) {

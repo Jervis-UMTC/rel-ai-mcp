@@ -16,6 +16,7 @@ function createDesktopServiceRuntime(deps) {
     runtimeLogs,
     secureTunnelRuntime,
     tunnelCredentials,
+    buildStatus = {},
     errorCodes,
     getCurrentStatus,
     setStatus,
@@ -329,7 +330,7 @@ function createDesktopServiceRuntime(deps) {
     activeToken = '';
     if (options.terminateUtility === true) await serviceProcessClient.dispose({ stop: false });
     if (!options.preserveDashboard) await dashboardWindowManager.close();
-    const nextStatus = initialDesktopStatus(app.getVersion());
+    const nextStatus = initialDesktopStatus(app.getVersion(), buildStatus);
     replaceCurrentStatus(nextStatus, { silent: options.silent === true });
     const runtimeCleanup = localRuntime.cleanup || {};
     const cleanup = {

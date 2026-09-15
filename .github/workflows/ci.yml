@@ -112,8 +112,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends x11-xserver-utils
-      - name: Build unpacked Linux application
-        run: npm run electron:build:linux
+      - name: Build Linux release artifacts
+        run: npm run electron:dist:linux
       - name: Resolve current unpacked application
         id: unpacked
         shell: bash
@@ -124,6 +124,8 @@ jobs:
           echo "path=$package_directory" >> "$GITHUB_OUTPUT"
       - name: Verify packaged application layout
         run: npm run verify:packaged -- --platform linux --dir '${{ steps.unpacked.outputs.path }}'
+      - name: Check Linux package size
+        run: npm run electron:size:linux
       - name: Verify packaged computer runtime
         run: xvfb-run --auto-servernum node scripts/verify-packaged-computer-runtime.mjs --platform linux --dir '${{ steps.unpacked.outputs.path }}'
       - name: Verify hardened Electron fuses

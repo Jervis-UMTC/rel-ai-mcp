@@ -7,6 +7,7 @@ import { listPackage } from '@electron/asar';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { electronPlatformSpec, normalizeElectronArch, normalizeElectronPlatform } from './electron-platform.mjs';
 import { resolvePackagedDirectory } from './packaged-directory.mjs';
+import { buildIdFromFingerprint, normalizeBuildProvenance } from '../src/buildProvenance.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -82,6 +83,7 @@ const requiredFiles = [
   resourcePath('public', 'dashboard-react.js'),
   resourcePath('public', 'dashboard.css'),
   resourcePath('package.json'),
+  resourcePath('build-provenance.json'),
   resourcePath('CHANGELOG.md'),
   resourcePath('LICENSE'),
   resourcePath('NOTICE'),
@@ -113,6 +115,10 @@ const rootPackage = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 
 const packagedPackage = JSON.parse(fs.readFileSync(path.join(resourcesRoot, 'package.json'), 'utf8')); 
 assert.equal(packagedPackage.name, rootPackage.name, 'Packaged package metadata has the wrong product name.');
 assert.equal(packagedPackage.version, rootPackage.version, 'Packaged package metadata has the wrong version.');
+const packagedBuildProvenance = normalizeBuildProvenance(JSON.parse(fs.readFileSync(path.join(resourcesRoot, 'build-provenance.json'), 'utf8')));
+assert.ok(packagedBuildProvenance, 'Packaged build provenance must be valid.');
+assert.equal(packagedBuildProvenance.version, rootPackage.version, 'Packaged build provenance has the wrong application version.');
+assert.match(buildIdFromFingerprint(packagedBuildProvenance.sourceFingerprint), /^[a-f0-9]{12}$/, 'Packaged build provenance must provide a valid build ID.');
 const rootOpenTelemetryDirectory = path.join(root, 'node_modules', '@opentelemetry');
 const packagedOpenTelemetryDirectory = path.join(resourcesRoot, 'node_modules', '@opentelemetry');
 const rootOpenTelemetryPackages = fs.readdirSync(rootOpenTelemetryDirectory, { withFileTypes: true })

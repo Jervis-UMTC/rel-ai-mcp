@@ -90,6 +90,7 @@
     "electron:dev:watch": "node scripts/electron-dev-watch.mjs",
     "electron:dev:watch:isolated": "node scripts/electron-dev-watch.mjs --isolated",
     "electron:runtime": "node electron/node_modules/electron/install.js",
+    "electron:build:id": "node scripts/print-local-build-id.mjs",
     "electron:build": "node scripts/electron-package.mjs --mode unpacked --platform win32",
     "electron:build:windows": "node scripts/electron-package.mjs --mode unpacked --platform win32",
     "electron:build:linux": "node scripts/electron-package.mjs --mode unpacked --platform linux",
