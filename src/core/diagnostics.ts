@@ -52,6 +52,10 @@ export function getDiagnosticsReport(options: DiagnosticsRuntimeOptions, workspa
     includeTokenInUrls: false
   });
   const desktopStatus = typeof options.getDesktopStatus === 'function' ? options.getDesktopStatus() : null;
+  const desktopBuildStatus = desktopStatus?.buildStatus;
+  const buildId = desktopBuildStatus && typeof desktopBuildStatus === 'object' && !Array.isArray(desktopBuildStatus)
+    ? String((desktopBuildStatus as Record<string, unknown>).buildId || '').trim()
+    : '';
   const connectionState = desktopStatus?.connectionState || deriveConnectionState(desktopStatus || {
     serverRunning: false,
     tunnelStatus: 'stopped'
@@ -63,6 +67,7 @@ export function getDiagnosticsReport(options: DiagnosticsRuntimeOptions, workspa
   const auditLogs = readAudit(config, { limit: 200, ...(workspace ? { workspace } : {}) });
   return buildDiagnosticReport({
     workspace,
+    application: { version: String(desktopStatus?.version || '').trim(), build: buildId },
     health: productUx.healthMonitor(config),
     cautionData: productUx.cautionSummary(config, { windowHours: 24, limit: 500 }),
     connection: connectionSummary,

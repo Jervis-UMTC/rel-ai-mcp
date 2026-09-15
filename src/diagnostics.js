@@ -43,10 +43,15 @@ function buildDiagnosticReport(input = {}) {
   ];
   const ordered = dedupeFindings(findings).sort(compareDiagnosticFindings);
   const failedActivity = normalizeFailedActivity(input.auditLogs);
+  const application = {
+    version: sanitizeText(input.application?.version || '', 120).trim(),
+    build: sanitizeText(input.application?.build || '', 120).trim()
+  };
   const report = {
     ok: true,
     generatedAt: new Date().toISOString(),
     scope: workspace ? { workspace } : { workspace: '' },
+    application,
     summary: countFindings(ordered),
     findings: ordered,
     logs: { runtime, failedActivity }
@@ -261,9 +266,11 @@ function formatDiagnosticReport(report) {
   const lines = [
     'Rel.AI MCP diagnostic report',
     `Generated: ${report.generatedAt}`,
-    `Scope: ${report.scope.workspace || 'all workspaces'}`,
-    `Findings: ${report.summary.blocking} blocking, ${report.summary.warnings} warnings, ${report.summary.recommendations} recommendations`
+    `Scope: ${report.scope.workspace || 'all workspaces'}`
   ];
+  if (report.application?.version) lines.push(`Version: ${report.application.version}`);
+  if (report.application?.build) lines.push(`Build: ${report.application.build}`);
+  lines.push(`Findings: ${report.summary.blocking} blocking, ${report.summary.warnings} warnings, ${report.summary.recommendations} recommendations`);
   for (const finding of report.findings) {
     lines.push('', `[${finding.severity.toUpperCase()}] ${finding.code}`, finding.title, `Impact: ${finding.impact}`, `Action: ${finding.recommendation}`);
   }

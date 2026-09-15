@@ -718,6 +718,7 @@ function ApplicationUpdates({ lifecycle, buildStatus }) {
     } finally { setBusy(''); }
   };
   const current = status || { state: 'idle' };
+  const buildId = buildIdOf(buildStatus);
   const view = updateView(current, autoDownload);
   return h(Card, { title: 'App updates', className: 'application-update-panel' },
     h(ToggleRow, {
@@ -728,7 +729,12 @@ function ApplicationUpdates({ lifecycle, buildStatus }) {
     }),
     h('div', { className: 'application-update-status', 'data-auto-download-updates': String(autoDownload) },
       h('div', { className: 'application-update-summary' },
-        h('div', null, h('span', { className: 'application-update-label' }, 'Installed version'), h('strong', null, current.currentVersion ? `v${versionWithBuildId(current.currentVersion, buildStatus)}` : 'Unknown version')),
+        h('div', null,
+          h('span', { className: 'application-update-label' }, 'Installed version'),
+          h('strong', null, current.currentVersion ? `v${current.currentVersion}` : 'Unknown version'),
+          buildId ? h('span', { className: 'application-update-label' }, 'Build') : null,
+          buildId ? h('span', { className: 'application-update-build' }, buildId) : null
+        ),
         h(StatusPill, { label: view.label, tone: view.tone })
       ),
       h('p', { className: 'muted application-update-copy' }, view.description),
@@ -746,10 +752,8 @@ function ApplicationUpdates({ lifecycle, buildStatus }) {
   );
 }
 
-function versionWithBuildId(version, buildStatus = {}) {
-  if (!version) return 'Unknown version';
-  const buildId = String(buildStatus?.buildId || '').trim();
-  return buildId ? `${String(version)} (${buildId})` : String(version);
+function buildIdOf(buildStatus = {}) {
+  return String(buildStatus?.buildId || '').trim();
 }
 
 function updateView(status = {}, autoDownload = false) {
@@ -987,6 +991,7 @@ function AboutPage({ metadata, buildStatus = {} }) {
   const repositoryUrl = validatedGitHubUrl(metadata.repositoryUrl);
   const developer = metadata.developer || {};
   const developerUrl = validatedGitHubUrl(developer.profileUrl);
+  const buildId = buildIdOf(buildStatus);
   const documentLink = (path, label) => {
     const href = repositoryDocumentUrl(repositoryUrl, path);
     return href
@@ -996,7 +1001,11 @@ function AboutPage({ metadata, buildStatus = {} }) {
   return h(React.Fragment, null,
     h(SettingsHeader, { title: 'About Rel.AI', description: 'Rel.AI keeps your projects local and shares bounded tool results through your configured ChatGPT connection when a task needs them.' }),
     h(Card, { title: 'Application information' },
-      h('div', { className: 'about-product' }, h('img', { src: '/public/assets/relai-logo.png', width: 193, height: 187, alt: '', 'aria-hidden': 'true' }), h('div', null, h('h4', null, metadata.name || 'Rel.AI MCP'), h('p', null, `Version ${versionWithBuildId(metadata.version || '', buildStatus)}`))),
+      h('div', { className: 'about-product' }, h('img', { src: '/public/assets/relai-logo.png', width: 193, height: 187, alt: '', 'aria-hidden': 'true' }), h('div', null,
+        h('h4', null, metadata.name || 'Rel.AI MCP'),
+        h('p', null, `Version: ${metadata.version ? `v${metadata.version}` : 'Unknown version'}`),
+        buildId ? h('p', null, `Build: ${buildId}`) : null
+      )),
       h(AboutRow, { label: 'Developer' }, h('span', { className: 'about-detail-value' }, 'Developed by ', developerUrl ? h('a', { className: 'settings-external-link about-detail-value', href: developerUrl, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `${developer.name} on GitHub (@${developer.username})` }, developer.name) : developer.name, developer.username ? ` (@${developer.username})` : '')),
       h(AboutRow, { label: 'Source code' }, repositoryUrl ? h('a', { className: 'settings-external-link about-detail-value', href: repositoryUrl, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Rel.AI MCP source code on GitHub' }, repositoryLabel(repositoryUrl)) : h('span', { className: 'about-detail-value' }, metadata.repositoryUrl || '')),
       h(AboutRow, { label: 'License' }, documentLink('LICENSE', String(metadata.license || 'Apache-2.0')))

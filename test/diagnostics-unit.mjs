@@ -23,6 +23,7 @@ assert.equal(objectValue.list[0].authorization, '[redacted]');
 
 const report = buildDiagnosticReport({
   workspace: 'example',
+  application: { version: '1.0.1', build: 'aaaa1111bbbb' },
   health: { findings: [{ severity: 'error', code: 'workspace_unavailable', workspace: 'example', path: 'C:/missing', message: `token=${secret}` }] },
   aliasCheck: { workspaces: [{ alias: 'example', staleKeys: ['npm:test:old'] }] },
   cautionData: { windowHours: 24, workspaces: [{ alias: 'example', count: 1, recent: [{ tool: 'relai_edit', ts: '2026-07-25T00:00:00.000Z', reason: `Bearer ${secret}` }] }] },
@@ -50,6 +51,7 @@ const report = buildDiagnosticReport({
 });
 
 assert.equal(report.ok, true);
+assert.deepEqual(report.application, { version: '1.0.1', build: 'aaaa1111bbbb' });
 assert.ok(report.summary.blocking >= 1);
 assert.ok(report.findings.some(item => item.code === 'workspace_unavailable'));
 assert.ok(report.findings.every(item => item.action?.href));
@@ -72,6 +74,8 @@ assert.match(report.reportText, /task=task-runtime-7 event=event-runtime-7 tool=
 assert.match(report.reportText, /code=PATCH_CONTEXT_MISMATCH workspace=example task=task-42 event=event-edit-1/);
 assert.doesNotMatch(JSON.stringify(report), new RegExp(secret));
 assert.match(report.reportText, /Rel\.AI MCP diagnostic report/);
+assert.match(report.reportText, /Version: 1\.0\.1/);
+assert.match(report.reportText, /Build: aaaa1111bbbb/);
 assert.doesNotMatch(report.reportText, new RegExp(secret));
 
 const persistenceFailure = buildDiagnosticReport({

@@ -20,6 +20,7 @@ export interface DiagnosticReportDto {
   ok: true;
   generatedAt: string;
   scope: { workspace: string };
+  application: { version: string; build: string };
   summary: Record<string, number>;
   findings: DiagnosticFindingDto[];
   logs: Record<string, unknown>;

@@ -17,7 +17,8 @@ try {
   const provenance = normalizeBuildProvenance(JSON.parse(fs.readFileSync(provenancePath, 'utf8')));
   if (!provenance) throw new Error('Local Electron package does not contain valid build identity metadata. Rebuild it with npm run electron:build.');
   const buildId = buildIdFromFingerprint(provenance.sourceFingerprint);
-  console.log(`Rel.AI MCP v${provenance.version} (${buildId})`);
+  console.log(`Version: v${provenance.version}`);
+  console.log(`Build: ${buildId}`);
   console.log(`Built: ${provenance.builtAt}`);
   console.log(provenance.dirty ? 'Source: local changes included' : 'Source: clean checkout');
 } catch (error) {

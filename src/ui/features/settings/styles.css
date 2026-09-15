@@ -97,6 +97,7 @@
 .application-update-summary { @apply flex items-center justify-between gap-4; }
 .application-update-summary > div { @apply grid min-w-0 gap-1; }
 .application-update-label { @apply text-[11px] font-bold uppercase tracking-[.06em]; color: var(--ui-text-tertiary); }
+.application-update-build { @apply font-mono text-[12px]; color: var(--ui-text-secondary); }
 .application-update-summary strong { @apply text-lg; }
 .application-update-copy { @apply m-0 max-w-3xl text-[12px] leading-5; color: var(--ui-text-secondary); }
 .application-update-actions { @apply mt-1 flex flex-wrap gap-2; }
