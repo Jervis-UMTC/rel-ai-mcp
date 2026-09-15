@@ -87,6 +87,7 @@ function createServiceProcessClient(options = {}) {
       context.runtimeLogs = applyRuntimeLogChange(context.runtimeLogs, patch.runtimeLogChange);
       delete context.runtimeLogChange;
     }
+    if (patch.transportEvent) delete context.transportEvent;
     sendContext(patch);
   }
 

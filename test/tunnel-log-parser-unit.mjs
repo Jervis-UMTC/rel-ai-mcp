@@ -39,5 +39,10 @@ const denied = normalizeTunnelLogRecord('{"level":"ERROR","msg":"forbidden","com
 assert.equal(denied.code, 'tunnel_access_denied');
 const missing = normalizeTunnelLogRecord('{"level":"ERROR","msg":"tunnel lookup failed","component":"controlplane","status_code":404}');
 assert.equal(missing.code, 'tunnel_not_found');
+const deadline = normalizeTunnelLogRecord('{"level":"WARN","msg":"command response deadline reached; dropping without posting a response","component":"dispatcher"}');
+assert.equal(deadline.code, 'tunnel_response_deadline');
+const upstream = normalizeTunnelLogRecord('{"level":"ERROR","msg":"dispatcher received MCP upstream error; posted error response to control plane","component":"dispatcher","status_code":502}');
+assert.equal(upstream.code, 'tunnel_upstream_5xx');
+assert.equal(upstream.details.httpStatus, 502);
 
 console.log('Tunnel log parser normalizes fragmented structured output safely.');

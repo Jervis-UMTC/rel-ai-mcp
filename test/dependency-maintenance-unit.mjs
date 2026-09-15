@@ -9,7 +9,7 @@ const rootPackage = JSON.parse(read('package.json'));
 const electronPackage = JSON.parse(read('electron/package.json'));
 const nodeVersion = read('.node-version').trim();
 
-assert.equal(nodeVersion, '24.15.0', 'the repository must keep an exact tested Node runtime');
+assert.equal(nodeVersion, '26.8.2', 'the repository must keep an exact tested Node runtime');
 assert.equal(rootPackage.packageManager, 'npm@12.0.2', 'the repository must keep an exact npm runtime');
 assert.equal(electronPackage.overrides?.['js-yaml'], '4.3.2', 'Electron must independently pin the patched js-yaml release');
 
@@ -21,7 +21,7 @@ for (const workflowPath of [
 ]) {
   const workflow = read(workflowPath);
   assert.match(workflow, /node-version-file:\s*\.node-version/, `${workflowPath} must consume the repository Node pin`);
-  assert.doesNotMatch(workflow, /node-version:\s*24\b/, `${workflowPath} must not float on the Node 24 major`);
+  assert.doesNotMatch(workflow, /node-version:\s*26\b/, `${workflowPath} must not float on the Node 26 major`);
 }
 
 const dependabot = read('.github/dependabot.yml');

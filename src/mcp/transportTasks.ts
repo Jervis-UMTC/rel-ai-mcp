@@ -10,6 +10,7 @@ import { combineAbortSignals } from '../abortSignals.js';
 import {
   DEFAULT_FALLBACK_GRACE_MS,
   acknowledgeFallbackCompletionNotice,
+  acknowledgeFallbackDelivery,
   enableFallbackCompletionNotice,
   fallbackExecutionStatus,
   fallbackSignature,
@@ -62,9 +63,17 @@ const TRANSPORT_TOOL_VALIDATORS = new Map(getToolSchemas().map((tool: any) => [
 const TRANSPORT_INTERCEPTABLE_TOOL_NAMES = new Set(getToolActionCatalog()
   .filter((entry: any) => entry.behavior?.executionClass === 'native_task_eligible' && entry.behavior?.longRunning === true)
   .map((entry: any) => entry.publicTool));
+const TRANSPORT_RESILIENT_OPERATION_NAMES = new Set([
+  'work.begin',
+  'work.status',
+  'snapshot',
+  'read',
+  'search.text',
+  'process.list'
+]);
 
 async function handleTransportTaskRequest(config: any, message: any, options: any = {}) {
-  if (!isTransportTaskRequestCandidate(config, message)) return null;
+  if (!isTransportTaskRequestCandidate(config, message, options)) return null;
   const envelope = validateJsonRpcRequestEnvelope(message);
   if (!envelope.ok) return errorResponse(null, envelope.code, envelope.error, envelope.data);
   const method = String(message.method || '');
@@ -81,12 +90,25 @@ async function handleTransportTaskRequest(config: any, message: any, options: an
   if (!validated.ok) return toolArgumentErrorResponse(message.id, validated.error);
 
   const definition = transportToolDefinition(name, validated.value);
-  if (!shouldInterceptTool(definition, validated.value)) return null;
+  const resilientFallback = options.transportType === 'streamable-http'
+    && shouldUseResilientFallback(definition, validated.value);
+  if (!resilientFallback && !shouldInterceptTool(definition, validated.value)) return null;
 
   const bounds = options.synchronousBounds || DEFAULT_SYNCHRONOUS_EXECUTION_BOUNDS;
   const execute = typeof options.executeToolResult === 'function'
     ? options.executeToolResult
     : executeToolResult;
+  if (resilientFallback) {
+    return runFallbackToolExecution(config, message, validated.value, {
+      ...options,
+      capabilities,
+      execute,
+      bounds,
+      scopeOnly: true,
+      deliveryAware: true,
+      persistFallback: false
+    });
+  }
   const estimate = synchronousEstimate(name, validated.value, bounds, options);
   const selection = selectExecutionMode({
     clientCapabilities: capabilities,
@@ -142,16 +164,22 @@ function shouldInterceptTool(definition: any, args: any = {}) {
     && !catalogApprovalRequirement(definition.name, args || {});
 }
 
+function shouldUseResilientFallback(definition: any, args: any = {}) {
+  return TRANSPORT_RESILIENT_OPERATION_NAMES.has(String(definition?.operationName || ''))
+    && !catalogApprovalRequirement(definition.name, args || {});
+}
+
 function transportToolDefinition(name: any, args: any = {}) {
   const resolution = resolveToolOperation(name, args);
   if (!resolution) return null;
   return {
     name: String(name || ''),
+    operationName: String(resolution.operationName || ''),
     behavior: resolution.catalogEntry?.behavior || resolution.definition?.behavior || null
   };
 }
 
-function isTransportTaskRequestCandidate(config: any, message: any) {
+function isTransportTaskRequestCandidate(config: any, message: any, options: any = {}) {
   if (!isModernRequest(message)) return false;
   const method = String(message?.method || '');
   if (TASK_METHODS.includes(method)) return true;
@@ -159,7 +187,9 @@ function isTransportTaskRequestCandidate(config: any, message: any) {
   const name = String(message?.params?.name || '');
   try {
     const definition = transportToolDefinition(name, message?.params?.arguments || {});
-    return shouldInterceptTool(definition, message?.params?.arguments);
+    return (options.transportType === 'streamable-http'
+      && shouldUseResilientFallback(definition, message?.params?.arguments))
+      || shouldInterceptTool(definition, message?.params?.arguments);
   } catch {
     // Keep malformed long-running tool calls inside Rel.AI's tools/call result
     // boundary. Falling back to SDK argument validation would emit JSON-RPC
@@ -177,7 +207,7 @@ function synchronousEstimate(_name: any, args: any, bounds: any, options: any = 
     ? args.checks.length
     : Array.isArray(args?.commands)
       ? args.commands.length
-      : args?.check || args?.command
+      : args?.check || args?.command || args?.executable
         ? 1
         : Number.POSITIVE_INFINITY;
   const safe = options.synchronousFallback !== false
@@ -192,7 +222,7 @@ function synchronousEstimate(_name: any, args: any, bounds: any, options: any = 
 
 async function runFallbackToolExecution(config: any, message: any, args: any, options: any = {}) {
   const name = String(message.params?.name || '');
-  const workId = String(args.work_id || '').trim();
+  const workId = options.scopeOnly === true ? '' : String(args.work_id || '').trim();
   const signature = fallbackSignature(name, args);
   const scopeId = workId || `workspace:${principalIdentity(options.principal)}:${String(args.workspace || '')}:${signature}`;
   const graceMs = Math.max(0, Number(options.synchronousFallbackGraceMs ?? DEFAULT_FALLBACK_GRACE_MS));
@@ -206,6 +236,7 @@ async function runFallbackToolExecution(config: any, message: any, args: any, op
       tool: name,
       workspace: String(args.workspace || ''),
       signature,
+      persist: options.persistFallback !== false,
       run: (signal: any) => options.execute(config, name, args, {
         ...options,
         backgroundFallbackExecution: true,
@@ -231,19 +262,19 @@ async function runFallbackToolExecution(config: any, message: any, args: any, op
       noticeScope: principalFingerprint(options.principal),
       workspace: String(args.workspace || '')
     });
-    return replayFallbackResult(message.id, workId, started.record);
+    return replayFallbackResult(message.id, workId, started.record, deliveryCallback(config, started.record, options));
   }
 
   if (!started.reused && graceMs > 0) {
     const settled = await waitForFallbackGrace(started.record.promise, graceMs);
     if (settled.kind === 'settled') {
-      if (settled.value.ok) return successResponse(message.id, settled.value.result);
+      if (settled.value.ok) return successResponse(message.id, settled.value.result, deliveryCallback(config, started.record, options));
       return successResponse(message.id, toolResult({
         ok: false,
         ...(workId ? { work_id: workId } : {}),
         error: settled.value.error instanceof Error ? settled.value.error.message : String(settled.value.error || 'Long-running operation failed.'),
         errorCode: 'TOOL_EXECUTION_FAILED'
-      }, true));
+      }, true), deliveryCallback(config, started.record, options));
     }
   }
 
@@ -254,7 +285,7 @@ async function runFallbackToolExecution(config: any, message: any, args: any, op
       noticeScope: principalFingerprint(options.principal),
       workspace: String(args.workspace || '')
     });
-    return replayFallbackResult(message.id, workId, started.record);
+    return replayFallbackResult(message.id, workId, started.record, deliveryCallback(config, started.record, options));
   }
   return successResponse(message.id, toolResult({
     ok: true,
@@ -269,13 +300,18 @@ async function runFallbackToolExecution(config: any, message: any, args: any, op
     nextAction: workId
       ? `Continue independent work. Later Rel.AI calls in this workspace may report this completion under completedOperations. Call relai_work with action "status" and work_id "${workId}" only when you need the result or no other useful independent work remains.`
       : `Continue independent work. Later Rel.AI calls in this workspace may report this completion under completedOperations. Call relai_work with action "status", workspace "${String(args.workspace || '')}", and operationId "${operation.operationId}" only when you need the result.`
-  }, false));
+  }, false), deliveryCallback(config, started.record, options));
 }
 
-function replayFallbackResult(requestId: any, workId: any, record: any) {
-  if (record.result) return successResponse(requestId, record.result);
+function deliveryCallback(config: any, record: any, options: any) {
+  if (options.deliveryAware !== true || !record?.operationId) return undefined;
+  return () => { acknowledgeFallbackDelivery(config, record.operationId); };
+}
+
+function replayFallbackResult(requestId: any, workId: any, record: any, onDelivered: any = undefined) {
+  if (record.result) return successResponse(requestId, record.result, onDelivered);
   if (record.persistedResult && typeof record.persistedResult === 'object') {
-    return successResponse(requestId, toolResult({ ...record.persistedResult, ...(workId ? { work_id: workId } : {}) }, record.isError === true));
+    return successResponse(requestId, toolResult({ ...record.persistedResult, ...(workId ? { work_id: workId } : {}) }, record.isError === true), onDelivered);
   }
   return successResponse(requestId, toolResult({
     ok: false,
@@ -283,7 +319,7 @@ function replayFallbackResult(requestId: any, workId: any, record: any) {
     status: record.status,
     error: record.error || `Previous background operation ${record.status}.`,
     errorCode: record.status === 'cancelled' ? 'CANCELLED' : 'TOOL_EXECUTION_FAILED'
-  }, true));
+  }, true), onDelivered);
 }
 
 async function waitForFallbackGrace(execution: any, graceMs: any) {
@@ -580,7 +616,7 @@ function errorFromPolicy(id: any, error: any) {
   return errorResponse(id, Number(error?.code) || -32603, error?.message || 'Execution mode is unsupported.', error?.data);
 }
 
-function successResponse(id: any, result: any) {
+function successResponse(id: any, result: any, onDelivered: any = undefined) {
   if (id == null) return notificationHandled();
   if (!validJsonRpcId(id)) return errorResponse(null, -32600, 'JSON-RPC id must be a string or finite number when present.');
   return {
@@ -589,7 +625,8 @@ function successResponse(id: any, result: any) {
       jsonrpc: '2.0',
       id,
       result: stampServerInfo(result)
-    }
+    },
+    ...(typeof onDelivered === 'function' ? { onDelivered } : {})
   };
 }
 
@@ -669,7 +706,7 @@ function createTaskAwareStdioTransport(options: any = {}) {
       wrapper.onmessage?.(message);
       return;
     }
-    if (!isTransportTaskRequestCandidate(options.config, message)) {
+    if (!isTransportTaskRequestCandidate(options.config, message, { transportType: 'stdio' })) {
       wrapper.onmessage?.(message);
       return;
     }
@@ -686,6 +723,7 @@ function createTaskAwareStdioTransport(options: any = {}) {
       });
       if (response) {
         if (response.body != null) await transport.send(response.body);
+        if ('onDelivered' in response && typeof response.onDelivered === 'function') response.onDelivered();
         return;
       }
       wrapper.onmessage?.(message);

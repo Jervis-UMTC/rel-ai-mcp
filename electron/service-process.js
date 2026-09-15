@@ -37,7 +37,6 @@ const unsubscribeActivity = toolActivity.onToolActivity(event => {
   const projected = projectServiceActivityEvent(event);
   if (projected) post({ type: 'activity', event: projected });
 });
-
 parentPort.on('message', event => {
   const message = event?.data || {};
   if (message.type === 'request') {
@@ -223,6 +222,7 @@ function updateDesktopContext(next = {}) {
       try { listener(next.runtimeLogChange); } catch {}
     }
   }
+  if (next.transportEvent) coreDesktopOperations.recordDesktopTransportEvent(next.transportEvent);
 }
 
 function runtimeLogSnapshot(options = {}) {

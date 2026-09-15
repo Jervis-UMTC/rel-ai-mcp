@@ -88,7 +88,8 @@ try {
   const synchronous = await call('relai_exec', {
     workspace: 'app',
     work_id: logicalTaskId,
-    command: 'node pass.cjs',
+    executable: process.execPath,
+    argv: ['pass.cjs'],
     timeoutMs: 10000
   });
   assert.equal(synchronous.result?.isError, false, JSON.stringify(synchronous));

@@ -49,6 +49,43 @@ function message(id, workId, command = 'node test.js') {
   };
 }
 
+function readMessage(id) {
+  return {
+    jsonrpc: '2.0',
+    id,
+    method: 'tools/call',
+    params: {
+      name: 'relai_read',
+      arguments: { workspace: 'app', paths: ['README.md'] },
+      _meta: {
+        [PROTOCOL_VERSION_META_KEY]: MCP_PROTOCOL_VERSION,
+        [CLIENT_CAPABILITIES_META_KEY]: {}
+      }
+    }
+  };
+}
+
+function workBeginMessage(id) {
+  return {
+    jsonrpc: '2.0',
+    id,
+    method: 'tools/call',
+    params: {
+      name: 'relai_work',
+      arguments: {
+        action: 'begin',
+        workspace: 'app',
+        title: 'Replay-safe start',
+        objective: 'Prove a lost work.begin response does not create a duplicate task.'
+      },
+      _meta: {
+        [PROTOCOL_VERSION_META_KEY]: MCP_PROTOCOL_VERSION,
+        [CLIENT_CAPABILITIES_META_KEY]: {}
+      }
+    }
+  };
+}
+
 function completedResult(workId, stdout = 'done') {
   return toolResult({
     ok: true,
@@ -93,6 +130,97 @@ const fast = await handleTransportTaskRequest({}, message(1, fastWorkId), {
 assert.equal(fast.body.result.isError, false);
 assert.equal(fast.body.result.structuredContent.exitCode, 0);
 assert.equal(fast.body.result.structuredContent.stdout, 'fast');
+
+let resilientReadExecutions = 0;
+const resilientReadExecute = async () => {
+  resilientReadExecutions += 1;
+  return toolResult({ ok: true, workspace: 'app', content: `read-${resilientReadExecutions}` }, false);
+};
+const resilientRead = await handleTransportTaskRequest({}, readMessage(1001), {
+  principal: 'principal-resilient',
+  transportType: 'streamable-http',
+  synchronousFallbackGraceMs: 50,
+  executeToolResult: resilientReadExecute
+});
+assert.equal(resilientReadExecutions, 1);
+assert.equal(typeof resilientRead.onDelivered, 'function', 'delivery-aware fallback must retain a one-shot acknowledgement until HTTP delivery completes');
+const lostResponseRetry = await handleTransportTaskRequest({}, readMessage(1002), {
+  principal: 'principal-resilient',
+  transportType: 'streamable-http',
+  synchronousFallbackGraceMs: 50,
+  executeToolResult: resilientReadExecute
+});
+assert.equal(resilientReadExecutions, 1, 'retry after a lost response must replay the accepted operation instead of executing it twice');
+assert.equal(lostResponseRetry.body.result.structuredContent.content, 'read-1');
+resilientRead.onDelivered();
+const freshRead = await handleTransportTaskRequest({}, readMessage(1003), {
+  principal: 'principal-resilient',
+  transportType: 'streamable-http',
+  synchronousFallbackGraceMs: 50,
+  executeToolResult: resilientReadExecute
+});
+assert.equal(resilientReadExecutions, 2, 'after confirmed delivery, the same read must execute fresh instead of replaying stale data');
+freshRead.onDelivered();
+
+let workBeginExecutions = 0;
+const workBeginExecute = async () => {
+  workBeginExecutions += 1;
+  return toolResult({
+    ok: true,
+    workspace: 'app',
+    work_id: 'work_replay_safe_begin',
+    status: 'planning',
+    title: 'Replay-safe start',
+    objective: 'Prove a lost work.begin response does not create a duplicate task.'
+  }, false);
+};
+const acceptedWorkBegin = await handleTransportTaskRequest({}, workBeginMessage(1004), {
+  principal: 'principal-work-begin-replay',
+  transportType: 'streamable-http',
+  synchronousFallbackGraceMs: 50,
+  executeToolResult: workBeginExecute
+});
+assert.equal(workBeginExecutions, 1);
+assert.equal(acceptedWorkBegin.body.result.structuredContent.work_id, 'work_replay_safe_begin');
+assert.equal(typeof acceptedWorkBegin.onDelivered, 'function');
+const retriedWorkBegin = await handleTransportTaskRequest({}, workBeginMessage(1005), {
+  principal: 'principal-work-begin-replay',
+  transportType: 'streamable-http',
+  synchronousFallbackGraceMs: 50,
+  executeToolResult: workBeginExecute
+});
+assert.equal(workBeginExecutions, 1, 'retrying work.begin after losing its response must replay the accepted task instead of creating a second task');
+assert.equal(retriedWorkBegin.body.result.structuredContent.work_id, 'work_replay_safe_begin');
+acceptedWorkBegin.onDelivered();
+
+let detachedReadExecutions = 0;
+const detachedReadExecute = async () => {
+  detachedReadExecutions += 1;
+  await delay(30);
+  return toolResult({ ok: true, workspace: 'app', content: `detached-${detachedReadExecutions}` }, false);
+};
+const detachedRead = await handleTransportTaskRequest({}, readMessage(1010), {
+  principal: 'principal-resilient-detached',
+  transportType: 'streamable-http',
+  synchronousFallbackGraceMs: 5,
+  executeToolResult: detachedReadExecute
+});
+assert.equal(detachedRead.body.result.structuredContent.status, 'running');
+assert.equal(typeof detachedRead.onDelivered, 'function');
+const detachedOperationId = detachedRead.body.result.structuredContent.operationId;
+detachedRead.onDelivered();
+await delay(45);
+assert.equal(fallbackExecutionStatus(detachedOperationId).status, 'completed', 'delivered detached work must remain queryable by operationId');
+const expiredDetachedAt = Date.now() + (16 * 60_000);
+assert.equal(fallbackExecutionStatus(detachedOperationId, { now: () => expiredDetachedAt }), null, 'delivered taskless operation records must expire from operationId lookup after the fallback TTL');
+const freshAfterDetachedDelivery = await handleTransportTaskRequest({}, readMessage(1011), {
+  principal: 'principal-resilient-detached',
+  transportType: 'streamable-http',
+  synchronousFallbackGraceMs: 50,
+  executeToolResult: detachedReadExecute
+});
+assert.equal(detachedReadExecutions, 2, 'delivering a detached acknowledgement must release its request-signature replay key after completion');
+freshAfterDetachedDelivery.onDelivered();
 
 const slowWorkId = 'work_slow_fallback_test';
 let executionCount = 0;

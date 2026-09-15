@@ -1,5 +1,5 @@
 import { readConfig } from '../config.js';
-import { readLocalUsageSnapshotAsync } from '../localAnalytics.js';
+import { readLocalUsageSnapshotAsync, recordLocalTransportEvent } from '../localAnalytics.js';
 import { writeOnboardingState } from '../onboardingState.js';
 import {
   describeTaskCodeWorkspace,
@@ -13,6 +13,10 @@ function currentConfig(): Record<string, unknown> {
 
 export function getDesktopLocalUsage(month?: string): Promise<Record<string, unknown>> {
   return readLocalUsageSnapshotAsync(currentConfig(), month) as Promise<Record<string, unknown>>;
+}
+
+export function recordDesktopTransportEvent(event: Record<string, unknown> = {}): boolean {
+  return recordLocalTransportEvent(currentConfig(), event);
 }
 
 export function markDesktopOnboardingHandoff(): Record<string, unknown> {

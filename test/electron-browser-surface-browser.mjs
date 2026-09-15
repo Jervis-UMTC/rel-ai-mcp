@@ -60,9 +60,11 @@ try {
   assert.equal(probe.screenshotWidth, 1200);
   assert.equal(probe.screenshotHeight, 750);
   assert.deepEqual(probe.screenshotViewport, { width: 1200, height: 750 }, 'AI screenshots must report the canonical viewport, not dashboard presentation bounds');
+  assert.deepEqual(probe.screenshotActualSize, { width: 1200, height: 750 }, 'AI screenshot pixels must stay at the canonical viewport even when the dashboard fits the live presentation');
   assert.equal(probe.aiClickCount, 0, 'AI-owned browser surfaces must ignore human-style pointer input');
   assert.equal(probe.userState.control, 'user');
-  assert.equal(probe.userClickCount, 1, 'user takeover must enable pointer input');
+  assert.equal(probe.userClickCount, 1, 'user takeover must enable pointer input through the fitted presentation');
+  assert.equal(probe.userEdgeClickCount, 1, 'the fitted presentation must expose and interact with the canonical viewport bottom-right instead of cropping it');
   assert.equal(probe.userScrollY, 400, 'user takeover must preserve an independently scrollable page state');
   assert.equal(probe.takeoverError?.code, 'BROWSER_USER_CONTROL_ACTIVE');
   assert.equal(probe.aiState.control, 'ai');

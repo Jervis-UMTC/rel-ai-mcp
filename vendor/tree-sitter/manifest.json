@@ -2,130 +2,557 @@
   "schemaVersion": 1,
   "sourcePackage": {
     "name": "tree-sitter-wasm",
-    "version": "1.0.7",
-    "integrity": "sha512-CpQFRUsBOTEzbweigUn2OToMmt9wSkCYzysmc8D0ysbMjLrAo730Wdip8tTbUBe9giv81E7T5HB6WOFR05QLRw==",
-    "repository": "Crysthamus/tree-sitter-wasm"
+    "version": "2.0.1",
+    "integrity": "sha512-VuJcTK89taP2UrkyW+sTYpIAfwk1pWgqxpTSDT2edCVajLjSOwKe6mVlfpjQckCYKVCm++ZXfS9J1N9S5CB3gg==",
+    "repository": "https://github.com/Crysthamus/tree-sitter-wasm"
   },
-  "licenseNote": "Vendored grammar WASM files retain the licenses of their upstream grammar projects; source package metadata is recorded for reproducibility.",
+  "licenseNote": "Most parser WASM binaries are sourced from tree-sitter-wasm 2.0.1. QL is regenerated from tree-sitter-ql 1.0.0 with tree-sitter-cli 0.27.0; SystemRDL is built from tree-sitter-systemrdl 0.8.0; TLA+ uses the WASM shipped by @tlaplus/tree-sitter-tlaplus 1.5.0. Each remains under its upstream grammar license.",
   "grammars": {
+    "ada": {
+      "file": "ada/tree-sitter-ada.wasm",
+      "sourcePath": "out/ada/tree-sitter-ada.wasm",
+      "bytes": 335308,
+      "sha256": "1f1cab86f12b3f3f454f29251c43de195669914010129e165f0a9a4dc9439231",
+      "grammarDependency": "tree-sitter-ada@git+https://github.com/briot/tree-sitter-ada.git#dd5fa4cdb3aba91abc687aa68fb1431396fce6a6"
+    },
+    "arduino": {
+      "file": "arduino/tree-sitter-arduino.wasm",
+      "sourcePath": "out/arduino/tree-sitter-arduino.wasm",
+      "bytes": 3505140,
+      "sha256": "8cdd8b17018cf62a9db7371519e891b14965ca657b419cb2b33d1a1badf434da",
+      "grammarDependency": "tree-sitter-arduino@^0.24.0"
+    },
+    "astro": {
+      "file": "astro/tree-sitter-astro.wasm",
+      "sourcePath": "out/astro/tree-sitter-astro.wasm",
+      "bytes": 25239,
+      "sha256": "7b64765551f6b4e8efeeb897754fa71f87c6336946016ef54353ea0a8bf9a9f0",
+      "grammarDependency": "tree-sitter-astro@git+https://github.com/virchau13/tree-sitter-astro.git#213f6e6973d9b456c6e50e86f19f66877e7ef0ee"
+    },
+    "bash": {
+      "file": "bash/tree-sitter-bash.wasm",
+      "sourcePath": "out/bash/tree-sitter-bash.wasm",
+      "bytes": 1358633,
+      "sha256": "5daf3f2ac1cea01a64cfd6878ef7d247310925a4c62238eb4b8c1feb5dce355a",
+      "grammarDependency": "tree-sitter-bash@^0.25.1"
+    },
+    "c": {
+      "file": "c/tree-sitter-c.wasm",
+      "sourcePath": "out/c/tree-sitter-c.wasm",
+      "bytes": 625921,
+      "sha256": "7b80a64003e8ef8cde197329ee0167e9270f67663f2e6c6ef7d67b5425998aac",
+      "grammarDependency": "tree-sitter-c@^0.24.1"
+    },
+    "csharp": {
+      "file": "csharp/tree-sitter-c_sharp.wasm",
+      "sourcePath": "out/c_sharp/tree-sitter-c_sharp.wasm",
+      "bytes": 5334256,
+      "sha256": "608208861b5cacee3805c486109e05cdfcf508988c303199cbba4628b8ed4151",
+      "grammarDependency": "tree-sitter-c-sharp@^0.23.5"
+    },
+    "cpp": {
+      "file": "cpp/tree-sitter-cpp.wasm",
+      "sourcePath": "out/cpp/tree-sitter-cpp.wasm",
+      "bytes": 3454741,
+      "sha256": "285a0d1da90e6cdea639ddf1b925ebca567d24b68d13c418ea92f5a6b7c099dd",
+      "grammarDependency": "tree-sitter-cpp@^0.23.4"
+    },
+    "css": {
+      "file": "css/tree-sitter-css.wasm",
+      "sourcePath": "out/css/tree-sitter-css.wasm",
+      "bytes": 128781,
+      "sha256": "0ec436be0a1bcf4776a38741e0d0f600445a199b75d8e7a558480c07ae6b33fb",
+      "grammarDependency": "tree-sitter-css@^0.25.0"
+    },
+    "dart": {
+      "file": "dart/tree-sitter-dart.wasm",
+      "sourcePath": "out/dart/tree-sitter-dart.wasm",
+      "bytes": 1156490,
+      "sha256": "2c35d80a22a0fa1a23388679b1ab14eb7298156e891d82893301a7cc4babfd5d",
+      "grammarDependency": "tree-sitter-dart@git+https://github.com/UserNobody14/tree-sitter-dart.git#be07cf7118d3dba06236a3f19541685a68209934"
+    },
+    "elisp": {
+      "file": "elisp/tree-sitter-elisp.wasm",
+      "sourcePath": "out/elisp/tree-sitter-elisp.wasm",
+      "bytes": 54343,
+      "sha256": "8756e115e05c4a199ab981cfed98efb1c4e94c93c8ede0291180b5a59f3b20d0",
+      "grammarDependency": "tree-sitter-elisp@^1.7.2"
+    },
+    "elixir": {
+      "file": "elixir/tree-sitter-elixir.wasm",
+      "sourcePath": "out/elixir/tree-sitter-elixir.wasm",
+      "bytes": 1579864,
+      "sha256": "1059cf0fe8666f0a0ce3d496a2e5451d736d0401186be7a20fc96fda321feb6e",
+      "grammarDependency": "tree-sitter-elixir@^0.3.5"
+    },
+    "elm": {
+      "file": "elm/tree-sitter-elm.wasm",
+      "sourcePath": "out/elm/tree-sitter-elm.wasm",
+      "bytes": 182494,
+      "sha256": "3ae7a3da0c0784d1d1219cd556a34b4c3077c82bc1f19bbd888c8e2e62cd8cef",
+      "grammarDependency": "@elm-tooling/tree-sitter-elm@^5.9.4"
+    },
+    "embedded_template": {
+      "file": "embedded_template/tree-sitter-embedded_template.wasm",
+      "sourcePath": "out/embedded_template/tree-sitter-embedded_template.wasm",
+      "bytes": 5708,
+      "sha256": "cf0880bef00dd40b7a3cec188549973b5b68351f33536d33cccd1af9e725a845",
+      "grammarDependency": "tree-sitter-embedded-template@^0.25.0"
+    },
+    "go": {
+      "file": "go/tree-sitter-go.wasm",
+      "sourcePath": "out/go/tree-sitter-go.wasm",
+      "bytes": 217720,
+      "sha256": "fd9af2da4da88b2537d4a33ce4739dd478cc5b141fdce4cdcf9a0e464b91b614",
+      "grammarDependency": "tree-sitter-go@^0.25.0"
+    },
+    "html": {
+      "file": "html/tree-sitter-html.wasm",
+      "sourcePath": "out/html/tree-sitter-html.wasm",
+      "bytes": 18868,
+      "sha256": "586f702f79fb297bf6d040807c9c7b315023dc4e65633a9ed548676a23777151",
+      "grammarDependency": "tree-sitter-html@^0.23.2"
+    },
     "hcl": {
       "file": "hcl/tree-sitter-hcl.wasm",
       "sourcePath": "out/hcl/tree-sitter-hcl.wasm",
-      "bytes": 92478,
-      "sha256": "86bb80cd151bd3ab1e44ed431a9c1874978db31519c62055efb50f028a1d0118",
-      "grammarDependency": "@tree-sitter-grammars/tree-sitter-hcl@^1.2.0"
+      "bytes": 94447,
+      "sha256": "524c1d9c5be1a4feea42afdccbb84a3bb7629e98470b188e9c022e0676b5cc24",
+      "grammarDependency": "@tree-sitter-grammars/tree-sitter-hcl@git+https://github.com/Crysthamus/tree-sitter-hcl.git#eaa20bc01e886864e128f1c60a06b41ca2f38ffc"
+    },
+    "java": {
+      "file": "java/tree-sitter-java.wasm",
+      "sourcePath": "out/java/tree-sitter-java.wasm",
+      "bytes": 419586,
+      "sha256": "e430a1a344388d6d3bc9f87144dec0d204fca37fafe5f4ab23c51060972a2ac5",
+      "grammarDependency": "tree-sitter-java@^0.23.5"
+    },
+    "javascript": {
+      "file": "javascript/tree-sitter-javascript.wasm",
+      "sourcePath": "out/javascript/tree-sitter-javascript.wasm",
+      "bytes": 413013,
+      "sha256": "fc5362de9cacbfd6c6ee11e5bf144c7adbbf26ae3703eaaba916d4b0d78da76f",
+      "grammarDependency": "tree-sitter-javascript@^0.25.0"
+    },
+    "json": {
+      "file": "json/tree-sitter-json.wasm",
+      "sourcePath": "out/json/tree-sitter-json.wasm",
+      "bytes": 6188,
+      "sha256": "f60270905cfa2483e8444559620150c0a1a2b23684a9d4b8b79b4528887863bb",
+      "grammarDependency": "tree-sitter-json@^0.24.8"
+    },
+    "kotlin": {
+      "file": "kotlin/tree-sitter-kotlin.wasm",
+      "sourcePath": "out/kotlin/tree-sitter-kotlin.wasm",
+      "bytes": 4086561,
+      "sha256": "82f658c6d6e07f0c2a421ab7e1308763fffa16627c7d10e9dd9f6f9a4f9ff25a",
+      "grammarDependency": "tree-sitter-kotlin@^0.3.8"
+    },
+    "lua": {
+      "file": "lua/tree-sitter-lua.wasm",
+      "sourcePath": "out/lua/tree-sitter-lua.wasm",
+      "bytes": 49530,
+      "sha256": "aedb69dbe1d27c031dde44e40e4ebb3c709adc51097be9f4114c60d6bd0262a4",
+      "grammarDependency": "@tree-sitter-grammars/tree-sitter-lua@^0.4.1"
+    },
+    "objc": {
+      "file": "objc/tree-sitter-objc.wasm",
+      "sourcePath": "out/objc/tree-sitter-objc.wasm",
+      "bytes": 5320685,
+      "sha256": "dae4a5b2fc3a0e8c05b304b82c4fe830d97f088ad6e3e3b8313aae277670093a",
+      "grammarDependency": "tree-sitter-objc@^3.0.2"
+    },
+    "ocaml": {
+      "file": "ocaml/tree-sitter-ocaml.wasm",
+      "sourcePath": "out/ocaml/tree-sitter-ocaml.wasm",
+      "bytes": 3920752,
+      "sha256": "74a6aa040b3e2b11232181e959c2e58032600ebf586e103a133d0d5148877764",
+      "grammarDependency": "tree-sitter-ocaml@git+https://github.com/tree-sitter/tree-sitter-ocaml.git#a4ce49a6c17e88e7ca8350cfb666749d9a5c6630"
+    },
+    "php": {
+      "file": "php/tree-sitter-php.wasm",
+      "sourcePath": "out/php/tree-sitter-php.wasm",
+      "bytes": 1074430,
+      "sha256": "01e0af450e9dae33a62a2d7a407240be883574a49edc031eb2bc4b1f22b69e55",
+      "grammarDependency": "tree-sitter-php@git+https://github.com/tree-sitter/tree-sitter-php.git#3fda2fb9577166c6399834917f9844f30370beea"
+    },
+    "python": {
+      "file": "python/tree-sitter-python.wasm",
+      "sourcePath": "out/python/tree-sitter-python.wasm",
+      "bytes": 456587,
+      "sha256": "2091d112a2989c54c2157a0a9a62c06d41a5ef3e40fd71f19cde7b4663bdd028",
+      "grammarDependency": "tree-sitter-python@^0.25.0"
+    },
+    "ql": {
+      "file": "ql/tree-sitter-ql.wasm",
+      "sourcePath": "npm:tree-sitter-ql@1.0.0 (regenerated with tree-sitter-cli@0.27.0)",
+      "bytes": 207668,
+      "sha256": "0783d6f142b0633627b6cb308064aab71652172e8ec213707f474c50542cb558",
+      "grammarDependency": "tree-sitter-ql@1.0.0"
+    },
+    "rescript": {
+      "file": "rescript/tree-sitter-rescript.wasm",
+      "sourcePath": "out/rescript/tree-sitter-rescript.wasm",
+      "bytes": 1051046,
+      "sha256": "09aa1adb1cb90274519e6a83a63fc0d1f36d6bca528fb108344128316545e8ce",
+      "grammarDependency": "tree-sitter-rescript@git+https://github.com/rescript-lang/tree-sitter-rescript.git#19ed8a8e6bcc844b71c37e9edaffc60c77f74d7c"
+    },
+    "ruby": {
+      "file": "ruby/tree-sitter-ruby.wasm",
+      "sourcePath": "out/ruby/tree-sitter-ruby.wasm",
+      "bytes": 2120601,
+      "sha256": "db6b357418d4154402e48b497dfa9128d592cf9c559bff1ea1e3fcfe3a3b8d56",
+      "grammarDependency": "tree-sitter-ruby@^0.23.1"
+    },
+    "rust": {
+      "file": "rust/tree-sitter-rust.wasm",
+      "sourcePath": "out/rust/tree-sitter-rust.wasm",
+      "bytes": 1113104,
+      "sha256": "dc7f9b4d182af6b8332b44cfb8d24c0b25892900b006af5ce7eafdef8c976d5a",
+      "grammarDependency": "tree-sitter-rust@^0.24.0"
+    },
+    "scala": {
+      "file": "scala/tree-sitter-scala.wasm",
+      "sourcePath": "out/scala/tree-sitter-scala.wasm",
+      "bytes": 3850225,
+      "sha256": "b77bab5adc8f838178ba469db065fa4a1aa250c419530e85fd2e470c080515e1",
+      "grammarDependency": "tree-sitter-scala@^0.24.0"
+    },
+    "solidity": {
+      "file": "solidity/tree-sitter-solidity.wasm",
+      "sourcePath": "out/solidity/tree-sitter-solidity.wasm",
+      "bytes": 511141,
+      "sha256": "6c3f6d55654a2eec52ebc5f631e18b64ec6b41a5d413e5da9375a327c79a0977",
+      "grammarDependency": "tree-sitter-solidity@^1.2.13"
+    },
+    "swift": {
+      "file": "swift/tree-sitter-swift.wasm",
+      "sourcePath": "out/swift/tree-sitter-swift.wasm",
+      "bytes": 3317127,
+      "sha256": "3553bb4258b20fe3514c12a6e68d990036b9446e528283ec6ab79ede8854e791",
+      "grammarDependency": "tree-sitter-swift@^0.7.1"
     },
     "terraform": {
       "file": "terraform/tree-sitter-terraform.wasm",
       "sourcePath": "out/terraform/tree-sitter-terraform.wasm",
-      "bytes": 92484,
-      "sha256": "0d9ef3ae926acc0411bfecba9b34df4ea659061917b96455570a45a70824e890",
-      "grammarDependency": "@tree-sitter-grammars/tree-sitter-hcl@^1.2.0"
+      "bytes": 94469,
+      "sha256": "b7eb460a8282700bd05b8e4af72959f7f31a88c38d904e912f7a9456962cb2bb",
+      "grammarDependency": "@tree-sitter-grammars/tree-sitter-hcl@git+https://github.com/Crysthamus/tree-sitter-hcl.git#eaa20bc01e886864e128f1c60a06b41ca2f38ffc"
+    },
+    "systemrdl": {
+      "file": "systemrdl/tree-sitter-systemrdl.wasm",
+      "sourcePath": "npm:tree-sitter-systemrdl@0.8.0",
+      "bytes": 82491,
+      "sha256": "6ad484c05791c3cf9d0a425ee98fc35b05d0f40aca925b0c079faef3bba305b4",
+      "grammarDependency": "tree-sitter-systemrdl@0.8.0"
+    },
+    "tlaplus": {
+      "file": "tlaplus/tree-sitter-tlaplus.wasm",
+      "sourcePath": "npm:@tlaplus/tree-sitter-tlaplus@1.5.0",
+      "bytes": 4878089,
+      "sha256": "40e066a8cf25a4415dbb5340bb401c80aa96837d05ee2710b00ae951b046b22c",
+      "grammarDependency": "@tlaplus/tree-sitter-tlaplus@1.5.0"
+    },
+    "toml": {
+      "file": "toml/tree-sitter-toml.wasm",
+      "sourcePath": "out/toml/tree-sitter-toml.wasm",
+      "bytes": 25055,
+      "sha256": "2c3205cdd7a9e8d85547a2a9ad13fa760cc1012f7a6e65f898a5ae5d919c7175",
+      "grammarDependency": "@tree-sitter-grammars/tree-sitter-toml@^0.7.0"
+    },
+    "tsx": {
+      "file": "tsx/tree-sitter-tsx.wasm",
+      "sourcePath": "out/tsx/tree-sitter-tsx.wasm",
+      "bytes": 1461283,
+      "sha256": "36d947d9f19043c1108f3f8f5cfa82c25ffd681694e76a164d8b35022ded1d40",
+      "grammarDependency": "tree-sitter-typescript@^0.23.2"
+    },
+    "typescript": {
+      "file": "typescript/tree-sitter-typescript.wasm",
+      "sourcePath": "out/typescript/tree-sitter-typescript.wasm",
+      "bytes": 1429139,
+      "sha256": "78a2710a7d0f60a8c9ab92cc6e961f76cf80b3d69690140eeca8a29eba9185db",
+      "grammarDependency": "tree-sitter-typescript@^0.23.2"
+    },
+    "vue": {
+      "file": "vue/tree-sitter-vue.wasm",
+      "sourcePath": "out/vue/tree-sitter-vue.wasm",
+      "bytes": 28678,
+      "sha256": "03bb3cec6e0f674f8648eb4b9d756ef18f780036cda5693ac25a7f238ebc08c5",
+      "grammarDependency": "tree-sitter-vue@git+https://github.com/tree-sitter-grammars/tree-sitter-vue.git#ce8011a414fdf8091f4e4071752efc376f4afb08"
+    },
+    "yaml": {
+      "file": "yaml/tree-sitter-yaml.wasm",
+      "sourcePath": "out/yaml/tree-sitter-yaml.wasm",
+      "bytes": 192300,
+      "sha256": "81dd56ecfadd34b62181f996e52cff6d3c4c026d7fbff6a201323a9abe8b2580",
+      "grammarDependency": "tree-sitter-yaml@git+https://github.com/tree-sitter-grammars/tree-sitter-yaml.git#a1c4812a73ec5e089de8e441fdea3a921e8d5079"
     },
     "sql": {
       "file": "sql/tree-sitter-sql.wasm",
       "sourcePath": "out/sql/tree-sitter-sql.wasm",
-      "bytes": 2440500,
-      "sha256": "9b93a15dc3eade66df4347731f2687b939daf987c8382660d6118e863604ab09",
+      "bytes": 2472235,
+      "sha256": "b77530893b1dd6d1d4814eacf34d25bcbe4a12ec9a25a8c45b320d447265f42b",
       "grammarDependency": "@derekstride/tree-sitter-sql@^0.3.11"
     },
     "powershell": {
       "file": "powershell/tree-sitter-powershell.wasm",
       "sourcePath": "out/powershell/tree-sitter-powershell.wasm",
-      "bytes": 1088467,
-      "sha256": "796124137f0500e59713fd9dccda6812ff73d25f22e33430b1c5af6e132efa5e",
+      "bytes": 990529,
+      "sha256": "56b83930aff207664ee64e9341e79bd448645f43c8f37cd2fab861e0e6b9cac1",
       "grammarDependency": "tree-sitter-powershell@^0.26.4"
     },
     "markdown": {
       "file": "markdown/tree-sitter-markdown.wasm",
       "sourcePath": "out/markdown/tree-sitter-markdown.wasm",
-      "bytes": 420522,
-      "sha256": "d0ecb98e8b22b63837ac1c3cc72491de33fd49c028b6160050aad588409dadf8",
-      "grammarDependency": "@tree-sitter-grammars/tree-sitter-markdown@^0.3.2"
+      "bytes": 380223,
+      "sha256": "9f111e8b3f050948bb096cf0dbde24f130ec77f3d2e53cde4b01393aa7047d62",
+      "grammarDependency": "@tree-sitter-grammars/tree-sitter-markdown@git+https://github.com/tree-sitter-grammars/tree-sitter-markdown.git#a0a00f817d02412bd92c54d316f164d827b57b5c"
     },
     "dockerfile": {
       "file": "dockerfile/tree-sitter-dockerfile.wasm",
       "sourcePath": "out/dockerfile/tree-sitter-dockerfile.wasm",
-      "bytes": 51842,
-      "sha256": "f64913d1fbaafae05ae443df972c8b21f12607ae28d194eaa6c6a8d63a81733e",
+      "bytes": 50236,
+      "sha256": "399e9593d71b57707445f63c2557255ab866135b197a28cb0cbcd8384593eca9",
       "grammarDependency": "tree-sitter-dockerfile@git+https://github.com/camdencheek/tree-sitter-dockerfile.git#971acdd908568b4531b0ba28a445bf0bb720aba5"
     },
     "graphql": {
       "file": "graphql/tree-sitter-graphql.wasm",
       "sourcePath": "out/graphql/tree-sitter-graphql.wasm",
-      "bytes": 64059,
-      "sha256": "1213028ee76111be6d504781e735b0bbce327abd56709cce1fce400fccfe7c1a",
-      "grammarDependency": "tree-sitter-graphql@git+https://github.com/joowani/tree-sitter-graphql.git#df5b88d1d24dcfc02e64919d2d20491359abe4c8"
+      "bytes": 52419,
+      "sha256": "5fb7e8610369e582e7592cc04c3fa66e0a5a02235d89dae887e6afeb1af8be07",
+      "grammarDependency": "tree-sitter-graphql@git+https://github.com/joowani/tree-sitter-graphql.git#1abcd628084f2fd8b1e74081b5552acfd2c21cd6"
     },
     "protobuf": {
       "file": "protobuf/tree-sitter-proto.wasm",
       "sourcePath": "out/proto/tree-sitter-proto.wasm",
-      "bytes": 93702,
-      "sha256": "244b96ff28fd05404c2bfe997cd635b8546dd9818f00aca0228149c28317707b",
-      "grammarDependency": "tree-sitter-proto@git+https://github.com/coder3101/tree-sitter-proto.git#d65a18ce7c2242801f702770114ad08056c7f8c9"
+      "bytes": 83230,
+      "sha256": "d655182c3612e4619e595ae603752fc2d8550c5d872446bf8df4a4f73244f6e3",
+      "grammarDependency": "tree-sitter-proto@git+https://github.com/coder3101/tree-sitter-proto.git#6c878d18628ebbff3474479d2fdd6d8ba1954c3e"
     },
     "r": {
       "file": "r/tree-sitter-r.wasm",
       "sourcePath": "out/r/tree-sitter-r.wasm",
-      "bytes": 490899,
-      "sha256": "b11a872a88ad8a9ebc85607ef3fd4cabdf6cbead51421ec1492b4591b6854553",
+      "bytes": 495964,
+      "sha256": "42be3b36ab255d068384b9221a34bece7601967ff8bb69113cc5a11d548953d1",
       "grammarDependency": "@eagleoutice/tree-sitter-r@^1.1.2"
     },
     "assembly": {
       "file": "assembly/tree-sitter-asm.wasm",
       "sourcePath": "out/asm/tree-sitter-asm.wasm",
-      "bytes": 29097,
-      "sha256": "5de92bd77ff1d8aa2944668c2fc9fb4854daae14b46e7ec8045e8ef6efd66eb0",
+      "bytes": 27870,
+      "sha256": "e1ac9d7093705838914212485baa35da6006d9ed760d8cd66a190b686b138db9",
       "grammarDependency": "tree-sitter-asm@git+https://github.com/RubixDev/tree-sitter-asm.git#839741fef4dab5128952334624905c82b40c7133"
     },
     "gdscript": {
       "file": "gdscript/tree-sitter-gdscript.wasm",
       "sourcePath": "out/gdscript/tree-sitter-gdscript.wasm",
-      "bytes": 292506,
-      "sha256": "a488c2cd22243aee8108bea33bed646cf871a045b156f1f1cb0138c542131fbc",
+      "bytes": 295369,
+      "sha256": "5920bb6daa330c93d3209f53346a39951e05000409601a86835a9831ba70d15c",
       "grammarDependency": "tree-sitter-gdscript@^6.1.0"
     },
     "nix": {
       "file": "nix/tree-sitter-nix.wasm",
       "sourcePath": "out/nix/tree-sitter-nix.wasm",
-      "bytes": 81456,
-      "sha256": "8b957d1ff521edda5606a5b6008e58489acbb1b3a7cf7ee2d16b7f0016a3d56a",
-      "grammarDependency": "tree-sitter-nix@git+https://github.com/nix-community/tree-sitter-nix.git#69fbfb02896cdd27cb7ff3cd61f7f3f6bde4f017"
+      "bytes": 81411,
+      "sha256": "ee332466b7667c0cddbee1621b89b4a3fd83a0e83c938a1502081440e03ba6a2",
+      "grammarDependency": "tree-sitter-nix@git+https://github.com/nix-community/tree-sitter-nix.git#3d0173d903e630b6e14d17f1cf79488791379ded"
     },
     "haskell": {
       "file": "haskell/tree-sitter-haskell.wasm",
       "sourcePath": "out/haskell/tree-sitter-haskell.wasm",
-      "bytes": 3805902,
-      "sha256": "37a6b07b1a838d02ffb4f4c2a06863637a8efe48432d60a275f50f1d08f1092c",
+      "bytes": 3840615,
+      "sha256": "1d749bd88cfc6d93f28d777451be12a3fffe93b75fc2b8dcdd6e8d8ea9a544c7",
       "grammarDependency": "tree-sitter-haskell@^0.23.1"
     },
     "julia": {
       "file": "julia/tree-sitter-julia.wasm",
       "sourcePath": "out/julia/tree-sitter-julia.wasm",
-      "bytes": 2668263,
-      "sha256": "f9d6aff11d7c53d80afe57deaf44bc87a6aef8f09a8b192c16d3722bc368b412",
+      "bytes": 2636477,
+      "sha256": "04f1a7efecce78f514f7dc27efce36fdba43ef8bb3281faf43207f9c5beb93bc",
       "grammarDependency": "tree-sitter-julia@git+https://github.com/tree-sitter/tree-sitter-julia.git#e0f9dcd180fdcfcfa8d79a3531e11d99e79321d3"
     },
     "clojure": {
       "file": "clojure/tree-sitter-clojure.wasm",
       "sourcePath": "out/clojure/tree-sitter-clojure.wasm",
-      "bytes": 101206,
-      "sha256": "f34287abec45df384781857435cbfa60587a3412a229da64d67352fb8bbb381c",
+      "bytes": 89438,
+      "sha256": "9499758c061c92c98ac63851aa26269bbcefbb512c5a70337397187edae3da82",
       "grammarDependency": "tree-sitter-clojure@git+https://github.com/sogaiu/tree-sitter-clojure.git#e43eff80d17cf34852dcd92ca5e6986d23a7040f"
+    },
+    "cmake": {
+      "file": "cmake/tree-sitter-cmake.wasm",
+      "sourcePath": "out/cmake/tree-sitter-cmake.wasm",
+      "bytes": 77192,
+      "sha256": "567d22f6475437680f500579ee86a5ae8c106890e8f26e62a85bed86f1322204",
+      "grammarDependency": "tree-sitter-cmake@git+https://github.com/uyha/tree-sitter-cmake.git#ca627bb5828616b6246aafdc3c3222789e728e37"
+    },
+    "commonlisp": {
+      "file": "commonlisp/tree-sitter-commonlisp.wasm",
+      "sourcePath": "out/commonlisp/tree-sitter-commonlisp.wasm",
+      "bytes": 756925,
+      "sha256": "3042c56787798eee8974cbe8bb494b8ce3dc61408d27ceb5ebef4814ab38a3a6",
+      "grammarDependency": "tree-sitter-commonlisp@git+https://github.com/tree-sitter-grammars/tree-sitter-commonlisp.git#32323509b3d9fe96607d151c2da2c9009eb13a2f"
+    },
+    "cuda": {
+      "file": "cuda/tree-sitter-cuda.wasm",
+      "sourcePath": "out/cuda/tree-sitter-cuda.wasm",
+      "bytes": 4084099,
+      "sha256": "53479c2ce27ddd6bcaaf9a70d7addddf6e89e4e68c8ea170ab461e07df684f78",
+      "grammarDependency": "tree-sitter-cuda@^0.21.1"
+    },
+    "d": {
+      "file": "d/tree-sitter-d.wasm",
+      "sourcePath": "out/d/tree-sitter-d.wasm",
+      "bytes": 3759272,
+      "sha256": "cfd8e7018f94726a947b21eaceee9964a7ce84ea1180191f2a3a37c550e183be",
+      "grammarDependency": "tree-sitter-d@git+https://github.com/gdamore/tree-sitter-d.git#64f27931b4e6fdd75af1102c79bacbca68a8dacc"
+    },
+    "erlang": {
+      "file": "erlang/tree-sitter-erlang.wasm",
+      "sourcePath": "out/erlang/tree-sitter-erlang.wasm",
+      "bytes": 426704,
+      "sha256": "58d1baefa8133414181ab833824dc3d53d5f45e47a58726cc3255a1310704603",
+      "grammarDependency": "tree-sitter-erlang@git+https://github.com/WhatsApp/tree-sitter-erlang.git#6ba4c762eb3065495e3db85697ffeecdf364ce35"
+    },
+    "fortran": {
+      "file": "fortran/tree-sitter-fortran.wasm",
+      "sourcePath": "out/fortran/tree-sitter-fortran.wasm",
+      "bytes": 6591076,
+      "sha256": "06b24419b70c6270df34aa1ae414a95a94afbd2459db61be1c0ca961b3edcfb5",
+      "grammarDependency": "tree-sitter-fortran@git+https://github.com/stadelmanma/tree-sitter-fortran.git#7edacd2b21aa80057d9725384a1304a1c758e0f8"
+    },
+    "gleam": {
+      "file": "gleam/tree-sitter-gleam.wasm",
+      "sourcePath": "out/gleam/tree-sitter-gleam.wasm",
+      "bytes": 421665,
+      "sha256": "19cb0b6b845e902a02e056db1155e4b3552e351bd07aab537d93a0a418151a76",
+      "grammarDependency": "tree-sitter-gleam@git+https://github.com/gleam-lang/tree-sitter-gleam.git#cefbd6863983b4df3214b7934bde5e9ca63d5b7f"
+    },
+    "glsl": {
+      "file": "glsl/tree-sitter-glsl.wasm",
+      "sourcePath": "out/glsl/tree-sitter-glsl.wasm",
+      "bytes": 867646,
+      "sha256": "6920b89e88ce7dac9a867c8d4c51c7f7c53ec926ed59aa1f9006bd35560e2901",
+      "grammarDependency": "tree-sitter-glsl@^0.2.0"
     },
     "groovy": {
       "file": "groovy/tree-sitter-groovy.wasm",
       "sourcePath": "out/groovy/tree-sitter-groovy.wasm",
-      "bytes": 874913,
-      "sha256": "1a17b99f92395ba47e76736cc8d55d6acf8341609409e519e03c77ad5b84d7d6",
+      "bytes": 856231,
+      "sha256": "2c070c8ff76b6075fc3bde391edd4ab177d12b5281c65e07b1fba69dac01dfd5",
       "grammarDependency": "tree-sitter-groovy@git+https://github.com/murtaza64/tree-sitter-groovy.git#deb0dcf8c4544f07564060f6e9b9f6e4b0bfc27d"
+    },
+    "latex": {
+      "file": "latex/tree-sitter-latex.wasm",
+      "sourcePath": "out/latex/tree-sitter-latex.wasm",
+      "bytes": 3632285,
+      "sha256": "bcb5ddc0456400f581f555917f31dd26477d01648ac7ce576fd460bd5dae466e",
+      "grammarDependency": "tree-sitter-latex@git+https://github.com/latex-lsp/tree-sitter-latex.git#fa8df448fc2c0192a8c2f8cfc97de53cb2b4ecb9"
+    },
+    "make": {
+      "file": "make/tree-sitter-make.wasm",
+      "sourcePath": "out/make/tree-sitter-make.wasm",
+      "bytes": 145345,
+      "sha256": "896518919852117bbb3d2d1666a28f71865762802c6ececdfd960cca93665334",
+      "grammarDependency": "tree-sitter-make@git+https://github.com/tree-sitter-grammars/tree-sitter-make.git#70613f3d812cbabbd7f38d104d60a409c4008b43"
+    },
+    "nginx": {
+      "file": "nginx/tree-sitter-nginx.wasm",
+      "sourcePath": "out/nginx/tree-sitter-nginx.wasm",
+      "bytes": 99064,
+      "sha256": "2d7138068a7f944b1ebcdbc388864e6c5fa1881a26aaec76eddf935ad3eff4b5",
+      "grammarDependency": "tree-sitter-nginx@^1.0.1"
+    },
+    "nim": {
+      "file": "nim/tree-sitter-nim.wasm",
+      "sourcePath": "out/nim/tree-sitter-nim.wasm",
+      "bytes": 5823362,
+      "sha256": "9e8c5a8fef8e5ae188ba410fd4d26f25b92dc27cf998fe9ac77be3604e41cace",
+      "grammarDependency": "tree-sitter-nim@git+https://github.com/alaviss/tree-sitter-nim.git#ac72ba30d16edf0be021588a9301ede4accd6cf4"
     },
     "perl": {
       "file": "perl/tree-sitter-perl.wasm",
       "sourcePath": "out/perl/tree-sitter-perl.wasm",
-      "bytes": 4131006,
-      "sha256": "6d86393a67b4bd49c2b87f7af84a408f7488446a45254f7363654df652b9461a",
-      "grammarDependency": "tree-sitter-perl@git+https://github.com/tree-sitter-perl/tree-sitter-perl.git#release"
+      "bytes": 4338383,
+      "sha256": "ad0aad1558d27c23ab6603b746cba3e6a4cccc5354d43305a73825e6bb42f58d",
+      "grammarDependency": "tree-sitter-perl@git+https://github.com/tree-sitter-perl/tree-sitter-perl.git#567caa6fc6adbe19977bc6c21fd31275fc54d810"
+    },
+    "prisma": {
+      "file": "prisma/tree-sitter-prisma.wasm",
+      "sourcePath": "out/prisma/tree-sitter-prisma.wasm",
+      "bytes": 36578,
+      "sha256": "dc72e7dd3787c2ce84be2938276aef28c282c12485058bc96d4f17507ccc9b84",
+      "grammarDependency": "tree-sitter-prisma@^1.6.0"
+    },
+    "qmljs": {
+      "file": "qmljs/tree-sitter-qmljs.wasm",
+      "sourcePath": "out/qmljs/tree-sitter-qmljs.wasm",
+      "bytes": 1654648,
+      "sha256": "08426569fffb249168a061aef28e226b42c2c54b244933759aeb697a7ca2461e",
+      "grammarDependency": "tree-sitter-qmljs@^0.3.1"
+    },
+    "racket": {
+      "file": "racket/tree-sitter-racket.wasm",
+      "sourcePath": "out/racket/tree-sitter-racket.wasm",
+      "bytes": 105398,
+      "sha256": "bc274625e806ab90fd067bc41930130e5dcc918233be8ee3613e771d3d908b0f",
+      "grammarDependency": "@6cdh/tree-sitter-racket@0.25.0"
+    },
+    "razor": {
+      "file": "razor/tree-sitter-razor.wasm",
+      "sourcePath": "out/razor/tree-sitter-razor.wasm",
+      "bytes": 10682429,
+      "sha256": "56b88689f0387c53e7c3973b710b2f3b8ae18a6212311902ba8de277e3e6ed89",
+      "grammarDependency": "tree-sitter-razor@git+https://github.com/tris203/tree-sitter-razor.git#d4664e409caaea12f73c9525484e3cf88b1cf718"
+    },
+    "scheme": {
+      "file": "scheme/tree-sitter-scheme.wasm",
+      "sourcePath": "out/scheme/tree-sitter-scheme.wasm",
+      "bytes": 102502,
+      "sha256": "85789950971580b6adc9b8201e22ab8f8985fd9100971a943c6faadb1fb1ae01",
+      "grammarDependency": "@6cdh/tree-sitter-scheme@0.24.7-1"
+    },
+    "svelte": {
+      "file": "svelte/tree-sitter-svelte.wasm",
+      "sourcePath": "out/svelte/tree-sitter-svelte.wasm",
+      "bytes": 38418,
+      "sha256": "467625d8f3000fc0910642926578adedcea310a958678584d6e7431943ce6b1a",
+      "grammarDependency": "tree-sitter-svelte@git+https://github.com/Himujjal/tree-sitter-svelte#60ea1d673a1a3eeeb597e098d9ada9ed0c79ef4b"
+    },
+    "templ": {
+      "file": "templ/tree-sitter-templ.wasm",
+      "sourcePath": "out/templ/tree-sitter-templ.wasm",
+      "bytes": 472804,
+      "sha256": "1496c31d8d5642277d233c332349f091552102ede42f7d12e1f87f3b2333d9b0",
+      "grammarDependency": "tree-sitter-templ@git+https://github.com/vrischmann/tree-sitter-templ.git#94d40865c15ebbaff9ed11dde5d6490b0f5de092"
+    },
+    "typst": {
+      "file": "typst/tree-sitter-typst.wasm",
+      "sourcePath": "out/typst/tree-sitter-typst.wasm",
+      "bytes": 769236,
+      "sha256": "8b7de24c27133cf1ccecc392b9c3214efe58d05b506dddc56d833631caa8d47e",
+      "grammarDependency": "tree-sitter-typst@git+https://github.com/uben0/tree-sitter-typst.git#46cf4ded12ee974a70bf8457263b67ad7ee0379d"
+    },
+    "vim": {
+      "file": "vim/tree-sitter-vim.wasm",
+      "sourcePath": "out/vim/tree-sitter-vim.wasm",
+      "bytes": 1233303,
+      "sha256": "df3906a0901b549fdb75adf046b4998b7b52d183a464d60f8c659829c654dfa1",
+      "grammarDependency": "tree-sitter-vim@git+https://github.com/Crysthamus/tree-sitter-vim.git#87ca54bb5e67036bf84481e73353bece72db028d"
+    },
+    "xml": {
+      "file": "xml/tree-sitter-xml.wasm",
+      "sourcePath": "out/xml/tree-sitter-xml.wasm",
+      "bytes": 49206,
+      "sha256": "91a5f46d49aa6b3198b840b1b13a1c4057f424e5006786939db3d38ca1f06947",
+      "grammarDependency": "@tree-sitter-grammars/tree-sitter-xml@^0.7.0"
+    },
+    "zig": {
+      "file": "zig/tree-sitter-zig.wasm",
+      "sourcePath": "out/zig/tree-sitter-zig.wasm",
+      "bytes": 696929,
+      "sha256": "c239344ce2612c87937445deb27af5083476fea7842b7bad6cf34c4db446c48a",
+      "grammarDependency": "@tree-sitter-grammars/tree-sitter-zig@^1.1.2"
     }
   }
 }

@@ -4,7 +4,7 @@ This document owns source development, build, test, packaging, and local protoco
 
 ## Supported toolchain
 
-- Node.js 24
+- Node.js 26
 - npm 12
 - Electron and MCP versions pinned by the repository manifests
 - the pinned OpenAI tunnel-client artifact for the target platform

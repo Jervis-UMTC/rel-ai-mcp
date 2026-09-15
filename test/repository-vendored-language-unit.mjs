@@ -36,6 +36,41 @@ const CASES = [
   {"path":"lib/RelAI.pm","language":"perl","source":"use strict;\nsub add { my ($a, $b) = @_; return $a + $b; }\n1;\n"}
 ];
 
+const EXPANDED_LANGUAGE_CASES = [
+  ['src/main.adb', 'ada'],
+  ['firmware/sketch.ino', 'arduino'],
+  ['src/page.astro', 'astro'],
+  ['CMakeLists.txt', 'cmake'],
+  ['src/core.lisp', 'commonlisp'],
+  ['src/kernel.cu', 'cuda'],
+  ['src/main.d', 'd'],
+  ['src/server.erl', 'erlang'],
+  ['src/model.f90', 'fortran'],
+  ['src/main.gleam', 'gleam'],
+  ['shaders/main.vert', 'glsl'],
+  ['docs/main.tex', 'latex'],
+  ['Makefile', 'make'],
+  ['nginx.conf', 'nginx'],
+  ['src/main.nim', 'nim'],
+  ['prisma/schema.prisma', 'prisma'],
+  ['ui/Main.qml', 'qmljs'],
+  ['src/main.rkt', 'racket'],
+  ['Pages/Index.cshtml', 'razor'],
+  ['src/main.scm', 'scheme'],
+  ['src/App.svelte', 'svelte'],
+  ['views/index.templ', 'templ'],
+  ['docs/main.typ', 'typst'],
+  ['.vimrc', 'vim'],
+  ['config/schema.xml', 'xml']
+];
+
+for (const [filePath, language] of EXPANDED_LANGUAGE_CASES) {
+  assert.equal(languageForPath(filePath), language, 'language mapping failed for ' + filePath);
+  const asset = parserForLanguage(language);
+  assert.equal(asset?.provider, 'vendored-tree-sitter-wasm', 'vendored parser provider missing for ' + language);
+  assert.equal(asset?.path, `vendor/tree-sitter/${language}/${asset.path.split('/').at(-1)}`, 'vendored parser path missing for ' + language);
+}
+
 for (const item of CASES) {
   assert.equal(languageForPath(item.path), item.language, 'language mapping failed for ' + item.path);
   const asset = parserForLanguage(item.language);

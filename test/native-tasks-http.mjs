@@ -39,7 +39,8 @@ async function invokeEligible(client, id, logicalTaskId, durationMs, capabilitie
   const taskCapable = Boolean(capabilities?.extensions?.[extensionId]);
   return callTool(client, id, eligibleTool, {
     work_id: logicalTaskId,
-    command: sleepCommand(durationMs),
+    executable: process.execPath,
+    argv: ['-e', `setTimeout(() => {}, ${durationMs})`],
     timeoutMs: taskCapable ? Math.max(15000, durationMs + 2000) : Math.max(5000, durationMs + 2000),
     maxOutputBytes: 64 * 1024
   }, capabilities);
@@ -47,10 +48,6 @@ async function invokeEligible(client, id, logicalTaskId, durationMs, capabilitie
 
 async function taskRequest(client, id, method, taskId, extra = {}, capabilities = tasksCapability) {
   return client.request(method, { taskId, ...extra }, { id, name: taskId, capabilities });
-}
-
-function sleepCommand(durationMs) {
-  return `node -e "setTimeout(() => {}, ${durationMs})"`;
 }
 
 let client = null;
@@ -115,6 +112,49 @@ try {
   assert.equal(fallback.body.result?.isError, false, JSON.stringify(fallback.body));
   assert.equal(fallback.body.result?.structuredContent?.exitCode, 0);
   assert.equal(fallback.body.result?.structuredContent?.work_id, logicalTaskId);
+
+  const releaseFile = path.join(workspaceDir, 'release-taskless-fallback');
+  const tasklessFallback = await callTool(client, 40, eligibleTool, {
+    workspace: 'repo',
+    executable: process.execPath,
+    argv: ['-e', `const fs=require('fs');const p=${JSON.stringify(releaseFile)};const end=Date.now()+12000;(function wait(){if(fs.existsSync(p))return; if(Date.now()>end)process.exit(2); setTimeout(wait,25);})();`],
+    timeoutMs: 15000,
+    maxOutputBytes: 64 * 1024
+  }, {});
+  assert.equal(tasklessFallback.response.status, 200, JSON.stringify(tasklessFallback.body));
+  assert.equal(tasklessFallback.body.result?.isError, false, JSON.stringify(tasklessFallback.body));
+  assert.equal(tasklessFallback.body.result?.structuredContent?.status, 'running', JSON.stringify(tasklessFallback.body));
+  const tasklessOperationId = tasklessFallback.body.result?.structuredContent?.operationId;
+  assert.ok(tasklessOperationId, JSON.stringify(tasklessFallback.body));
+
+  const concurrentRead = callTool(client, 41, 'relai_read', {
+    workspace: 'repo',
+    paths: ['package.json']
+  }, {});
+  const readBeforeRelease = await Promise.race([
+    concurrentRead.then(response => ({ kind: 'response', response })),
+    new Promise(resolve => setTimeout(() => resolve({ kind: 'timeout' }), 1500))
+  ]);
+  fs.writeFileSync(releaseFile, 'release\n');
+  assert.equal(readBeforeRelease.kind, 'response', 'a taskless background mutation must not hold the workspace writer lock');
+  assert.equal(readBeforeRelease.response.response.status, 200, JSON.stringify(readBeforeRelease.response.body));
+  assert.equal(readBeforeRelease.response.body.result?.isError, false, JSON.stringify(readBeforeRelease.response.body));
+
+  let completedTasklessFallback = null;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const status = await callTool(client, 4100 + attempt, 'relai_work', {
+      action: 'status',
+      workspace: 'repo',
+      operationId: tasklessOperationId
+    }, {});
+    const operation = status.body.result?.structuredContent?.backgroundOperation;
+    if (operation?.status && operation.status !== 'running') {
+      completedTasklessFallback = operation;
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.equal(completedTasklessFallback?.status, 'completed', JSON.stringify(completedTasklessFallback));
 
   const taskCapableExec = await invokeEligible(client, 5, logicalTaskId, 100);
   assert.equal(taskCapableExec.response.status, 200, JSON.stringify(taskCapableExec.body));

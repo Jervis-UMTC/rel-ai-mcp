@@ -23,6 +23,7 @@ export const ANALYTICS_RANGES = Object.freeze([
 
 const HOUR_MS = 60 * 60 * 1000;
 const RELIABILITY_KEYS = Object.freeze(['reliabilityCalls', 'reliableCalls', 'infrastructureFailures', 'operationFailures', 'recoverableFailures', 'cancellations']);
+const TRANSPORT_KEYS = Object.freeze(['request_started', 'request_reached_runtime', 'request_cancelled', 'connection_closed', 'upstream_5xx', 'response_delivered']);
 const TOTAL_KEYS = Object.freeze(['requests', 'toolCalls', 'successes', 'failures', 'executionMs', ...RELIABILITY_KEYS]);
 const GROUP_KEYS = Object.freeze(['toolCalls', 'successes', 'failures', 'executionMs', ...RELIABILITY_KEYS]);
 
@@ -74,6 +75,7 @@ export function normalizeUsageSnapshot(snapshot, requestedMonth = '') {
     month,
     privacy: normalizePrivacy(snapshot.privacy),
     totals: normalizeTotals(snapshot.totals),
+    transport: normalizeTransport(snapshot.transport, 'transport'),
     tools: normalizeBreakdown(snapshot.tools, 'tool'),
     workspaces: normalizeBreakdown(snapshot.workspaces, 'workspace'),
     workspaceTools: normalizeBreakdown(snapshot.workspaceTools, 'workspaceTool'),
@@ -82,6 +84,7 @@ export function normalizeUsageSnapshot(snapshot, requestedMonth = '') {
     taskIntents: normalizeTaskIntentRows(snapshot.taskIntents),
     workspaceTaskIntents: normalizeTaskIntentRows(snapshot.workspaceTaskIntents, { workspace: true }),
     series: normalizeSeries(snapshot.series, 'overall'),
+    transportSeries: normalizeTransportSeries(snapshot.transportSeries),
     toolSeries: normalizeSeries(snapshot.toolSeries, 'tool'),
     workspaceSeries: normalizeSeries(snapshot.workspaceSeries, 'workspace'),
     workspaceToolSeries: normalizeSeries(snapshot.workspaceToolSeries, 'workspaceTool'),
@@ -102,6 +105,9 @@ export function analyticsRangeScope(models, bounds, { workspace = '', monthlyFal
   const workspaceRows = all.flatMap(model => model.workspaceSeries).filter(row => inRange(row.hour, bounds.start, bounds.end) && workspaceMatch(row, workspace));
   const baseRows = workspace ? workspaceRows : rows;
   let totals = sumRows(baseRows);
+  let transport = workspace
+    ? null
+    : sumTransportRows(all.flatMap(model => model.transportSeries).filter(row => inRange(row.hour, bounds.start, bounds.end)));
   let usedMonthlyFallback = false;
   let fallbackModel = null;
   if (monthlyFallback && bounds.range === 'month') {
@@ -113,6 +119,7 @@ export function analyticsRangeScope(models, bounds, { workspace = '', monthlyFal
         if (relevant.length) totals = sumRows(relevant);
       } else {
         totals = { ...model.totals };
+        transport = { ...model.transport };
       }
       usedMonthlyFallback = true;
     }
@@ -165,6 +172,7 @@ export function analyticsRangeScope(models, bounds, { workspace = '', monthlyFal
     operationSuccessRate: totals.successes + totals.failures ? totals.successes / (totals.successes + totals.failures) * 100 : 0,
     reliabilityRate: totals.reliabilityCalls ? totals.reliableCalls / totals.reliabilityCalls * 100 : null,
     averageDuration: totals.successes + totals.failures ? totals.executionMs / (totals.successes + totals.failures) : 0,
+    transport,
     tools,
     workspaces,
     useCases,
@@ -217,6 +225,19 @@ function normalizeTotals(value) {
   const result = {};
   for (const key of ['requests', 'toolCalls', 'successes', 'failures', 'executionMs', 'activeDays']) result[key] = exactNumber(value[key], key);
   return { ...result, ...normalizeReliability(value, 'totals') };
+}
+
+function normalizeTransport(value, label) {
+  const row = value && typeof value === 'object' ? value : {};
+  return Object.fromEntries(TRANSPORT_KEYS.map(key => [key, optionalNumber(row[key], 0, `${label}.${key}`)]));
+}
+
+function normalizeTransportSeries(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => ({
+    hour: String(item?.hour || ''),
+    ...normalizeTransport(item, 'transportSeries')
+  })).filter(row => hourTime(row.hour) !== null);
 }
 
 function normalizeBreakdown(value, kind) {
@@ -297,6 +318,12 @@ function normalizeFailureRows(value, { workspace = false, series = false } = {})
 function sumRows(rows) {
   const totals = Object.fromEntries(TOTAL_KEYS.map(key => [key, 0]));
   for (const row of rows || []) for (const key of TOTAL_KEYS) totals[key] += Number(row[key] || 0);
+  return totals;
+}
+
+function sumTransportRows(rows) {
+  const totals = Object.fromEntries(TRANSPORT_KEYS.map(key => [key, 0]));
+  for (const row of rows || []) for (const key of TRANSPORT_KEYS) totals[key] += Number(row[key] || 0);
   return totals;
 }
 

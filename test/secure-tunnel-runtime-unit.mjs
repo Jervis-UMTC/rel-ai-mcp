@@ -66,12 +66,24 @@ try {
     assert.ok(statuses.some(status => status.state === phase), `startup must publish ${phase}`);
   }
 
+  primaryChild.stdout.emit('data', '{"level":"WARN","msg":"command response deadline reached; dropping without posting a response","component":"dispatcher"}\n');
+  primaryChild.stdout.emit('data', '{"level":"ERROR","msg":"dispatcher received MCP upstream error; posted error response to control plane","component":"dispatcher","status_code":502}\n');
+  await waitFor(() => runtime.snapshot().state === 'degraded' && runtime.snapshot().errorCode === 'tunnel_command_delivery_degraded');
+  assert.equal(runtime.snapshot().transportFailureStreak, 2);
+  assert.equal(typeof runtime.observeTransportEvent, 'undefined', 'local HTTP response completion must not be able to clear control-plane delivery degradation');
+  assert.equal(runtime.snapshot().state, 'degraded', 'delivery degradation must remain authoritative until the recovery path restarts the tunnel');
+
   operational = false;
-  await waitFor(() => runtime.snapshot().state === 'degraded');
-  assert.equal(runtime.snapshot().errorCode, 'tunnel_connection_interrupted');
+  await waitFor(() => runtime.snapshot().consecutiveFailures >= 2);
+  assert.equal(runtime.snapshot().errorCode, 'tunnel_command_delivery_degraded', 'a transient readiness outage must not mask command-delivery degradation');
   operational = true;
-  await waitFor(() => runtime.snapshot().state === 'running');
-  assert.equal(runtime.snapshot().error, '');
+  await waitFor(() => runtime.snapshot().consecutiveFailures === 0);
+  assert.equal(runtime.snapshot().state, 'degraded', 'readiness recovery must not clear command-delivery degradation without restarting the tunnel');
+  assert.equal(runtime.snapshot().errorCode, 'tunnel_command_delivery_degraded');
+  await runtime.stop();
+  assert.equal(primaryChild.exitCode, 0, 'manual stop must terminate the original tunnel child');
+  assert.equal(runtime.snapshot().state, 'stopped');
+  assert.ok(logs.some(entry => entry.source === 'openai-tunnel'));
 
   const persistentRuntime = createSecureTunnelRuntime({
     spawnImpl: fakeSpawn,
@@ -91,10 +103,6 @@ try {
   assert.ok(persistentRuntime.snapshot().consecutiveFailures >= 4, 'persistent outage must escalate only after the second failure threshold');
 
   operational = true;
-  await runtime.stop();
-  assert.equal(primaryChild.exitCode, 0, 'manual stop must terminate the original tunnel child');
-  assert.equal(runtime.snapshot().state, 'stopped');
-  assert.ok(logs.some(entry => entry.source === 'openai-tunnel'));
 
   let authChild = null;
   let authStopped = false;

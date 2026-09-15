@@ -22,6 +22,10 @@ const FATAL_TUNNEL_CODES = new Set([
   'tunnel_not_found',
   TUNNEL_RUNTIME_UNAVAILABLE_CODE
 ]);
+const TRANSPORT_FAILURE_CODES = new Set([
+  'tunnel_response_deadline',
+  'tunnel_upstream_5xx'
+]);
 
 function createSecureTunnelRuntime({
   spawnImpl = spawn,
@@ -47,6 +51,7 @@ function createSecureTunnelRuntime({
   let generation = 0;
   let stopping = false;
   let monitorPromise = null;
+  let transportFailureStreak = 0;
   const monitorDelayMs = Math.max(50, Number(monitorIntervalMs || MONITOR_INTERVAL_MS));
   const degradedAfterFailures = Math.max(1, Math.floor(Number(degradedFailureThreshold || DEGRADED_FAILURE_THRESHOLD)));
   const failedAfterFailures = Math.max(degradedAfterFailures + 1, Math.floor(Number(failedFailureThreshold || FAILED_FAILURE_THRESHOLD)));
@@ -58,6 +63,7 @@ function createSecureTunnelRuntime({
     errorCode: '',
     lastConnectedAt: null,
     consecutiveFailures: 0,
+    transportFailureStreak: 0,
     outageStartedAt: null
   });
 
@@ -69,7 +75,8 @@ function createSecureTunnelRuntime({
     const port = normalizePort(config.port);
     const runGeneration = ++generation;
     stopping = false;
-    update({ state: 'starting', tunnelId, healthUrl: '', error: '', errorCode: '', consecutiveFailures: 0, outageStartedAt: null });
+    transportFailureStreak = 0;
+    update({ state: 'starting', tunnelId, healthUrl: '', error: '', errorCode: '', consecutiveFailures: 0, transportFailureStreak: 0, outageStartedAt: null });
 
     let executable;
     try {
@@ -106,6 +113,21 @@ function createSecureTunnelRuntime({
     let fatalStopPromise = null;
     const acceptLogEntry = entry => {
       onLog(entry);
+      if (TRANSPORT_FAILURE_CODES.has(entry.code) && runGeneration === generation) {
+        transportFailureStreak += 1;
+        if (transportFailureStreak >= degradedAfterFailures && ['running', 'degraded'].includes(state.state)) {
+          update({
+            state: 'degraded',
+            tunnelId,
+            healthUrl: state.healthUrl,
+            errorCode: 'tunnel_command_delivery_degraded',
+            error: 'Tunnel command responses are repeatedly failing to reach the control plane. Rel.AI will recover the secure tunnel automatically.',
+            transportFailureStreak
+          });
+        } else if (state.transportFailureStreak !== transportFailureStreak) {
+          update({ transportFailureStreak });
+        }
+      }
       if (!FATAL_TUNNEL_CODES.has(entry.code) || fatalFailure || runGeneration !== generation) return;
       fatalFailure = tunnelFailure(entry.code, entry.message);
       update({
@@ -114,6 +136,7 @@ function createSecureTunnelRuntime({
         error: fatalFailure.message,
         errorCode: fatalFailure.code,
         consecutiveFailures: 0,
+        transportFailureStreak,
         outageStartedAt: null
       });
       if (ownedChild && ownedChild.exitCode === null) {
@@ -192,6 +215,7 @@ function createSecureTunnelRuntime({
         errorCode: '',
         lastConnectedAt: Date.now(),
         consecutiveFailures: 0,
+        transportFailureStreak,
         outageStartedAt: null
       });
       monitorPromise = monitorTunnel({
@@ -248,6 +272,12 @@ function createSecureTunnelRuntime({
       if (operational.ok) {
         consecutiveFailures = 0;
         outageStartedAt = 0;
+        if (state.errorCode === 'tunnel_command_delivery_degraded') {
+          if (state.consecutiveFailures !== 0 || state.outageStartedAt !== null) {
+            update({ consecutiveFailures: 0, outageStartedAt: null });
+          }
+          continue;
+        }
         if (state.state !== 'running') {
           update({
             state: 'running',
@@ -280,6 +310,10 @@ function createSecureTunnelRuntime({
         return;
       }
       if (consecutiveFailures < degradedAfterFailures) continue;
+      if (state.errorCode === 'tunnel_command_delivery_degraded') {
+        update({ consecutiveFailures, outageStartedAt });
+        continue;
+      }
       update({
         state: 'degraded',
         tunnelId,
@@ -367,13 +401,15 @@ function createSecureTunnelRuntime({
     const ownedChild = child;
     child = null;
     if (!ownedChild) {
-      update({ state: 'stopped', tunnelId: '', healthUrl: '', error: '', errorCode: '', consecutiveFailures: 0, outageStartedAt: null });
+      transportFailureStreak = 0;
+      update({ state: 'stopped', tunnelId: '', healthUrl: '', error: '', errorCode: '', consecutiveFailures: 0, transportFailureStreak: 0, outageStartedAt: null });
       return { stopped: true, exited: true, forced: false };
     }
     const result = await stopProcess(ownedChild, { graceMs: 1000, forceWaitMs: 2000 });
     if (monitorPromise) await Promise.race([monitorPromise, delay(100)]).catch(() => {});
     monitorPromise = null;
-    update({ state: 'stopped', tunnelId: '', healthUrl: '', error: '', errorCode: '', consecutiveFailures: 0, outageStartedAt: null });
+    transportFailureStreak = 0;
+    update({ state: 'stopped', tunnelId: '', healthUrl: '', error: '', errorCode: '', consecutiveFailures: 0, transportFailureStreak: 0, outageStartedAt: null });
     return { stopped: true, ...result };
   }
 

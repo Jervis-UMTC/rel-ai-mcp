@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.0.1] — 2026-09-15
+
+### Embedded browser
+- **Fit the complete canonical AI viewport into the desktop Browser surface instead of cropping the top-left corner.** The live WebContentsView now applies Chromium presentation scaling while keeping the requested viewport dimensions and responsive breakpoints unchanged, so the whole page viewport is visible at once without changing what automation sees.
+- **Preserve browser automation and takeover semantics while fitting the live view.** Real Electron coverage now verifies bottom-right visibility and interaction, independent scrolling, user takeover through the fitted presentation, and full-resolution AI screenshots that remain at the canonical viewport size.
+
+### Desktop and Pulse
+- **Suppress split-second Pulse flashes from unlinked tool calls without hiding sustained activity.** A new 300 ms visibility delay applies only when Rel.AI is about to show Pulse for working activity that has no bound task; activity that ends inside the delay is discarded, while longer unlinked calls still surface normally and existing visible/task-bound Pulse behavior is unchanged.
+
+### Repository Intelligence and parser assets
+- **Hard-cut structural parsing to current vendored Tree-sitter WASM grammars.** `web-tree-sitter` moves from 0.25.10 to 0.27.0, the incompatible `tree-sitter-wasms` runtime fallback is removed, parser generation advances to v29, and every structural parser resolves from the reviewed `vendor/tree-sitter` set.
+- **Expand structural language coverage from 53 to 78 profiles.** Added vendored parsing for Ada, Arduino, Astro, CMake, Common Lisp, CUDA, D, Erlang, Fortran, Gleam, GLSL, LaTeX, Make, Nginx, Nim, Prisma, QML, Racket, Razor, Scheme, Svelte, Templ, Typst, Vim, and XML, with matching language-detection and parser-path regression coverage.
+- **Refresh Tree-sitter provenance, checksums, notices, packaging checks, and size accounting together.** Most grammars now come from `tree-sitter-wasm` 2.0.1, with recorded supplemental QL, SystemRDL, and TLA+ builds; package verification validates the current `web-tree-sitter` artifact names and the vendored manifest instead of requiring the removed legacy grammar dependency.
+
+### Runtime, dependencies, CI, and generated assets
+- **Move the tested runtime baseline from Node.js 24.15.0 to Node.js 26.8.2 while retaining npm 12.0.2.** `.node-version`, root/Electron engine ranges, CI labeling, dependency-policy tests, source-build documentation, release documentation, and package-management guidance now agree on the Node 26 runtime; the recorded Node 24 observability benchmark remains explicitly historical.
+- **Refresh maintained root and frontend dependencies and regenerate their lockfiles and production dashboard bundles.** React and React DOM move to 19.3.0, Vite to 8.3.0, Lucide React to 1.46.0, Midscene Computer to 1.12.6, Pyright to 1.1.414, Zod to 4.6.5, and the matching React/Node type packages are refreshed. The TypeScript 7 compiler remains paired with a TypeScript 6 language-server compatibility runtime until the current language server supports the newer tsserver layout.
+- **Keep packaged dependency policy aligned with the Tree-sitter cutover.** Electron packaging patterns, Knip exceptions, plugin-package assertions, packaged-app verification, and package-size reporting no longer reference `tree-sitter-wasms`, while regenerated hashed dashboard assets reflect the updated frontend dependency graph.
+
+### Runtime and task reliability
+- **Recognize direct `executable` Rel.AI command calls as bounded synchronous fallback candidates.** Task transport estimation now treats direct executable/argv calls like the existing command/check forms, and deferred/native-task regression tests use shell-free executable invocation so quoting differences do not determine task behavior.
+- **Stop taskless background commands from taking a workspace-wide writer lock.** Detached fallback and native-task executions now carry a separate queue identity when no user `work_id` exists, so long background mutations keep the intended mutation serialization without blocking unrelated reads, searches, status calls, or task starts in the same workspace; an HTTP regression holds a long taskless command open while proving a same-workspace read still completes before release.
+- **Make MCP request delivery failures observable instead of collapsing them into ordinary tool failures.** Local transport accounting now distinguishes request start, runtime arrival, client cancellation, premature connection close, upstream 5xx responses, and locally completed responses, while tunnel diagnostics recognize upstream 502 and response-deadline-drop events so a healthy tunnel process can still expose request-level delivery failures.
+- **Keep tunnel recovery tied to tunnel evidence instead of local HTTP writes.** A local `ServerResponse.finish` remains useful transport telemetry but no longer clears `tunnel_command_delivery_degraded`; repeated tunnel deadline/5xx evidence stays degraded until the existing recovery path restarts the tunnel, transient readiness failures/recoveries cannot mask that state, and synchronous execution metadata now matches the connection-loss behavior by advertising request-abort cleanup without connection-close cancellation.
+- **Keep fallback retries safe while an accepted response is still pending locally.** Delivery-aware replay retains a one-shot fallback result until the local HTTP response completes, so duplicate requests during that accepted-response window reuse the existing resilient read/status result instead of starting a second execution; taskless operation-status records remain bounded by the existing TTL and record cap even after their replay signature is released.
+- **Make dashboard task-event batching compatible with both Node and browser timer handles.** The batcher accepts numeric renderer timers and only calls `unref()` on timer objects that actually support it, preserving the existing coalescing behavior across runtimes.
+- **Stabilize Windows failure-accounting regression cleanup.** Temporary test state now retries recursive removal on Windows so transient file-handle release timing does not create false failures after the behavior under test has already completed.
+
+Bump root/electron/workspace/status UI/lockfiles/release manifest to 1.0.1.
+
 ## [1.0.0] — 2026-09-07
 
 ### 1.0.0 release candidate

@@ -27,7 +27,7 @@ Rel.AI bundles platform builds of Sourcegraph Zoekt for local repository search.
 
 ### Tree-sitter grammar WASM artifacts
 
-Rel.AI ships selected Tree-sitter grammar WASM artifacts sourced through `tree-sitter-wasm` 1.0.7. Each grammar artifact retains the license of its upstream grammar project. Package names, versions/commits, checksums, and source metadata are recorded in `vendor/tree-sitter/manifest.json`.
+Rel.AI ships selected Tree-sitter grammar WASM artifacts primarily sourced through `tree-sitter-wasm` 2.0.1. QL, SystemRDL, and TLA+ are supplemental WASM builds from `tree-sitter-ql` 1.0.0, `tree-sitter-systemrdl` 0.8.0, and `@tlaplus/tree-sitter-tlaplus` 1.5.0 respectively. These packages are MIT-licensed. Each grammar artifact retains the license of its upstream grammar project. Package names, versions/commits, checksums, and source metadata are recorded in `vendor/tree-sitter/manifest.json`.
 
 ### Electron, Chromium, Node.js packages, and runtime dependencies
 

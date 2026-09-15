@@ -1,9 +1,12 @@
 import path from 'node:path';
 
-const PARSER_VERSION = 28;
+const PARSER_VERSION = 29;
 const MAX_SEARCH_TERMS = 768;
 
 const LANGUAGE_PROFILES = Object.freeze([
+  profile('ada', 'tree-sitter-ada.wasm', ['.adb', '.ads', '.ada']),
+  profile('arduino', 'tree-sitter-arduino.wasm', ['.ino']),
+  profile('astro', 'tree-sitter-astro.wasm', ['.astro']),
   profile('bash', 'tree-sitter-bash.wasm', ['.sh', '.bash', '.zsh'], ['.bashrc', '.zshrc']),
   profile('c', 'tree-sitter-c.wasm', ['.c', '.h'], [], 'c-family'),
   profile('csharp', 'tree-sitter-c_sharp.wasm', ['.cs'], [], 'csharp'),
@@ -54,8 +57,30 @@ const LANGUAGE_PROFILES = Object.freeze([
   profile('haskell', 'tree-sitter-haskell.wasm', [".hs",".lhs"]),
   profile('julia', 'tree-sitter-julia.wasm', [".jl"]),
   profile('clojure', 'tree-sitter-clojure.wasm', [".clj",".cljs",".cljc",".edn"]),
+  profile('cmake', 'tree-sitter-cmake.wasm', ['.cmake'], ['cmakelists.txt']),
+  profile('commonlisp', 'tree-sitter-commonlisp.wasm', ['.lisp', '.lsp', '.cl']),
+  profile('cuda', 'tree-sitter-cuda.wasm', ['.cu', '.cuh']),
+  profile('d', 'tree-sitter-d.wasm', ['.d']),
+  profile('erlang', 'tree-sitter-erlang.wasm', ['.erl', '.hrl']),
+  profile('fortran', 'tree-sitter-fortran.wasm', ['.f', '.for', '.f77', '.f90', '.f95', '.f03', '.f08']),
+  profile('gleam', 'tree-sitter-gleam.wasm', ['.gleam']),
+  profile('glsl', 'tree-sitter-glsl.wasm', ['.glsl', '.vert', '.frag', '.geom', '.tesc', '.tese', '.comp']),
   profile('groovy', 'tree-sitter-groovy.wasm', [".groovy",".gradle"]),
+  profile('latex', 'tree-sitter-latex.wasm', ['.tex', '.sty', '.cls']),
+  profile('make', 'tree-sitter-make.wasm', ['.mk'], ['makefile', 'gnumakefile']),
+  profile('nginx', 'tree-sitter-nginx.wasm', [], ['nginx.conf']),
+  profile('nim', 'tree-sitter-nim.wasm', ['.nim', '.nims']),
   profile('perl', 'tree-sitter-perl.wasm', [".pl",".pm",".t"]),
+  profile('prisma', 'tree-sitter-prisma.wasm', ['.prisma']),
+  profile('qmljs', 'tree-sitter-qmljs.wasm', ['.qml']),
+  profile('racket', 'tree-sitter-racket.wasm', ['.rkt', '.rktl']),
+  profile('razor', 'tree-sitter-razor.wasm', ['.razor', '.cshtml']),
+  profile('scheme', 'tree-sitter-scheme.wasm', ['.scm', '.ss']),
+  profile('svelte', 'tree-sitter-svelte.wasm', ['.svelte']),
+  profile('templ', 'tree-sitter-templ.wasm', ['.templ']),
+  profile('typst', 'tree-sitter-typst.wasm', ['.typ']),
+  profile('vim', 'tree-sitter-vim.wasm', ['.vim'], ['.vimrc', 'vimrc']),
+  profile('xml', 'tree-sitter-xml.wasm', ['.xml', '.xsd', '.xsl', '.xslt']),
   profile('zig', 'tree-sitter-zig.wasm', ['.zig'])
 ]);
 
@@ -66,26 +91,9 @@ for (const item of LANGUAGE_PROFILES) {
   for (const extension of item.extensions) EXTENSION_LANGUAGE.set(extension, item.language);
   for (const basename of item.basenames) BASENAME_LANGUAGE.set(basename, item.language);
 }
-const WASM_BY_LANGUAGE = Object.freeze(Object.fromEntries(LANGUAGE_PROFILES.map(item => [item.language, item.wasm])));
-const VENDORED_WASM_BY_LANGUAGE = Object.freeze({
-  hcl: 'vendor/tree-sitter/hcl/tree-sitter-hcl.wasm',
-  terraform: 'vendor/tree-sitter/terraform/tree-sitter-terraform.wasm',
-  sql: 'vendor/tree-sitter/sql/tree-sitter-sql.wasm',
-  powershell: 'vendor/tree-sitter/powershell/tree-sitter-powershell.wasm',
-  markdown: 'vendor/tree-sitter/markdown/tree-sitter-markdown.wasm',
-  dockerfile: 'vendor/tree-sitter/dockerfile/tree-sitter-dockerfile.wasm',
-  graphql: 'vendor/tree-sitter/graphql/tree-sitter-graphql.wasm',
-  protobuf: 'vendor/tree-sitter/protobuf/tree-sitter-proto.wasm',
-  r: 'vendor/tree-sitter/r/tree-sitter-r.wasm',
-  assembly: 'vendor/tree-sitter/assembly/tree-sitter-asm.wasm',
-  gdscript: 'vendor/tree-sitter/gdscript/tree-sitter-gdscript.wasm',
-  nix: 'vendor/tree-sitter/nix/tree-sitter-nix.wasm',
-  haskell: 'vendor/tree-sitter/haskell/tree-sitter-haskell.wasm',
-  julia: 'vendor/tree-sitter/julia/tree-sitter-julia.wasm',
-  clojure: 'vendor/tree-sitter/clojure/tree-sitter-clojure.wasm',
-  groovy: 'vendor/tree-sitter/groovy/tree-sitter-groovy.wasm',
-  perl: 'vendor/tree-sitter/perl/tree-sitter-perl.wasm'
-});
+const VENDORED_WASM_BY_LANGUAGE = Object.freeze(Object.fromEntries(
+  LANGUAGE_PROFILES.map(item => [item.language, `vendor/tree-sitter/${item.language}/${item.wasm}`])
+));
 
 function profile(language, wasm, extensions, basenames = [], resolver = null) {
   return Object.freeze({ language, wasm, extensions: Object.freeze([...extensions]), basenames: Object.freeze([...basenames]), resolver });
@@ -100,9 +108,7 @@ function languageForPath(relativePath) {
 function parserForLanguage(language) {
   const key = String(language || '').toLowerCase();
   const vendored = VENDORED_WASM_BY_LANGUAGE[key];
-  if (vendored) return { path: vendored, provider: 'vendored-tree-sitter-wasm' };
-  const wasm = WASM_BY_LANGUAGE[key];
-  return wasm ? { path: `node_modules/tree-sitter-wasms/out/${wasm}`, provider: 'tree-sitter-wasms' } : null;
+  return vendored ? { path: vendored, provider: 'vendored-tree-sitter-wasm' } : null;
 }
 
 function languageProfile(language) {

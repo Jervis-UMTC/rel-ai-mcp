@@ -6,6 +6,7 @@ const PULSE_HEIGHT = 48;
 const PULSE_EXPANDED_WIDTH = 364;
 const PULSE_EXPANDED_HEIGHT = 384;
 const PULSE_MARGIN = 18;
+const PULSE_UNLINKED_SHOW_DELAY_MS = 300;
 
 function createPulseWindowManager(options = {}) {
   const {
@@ -32,6 +33,7 @@ function createPulseWindowManager(options = {}) {
   let customAnchor = null;
   let applyingGeometry = false;
   let geometryRevision = 0;
+  let pendingShowTimer = null;
   let currentStatus = {};
   let currentModel = projectPulseStatus(currentStatus);
   const wayland = platform === 'linux' && String(env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland';
@@ -84,6 +86,40 @@ function createPulseWindowManager(options = {}) {
       hide();
       return;
     }
+    if (shouldDelayUnlinkedShow()) {
+      scheduleUnlinkedShow();
+      return;
+    }
+    cancelPendingShow();
+    showCurrentModel();
+  }
+
+  function shouldDelayUnlinkedShow() {
+    const visible = window && !window.isDestroyed() && window.isVisible();
+    return !visible && isUnlinkedWorkingActivity(currentStatus, currentModel);
+  }
+
+  function scheduleUnlinkedShow() {
+    if (pendingShowTimer !== null) return;
+    pendingShowTimer = setTimeout(() => {
+      pendingShowTimer = null;
+      if (!started || !enabled || !currentModel.visible || isQuitting()) return;
+      if (!isUnlinkedWorkingActivity(currentStatus, currentModel)) {
+        sync();
+        return;
+      }
+      showCurrentModel();
+    }, PULSE_UNLINKED_SHOW_DELAY_MS);
+    pendingShowTimer.unref?.();
+  }
+
+  function cancelPendingShow() {
+    if (pendingShowTimer === null) return;
+    clearTimeout(pendingShowTimer);
+    pendingShowTimer = null;
+  }
+
+  function showCurrentModel() {
     const win = getOrCreateWindow();
     if (rendererReady) win.webContents.send('pulse:update', pulseModel());
     if (!win.isVisible()) {
@@ -176,6 +212,7 @@ function createPulseWindowManager(options = {}) {
   }
 
   function hide() {
+    cancelPendingShow();
     const wasExpanded = expanded;
     expanded = false;
     if (wasExpanded) applyGeometry();
@@ -190,6 +227,7 @@ function createPulseWindowManager(options = {}) {
     screen.off?.('display-metrics-changed', reposition);
     geometryRevision += 1;
     applyingGeometry = false;
+    cancelPendingShow();
     if (window && !window.isDestroyed()) window.destroy();
     window = null;
     rendererReady = false;
@@ -230,6 +268,14 @@ function pulseBounds(screen, options = {}) {
   };
 }
 
+function isUnlinkedWorkingActivity(status = {}, model = {}) {
+  const activity = status?.taskActivity && typeof status.taskActivity === 'object' ? status.taskActivity : {};
+  const activeCalls = Math.max(0, Number(activity.activeCalls || 0));
+  const activeTaskCount = Math.max(0, Number(activity.activeTaskCount || 0));
+  const tasks = Array.isArray(activity.tasks) ? activity.tasks.filter(task => task && typeof task === 'object') : [];
+  return model?.tone === 'working' && activeCalls > 0 && activeTaskCount === 0 && tasks.length === 0;
+}
+
 function sameBounds(left, right) {
   return left?.x === right?.x
     && left?.y === right?.y
@@ -241,4 +287,4 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
-export { PULSE_EXPANDED_HEIGHT, PULSE_EXPANDED_WIDTH, PULSE_HEIGHT, PULSE_WIDTH, createPulseWindowManager, pulseBounds };
+export { PULSE_EXPANDED_HEIGHT, PULSE_EXPANDED_WIDTH, PULSE_HEIGHT, PULSE_UNLINKED_SHOW_DELAY_MS, PULSE_WIDTH, createPulseWindowManager, pulseBounds };

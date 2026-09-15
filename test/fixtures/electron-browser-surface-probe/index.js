@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import http from 'node:http';
-import { app, BrowserWindow, WebContentsView, session } from 'electron';
+import { app, BrowserWindow, WebContentsView, nativeImage, session } from 'electron';
 import { createBrowserSurfaceHost } from '../../../electron/browser-surface-host.js';
 
 const outputPath = process.env.RELAI_PROBE_OUTPUT_PATH;
@@ -16,7 +16,8 @@ app.whenReady().then(async () => {
       #breakpoint::after { content: 'narrow'; }
       @media (min-width: 1000px) { #breakpoint::after { content: 'wide'; } }
       .spacer { height: 3000px; }
-    </style></head><body><main><h1>Embedded browser fixture</h1><div id="breakpoint"></div><label for="name">Name</label><input id="name" placeholder="Your name"><button id="save" type="button" onclick="window.probeClicks=(window.probeClicks||0)+1">Save</button><div class="spacer"></div></main></body></html>`);
+      #edge { position: fixed; right: 8px; bottom: 8px; }
+    </style></head><body><main><h1>Embedded browser fixture</h1><div id="breakpoint"></div><label for="name">Name</label><input id="name" placeholder="Your name"><button id="save" type="button" onclick="window.probeClicks=(window.probeClicks||0)+1">Save</button><button id="edge" type="button" onclick="window.probeEdgeClicks=(window.probeEdgeClicks||0)+1">Edge</button><div class="spacer"></div></main></body></html>`);
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -67,6 +68,7 @@ app.whenReady().then(async () => {
     const initialViewport = await pageContents.executeJavaScript(`({ width: innerWidth, height: innerHeight, breakpoint: getComputedStyle(document.querySelector('#breakpoint'), '::after').content })`);
     const resizedState = await host.setBounds({ visible: true, x: 24, y: 80, width: 500, height: 500 });
     const resizedViewport = await pageContents.executeJavaScript(`({ width: innerWidth, height: innerHeight, breakpoint: getComputedStyle(document.querySelector('#breakpoint'), '::after').content })`);
+    const presentationScale = 500 / 1200;
     const snapshot = await host.run({
       action: 'snapshot',
       nativeSessionId: started.nativeSessionId,
@@ -93,6 +95,7 @@ app.whenReady().then(async () => {
       nativePageId: opened.nativePageId,
       fullPage: false
     });
+    const screenshotActualSize = nativeImage.createFromBuffer(Buffer.from(screenshot.image.data, 'base64')).getSize();
     const afterTabClose = await host.closeTab(secondTab.nativePageId);
     const button = await pageContents.executeJavaScript(`(() => { const r = document.querySelector('#save').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
     pageContents.sendInputEvent({ type: 'mouseDown', x: button.x, y: button.y, button: 'left', clickCount: 1 });
@@ -100,10 +103,14 @@ app.whenReady().then(async () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     const aiClickCount = await pageContents.executeJavaScript('window.probeClicks || 0');
     const userState = await host.setControl('user');
-    pageContents.sendInputEvent({ type: 'mouseDown', x: button.x, y: button.y, button: 'left', clickCount: 1 });
-    pageContents.sendInputEvent({ type: 'mouseUp', x: button.x, y: button.y, button: 'left', clickCount: 1 });
+    pageContents.sendInputEvent({ type: 'mouseDown', x: button.x * presentationScale, y: button.y * presentationScale, button: 'left', clickCount: 1 });
+    pageContents.sendInputEvent({ type: 'mouseUp', x: button.x * presentationScale, y: button.y * presentationScale, button: 'left', clickCount: 1 });
+    const edgeButton = await pageContents.executeJavaScript(`(() => { const r = document.querySelector('#edge').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    pageContents.sendInputEvent({ type: 'mouseDown', x: edgeButton.x * presentationScale, y: edgeButton.y * presentationScale, button: 'left', clickCount: 1 });
+    pageContents.sendInputEvent({ type: 'mouseUp', x: edgeButton.x * presentationScale, y: edgeButton.y * presentationScale, button: 'left', clickCount: 1 });
     await new Promise(resolve => setTimeout(resolve, 50));
     const userClickCount = await pageContents.executeJavaScript('window.probeClicks || 0');
+    const userEdgeClickCount = await pageContents.executeJavaScript('window.probeEdgeClicks || 0');
     const userScrollY = await pageContents.executeJavaScript('scrollTo(0, 400); scrollY');
     let takeoverError = null;
     try {
@@ -141,11 +148,14 @@ app.whenReady().then(async () => {
       screenshotWidth: screenshot.image.width,
       screenshotHeight: screenshot.image.height,
       screenshotViewport: screenshot.viewport,
+      screenshotActualSize,
       initialViewport,
       resizedViewport,
+      presentationScale,
       aiViewport,
       aiClickCount,
       userClickCount,
+      userEdgeClickCount,
       userScrollY,
       aiScrollY,
       userState,

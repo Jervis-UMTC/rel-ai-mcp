@@ -19,7 +19,7 @@ const REPLAYABLE_FALLBACK_STATUSES = new Set([
 const executionsByWorkId = new Map();
 const executionsByOperationId = new Map();
 
-function startFallbackExecution({ config = null, workId = '', scopeId = '', noticeScope = '', tool, workspace = '', signature = '', run, now = Date.now }) {
+function startFallbackExecution({ config = null, workId = '', scopeId = '', noticeScope = '', tool, workspace = '', signature = '', run, persist = true, now = Date.now }) {
   const work = String(workId || '').trim();
   const id = work || String(scopeId || '').trim();
   if (!id) throw new Error('Fallback execution requires a durable work_id or authorized workspace execution scope.');
@@ -65,6 +65,8 @@ function startFallbackExecution({ config = null, workId = '', scopeId = '', noti
     persistedResult: null,
     isError: false,
     error: '',
+    persist: persist !== false,
+    deliveryAcknowledged: false,
     controller,
     promise: null
   };
@@ -81,6 +83,7 @@ function startFallbackExecution({ config = null, workId = '', scopeId = '', noti
       record.result = result || null;
       record.isError = result?.isError === true;
       persistFallbackRecord(config, record);
+      releaseDeliveredExecutionScope(record);
       if (record.noticeEnabled) enqueueFallbackCompletionNotice(config, record);
       return { ok: true, result };
     }, error => {
@@ -92,6 +95,7 @@ function startFallbackExecution({ config = null, workId = '', scopeId = '', noti
       settleRecord(record, FALLBACK_EXECUTION_STATUS.FAILED, now);
       record.error = error instanceof Error ? error.message : String(error);
       persistFallbackRecord(config, record);
+      releaseDeliveredExecutionScope(record);
       if (record.noticeEnabled) enqueueFallbackCompletionNotice(config, record);
       return { ok: false, error };
     });
@@ -138,6 +142,28 @@ function enableFallbackCompletionNotice(config, record) {
   if (!record) return;
   record.noticeEnabled = true;
   if (record.status !== FALLBACK_EXECUTION_STATUS.RUNNING) enqueueFallbackCompletionNotice(config, record);
+}
+
+function acknowledgeFallbackDelivery(config, reference) {
+  const id = String(reference || '').trim();
+  if (!id) return false;
+  const record = executionsByOperationId.get(id) || executionsByWorkId.get(id) || null;
+  if (!record || record.workId) return false;
+  if (record.status === FALLBACK_EXECUTION_STATUS.RUNNING) {
+    record.deliveryAcknowledged = true;
+    return true;
+  }
+  executionsByOperationId.delete(record.operationId);
+  executionsByWorkId.delete(record.executionKey || record.operationId);
+  if (config && record.operationId) {
+    try { fs.rmSync(tasklessFallbackFile(config, record.operationId), { force: true }); } catch {}
+  }
+  return true;
+}
+
+function releaseDeliveredExecutionScope(record) {
+  if (!record || record.workId || record.deliveryAcknowledged !== true) return;
+  executionsByWorkId.delete(record.executionKey || record.operationId);
 }
 
 function fallbackExecutionStatus(reference, options = {}) {
@@ -326,6 +352,7 @@ function hydratePersistedRecord(record) {
     persistedResult: record.result && typeof record.result === 'object' ? record.result : null,
     isError: record.isError === true,
     error: String(record.error || ''),
+    deliveryAcknowledged: false,
     controller: null,
     promise: null
   };
@@ -367,7 +394,7 @@ function readPersistedFallback(config, reference) {
 }
 
 function persistFallbackRecord(config, record) {
-  if (!config || !record) return;
+  if (!config || !record || record.persist === false) return;
   persistFallbackSnapshot(config, persistentFallbackRecord(record));
 }
 
@@ -424,21 +451,25 @@ function settleCancelledRecord(record, now = Date.now, reason = null) {
 
 function pruneFallbackExecutions(now = Date.now) {
   const current = timeValue(now);
-  for (const [workId, record] of executionsByWorkId) {
+  for (const record of executionsByOperationId.values()) {
     if (record.status === FALLBACK_EXECUTION_STATUS.RUNNING) continue;
     const completed = Number(record.completedAtMs || record.startedAtMs || current);
-    if (current - completed > FALLBACK_RECORD_TTL_MS) {
-      executionsByWorkId.delete(workId);
-      if (record.operationId) executionsByOperationId.delete(record.operationId);
-    }
+    if (current - completed > FALLBACK_RECORD_TTL_MS) removeFallbackExecutionRecord(record);
   }
-  if (executionsByWorkId.size <= MAX_FALLBACK_RECORDS) return;
-  const removable = [...executionsByWorkId.entries()]
-    .filter(([, record]) => record.status !== FALLBACK_EXECUTION_STATUS.RUNNING)
-    .sort((left, right) => Number(left[1].completedAtMs || left[1].startedAtMs) - Number(right[1].completedAtMs || right[1].startedAtMs));
-  while (executionsByWorkId.size > MAX_FALLBACK_RECORDS && removable.length) {
-    executionsByWorkId.delete(removable.shift()[0]);
+  if (executionsByOperationId.size <= MAX_FALLBACK_RECORDS) return;
+  const removable = [...executionsByOperationId.values()]
+    .filter(record => record.status !== FALLBACK_EXECUTION_STATUS.RUNNING)
+    .sort((left, right) => Number(left.completedAtMs || left.startedAtMs) - Number(right.completedAtMs || right.startedAtMs));
+  while (executionsByOperationId.size > MAX_FALLBACK_RECORDS && removable.length) {
+    removeFallbackExecutionRecord(removable.shift());
   }
+}
+
+function removeFallbackExecutionRecord(record) {
+  if (!record) return;
+  if (record.operationId) executionsByOperationId.delete(record.operationId);
+  const executionKey = String(record.executionKey || record.workId || record.operationId || '').trim();
+  if (executionKey && executionsByWorkId.get(executionKey) === record) executionsByWorkId.delete(executionKey);
 }
 
 function timeValue(now = Date.now) {
@@ -465,6 +496,7 @@ function resetFallbackExecutions() {
 export {
   DEFAULT_FALLBACK_GRACE_MS,
   acknowledgeFallbackCompletionNotice,
+  acknowledgeFallbackDelivery,
   cancelFallbackExecution,
   consumeFallbackCompletionNotices,
   enableFallbackCompletionNotice,

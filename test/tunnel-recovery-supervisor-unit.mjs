@@ -26,6 +26,17 @@ const supervisor = createTunnelRecoverySupervisor({
   onSchedule: state => schedules.push(state)
 });
 
+const degradedTimers = [];
+const degradedSupervisor = createTunnelRecoverySupervisor({
+  restartConnection: async () => ({ serverRunning: true, tunnelStatus: 'running', errorCode: '', error: '' }),
+  retryDelaysMs: [10],
+  setTimer(fn, delayMs) { const timer = { fn, delayMs, cancelled: false }; degradedTimers.push(timer); return timer; },
+  clearTimer(timer) { timer.cancelled = true; }
+});
+assert.equal(degradedSupervisor.observe({ state: 'degraded', errorCode: 'tunnel_command_delivery_degraded', error: 'responses dropping' }).scheduled, true, 'degraded tunnel health must schedule the existing recovery path');
+degradedSupervisor.observe({ state: 'running' });
+assert.equal(degradedTimers[0].cancelled, true, 'a recovered response must cancel the pending degraded retry');
+
 const first = supervisor.observe({ state: 'failed', errorCode: 'secure_tunnel_failed', error: 'tunnel-client exited' });
 assert.equal(first.scheduled, true, 'unexpected tunnel failure must schedule automatic recovery');
 assert.equal(first.attempt, 1);

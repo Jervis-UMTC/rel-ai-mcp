@@ -20,7 +20,7 @@ const DEFAULT_SYNCHRONOUS_EXECUTION_BOUNDS = Object.freeze({
 });
 const BOUNDED_SYNCHRONOUS_CLEANUP = Object.freeze({
   abortOnRequestClose: true,
-  abortOnConnectionClose: true,
+  abortOnConnectionClose: false,
   terminateSubprocessTree: true,
   awaitSubprocessExit: true
 });

@@ -118,6 +118,7 @@ function createBrowserSurfaceHost(options = {}) {
       view,
       webContents: view.webContents,
       bounds: initialBounds,
+      presentationScale: 1,
       closing: false,
       loading: false,
       aiInputDepth: 0,
@@ -750,11 +751,13 @@ function createBrowserSurfaceHost(options = {}) {
     const presentation = browserPresentation(record.viewport, surfaceBounds);
     if (attached?.page === page && attached.window === win) {
       page.bounds = presentation.bounds;
+      page.presentationScale = presentation.scale;
       page.view.setBounds(page.bounds);
       return;
     }
     detachAttached();
     page.bounds = presentation.bounds;
+    page.presentationScale = presentation.scale;
     page.view.setBounds(page.bounds);
     win.contentView.addChildView(page.view);
     attached = { page, window: win };
@@ -774,7 +777,8 @@ function createBrowserSurfaceHost(options = {}) {
         width: record.viewport.width,
         height: record.viewport.height,
         deviceScaleFactor: 0,
-        mobile: false
+        mobile: false,
+        scale: page.presentationScale || 1
       });
       await debuggerApi.sendCommand('Input.setIgnoreInputEvents', { ignore: record.control !== 'user' });
     });
@@ -783,6 +787,7 @@ function createBrowserSurfaceHost(options = {}) {
   function detachAttached() {
     if (!attached) return;
     try {
+      attached.page.presentationScale = 1;
       if (!attached.window.isDestroyed?.()) attached.window.contentView.removeChildView(attached.page.view);
     } catch {}
     attached = null;

@@ -141,7 +141,14 @@ async function createDesktopHost(options = {}) {
   const secureTunnelRuntime = createSecureTunnelRuntime({
     stopProcess: terminateProcessTree,
     makeEnvironment: makeTunnelProcessEnvironment,
-    onLog: entry => publicConnectionLog('openai-tunnel', entry),
+    onLog: entry => {
+      publicConnectionLog('openai-tunnel', entry);
+      if (entry?.code === 'tunnel_upstream_5xx') {
+        serviceProcessClient?.updateContext({
+          transportEvent: { event: 'upstream_5xx', at: entry.ts || new Date().toISOString() }
+        });
+      }
+    },
     onStatus: handleTunnelStatus
   });
   const desktopLifecycle = createDesktopLifecycleManager({
@@ -595,6 +602,7 @@ async function createDesktopHost(options = {}) {
         error: status.error,
         errorCode: status.errorCode || ERROR_CODES.TUNNEL_CONNECTION_INTERRUPTED
       });
+      tunnelRecoverySupervisor?.observe(status);
       return;
     }
     if (status.state === 'failed') {

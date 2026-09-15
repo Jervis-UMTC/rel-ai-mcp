@@ -7,7 +7,7 @@ import { openIndexDatabase, repositoryIndexPath } from '../src/repository/intell
 import { enhancedResolverLanguages, languageCapabilities, languageForPath, structuralLanguages } from '../src/repository/intelligence/languages.js';
 import { repositoryIntelligence } from '../src/repository/intelligence/service.js';
 
-assert.equal(structuralLanguages().length, 53);
+assert.equal(structuralLanguages().length, 78);
 const EXPECTED_ENHANCED = ['c', 'cpp', 'csharp', 'go', 'java', 'javascript', 'kotlin', 'php', 'python', 'ruby', 'rust', 'tsx', 'typescript'];
 assert.deepEqual(enhancedResolverLanguages().sort(), EXPECTED_ENHANCED);
 assert.equal(languageForPath('src/app.ts'), 'typescript');
@@ -48,7 +48,7 @@ const config = { stateDir };
 
 try {
   const index = await repositoryIntelligence.ensure(workspace, config);
-  assert.equal(index.languageIntelligence.structuralLanguages, 53);
+  assert.equal(index.languageIntelligence.structuralLanguages, 78);
   assert.deepEqual(index.languageIntelligence.enhancedLanguages.sort(), EXPECTED_ENHANCED);
   const db = openIndexDatabase(repositoryIndexPath(config, workspace), { readonly: true });
   try {

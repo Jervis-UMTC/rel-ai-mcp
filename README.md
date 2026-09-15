@@ -376,7 +376,7 @@ Keep tunnel runtime API keys, local bearer credentials, repository credentials, 
 
 ## Build Rel.AI from source
 
-Rel.AI currently uses **Node.js 24** and **npm 12**. The root runtime and Electron desktop maintain separate lockfiles.
+Rel.AI currently uses **Node.js 26** and **npm 12**. The root runtime and Electron desktop maintain separate lockfiles.
 
 ```bash
 npm ci --ignore-scripts

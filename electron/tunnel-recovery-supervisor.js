@@ -35,6 +35,10 @@ function createTunnelRecoverySupervisor({
       reset(true);
       return snapshot();
     }
+    if (tunnelStatus === 'degraded') {
+      scheduleInitial(status.error || 'The Secure MCP Tunnel is degraded.');
+      return snapshot();
+    }
     if (tunnelStatus === 'failed') {
       if (isTerminalTunnelCode(errorCode)) {
         reset(true);

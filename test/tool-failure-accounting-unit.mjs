@@ -49,7 +49,7 @@ try {
   unsubscribeActivity();
   if (previous == null) delete process.env.REL_AI_MCP_CONFIG;
   else process.env.REL_AI_MCP_CONFIG = previous;
-  fs.rmSync(temp, { recursive: true, force: true });
+  fs.rmSync(temp, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 20 : 2, retryDelay: 100 });
 }
 
 console.log('Tool execution and command-outcome accounting tests passed.');

@@ -1,5 +1,6 @@
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { readConfig } from '../config.js';
+import { recordLocalTransportEvent } from '../localAnalytics.ts';
 import { createRelaiCoreRuntime } from './runtime.ts';
 import { createLocalAdminPolicy } from '../mcp/authorizationPolicy.ts';
 import { mcpConnectionManager } from '../mcp/connectionManager.js';
@@ -49,6 +50,7 @@ export interface McpEnvelopeValidation extends Record<string, unknown> {
 export interface McpTransportResponse {
   readonly status?: number;
   readonly body?: Record<string, unknown> | null;
+  readonly onDelivered?: () => void;
 }
 
 export function createLocalMcpAuthorization(authMode: McpAuthMode, clientId: string): McpAuthorization {
@@ -94,6 +96,15 @@ export function beginMcpRequest(details: Record<string, unknown>): string {
 
 export function finishMcpRequest(requestId: string, details: Record<string, unknown>): void {
   mcpConnectionManager.finishRequest(requestId, details);
+}
+
+export function recordMcpTransportEvent(event: string, details: Record<string, unknown> = {}): void {
+  try {
+    recordLocalTransportEvent(readConfig(), { event });
+  } catch {}
+  try {
+    mcpConnectionManager.record(`mcp_transport_${event}`, details);
+  } catch {}
 }
 
 export function observeMcpRequestManifest(context: CoreMcpRequestContext, method: string): Promise<void> {

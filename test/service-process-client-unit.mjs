@@ -154,6 +154,9 @@ const logDeltaMessage = child.sent.at(-1);
 assert.equal(logDeltaMessage.type, 'context');
 assert.equal(logDeltaMessage.context.runtimeLogChange.entry.message, 'second');
 assert.equal(Object.hasOwn(logDeltaMessage.context, 'runtimeLogs'), false, 'log changes must cross the utility-process boundary as deltas');
+client.updateContext({ transportEvent: { event: 'upstream_5xx', at: '2026-09-15T06:00:01.000Z' } });
+const transportContextMessage = child.sent.at(-1);
+assert.equal(transportContextMessage.context.transportEvent.event, 'upstream_5xx');
 
 child.emit('message', { type: 'native-request', id: 'native-1', method: 'openFolder', payload: { path: '/repo' } });
 await new Promise(resolve => setImmediate(resolve));

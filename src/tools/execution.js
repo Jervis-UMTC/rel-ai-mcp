@@ -25,6 +25,7 @@ async function executeToolCall({ config, name, executionName = name, effectiveAr
     spanAttributes(name, effectiveArgs, context),
     async () => {
       const taskId = String(finishActivity?.taskId || effectiveArgs?.work_id || '').trim();
+      const queueTaskId = taskId || detachedQueueTaskId(context);
       const backgroundReference = String(effectiveArgs?.operationId || taskId || '').trim();
       const backgroundStatusMode = executionName === OP.WORK_STATUS
         && Boolean(backgroundReference)
@@ -83,7 +84,7 @@ async function executeToolCall({ config, name, executionName = name, effectiveAr
           });
           return handled;
         },
-        queueOptions(queueMode, queueScope, taskId, context?.signal)
+        queueOptions(queueMode, queueScope, queueTaskId, context?.signal)
       );
 
       return result;
@@ -168,6 +169,13 @@ function isExplicitBranchChange(executionName, args = {}) {
   const command = String(args.command || '');
   if (/\bgit(?:\.exe)?\b[^\r\n;&|]*\bswitch\b/i.test(command)) return true;
   return /\bgit(?:\.exe)?\b[^\r\n;&|]*\bcheckout\b(?![^\r\n;&|]*\s--(?:\s|$))/i.test(command);
+}
+
+function detachedQueueTaskId(context = {}) {
+  const nativeTaskId = String(context?.nativeTaskId || '').trim();
+  if (nativeTaskId) return nativeTaskId;
+  if (context?.backgroundFallbackExecution !== true) return '';
+  return String(context?.requestId || '').trim();
 }
 
 function queueOptions(mode, scope, taskId, signal) {

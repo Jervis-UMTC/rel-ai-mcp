@@ -2,7 +2,7 @@ type JsonRecord = Record<string, unknown>;
 
 const DASHBOARD_TASK_EVENT_COALESCE_MS = 50;
 
-type TimerHandle = ReturnType<typeof setTimeout>;
+type TimerHandle = ReturnType<typeof setTimeout> | number;
 
 interface DashboardTaskActivity extends JsonRecord {
   revision?: number;
@@ -38,7 +38,7 @@ function createDashboardTaskEventBatcher(options: DashboardTaskEventBatcherOptio
     pending.set(activityKey(activity), activity);
     if (timer) return;
     timer = setTimer(flush, delayMs);
-    timer?.unref?.();
+    if (typeof timer !== 'number') timer.unref?.();
   }
 
   function flush(): boolean {

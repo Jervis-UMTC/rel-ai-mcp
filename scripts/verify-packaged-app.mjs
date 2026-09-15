@@ -73,10 +73,8 @@ const requiredFiles = [
   resourcePath('node_modules', 'hono', 'package.json'),
   resourcePath('node_modules', 'zod', 'package.json'),
   resourcePath('node_modules', 'web-tree-sitter', 'package.json'),
-  resourcePath('node_modules', 'web-tree-sitter', 'tree-sitter.js'),
-  resourcePath('node_modules', 'web-tree-sitter', 'tree-sitter.wasm'),
-  resourcePath('node_modules', 'tree-sitter-wasms', 'package.json'),
-  resourcePath('node_modules', 'tree-sitter-wasms', 'out', 'tree-sitter-javascript.wasm'),
+  resourcePath('node_modules', 'web-tree-sitter', 'web-tree-sitter.js'),
+  resourcePath('node_modules', 'web-tree-sitter', 'web-tree-sitter.wasm'),
   resourcePath('vendor', 'tree-sitter', 'manifest.json'),
   resourcePath('bin', 'rel-ai-mcp-http.js'),
   resourcePath('public', 'dashboard.js'),
@@ -126,13 +124,6 @@ const packagedOpenTelemetryPackages = fs.readdirSync(packagedOpenTelemetryDirect
   .map(entry => entry.name)
   .sort();
 assert.deepEqual(packagedOpenTelemetryPackages, rootOpenTelemetryPackages, 'Packaged application must include the complete OpenTelemetry runtime dependency scope.');
-const rootTreeSitterWasms = fs.readdirSync(path.join(root, 'node_modules', 'tree-sitter-wasms', 'out'))
-  .filter(name => name.endsWith('.wasm'))
-  .sort();
-const packagedTreeSitterWasms = fs.readdirSync(path.join(resourcesRoot, 'node_modules', 'tree-sitter-wasms', 'out'))
-  .filter(name => name.endsWith('.wasm'))
-  .sort();
-assert.deepEqual(packagedTreeSitterWasms, rootTreeSitterWasms, 'Packaged application must include every Tree-sitter WASM grammar shipped by the root runtime dependency.');
 const packagedTreeSitterManifest = JSON.parse(fs.readFileSync(path.join(resourcesRoot, 'vendor', 'tree-sitter', 'manifest.json'), 'utf8')); 
 assert.deepEqual(packagedTreeSitterManifest, sourceTreeSitterManifest, 'Packaged vendored Tree-sitter manifest must match the reviewed source manifest.');
 for (const grammar of Object.values(sourceTreeSitterManifest.grammars || {})) {

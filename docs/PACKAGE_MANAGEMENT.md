@@ -1,6 +1,6 @@
 # Package Management Policy
 
-Rel AI MCP uses npm 12 on Node.js 24.15+ LTS. `.node-version` is the canonical Node pin and `packageManager` in the root manifest is the canonical npm pin; CI and release workflows consume those declarations instead of floating on a Node major.
+Rel AI MCP uses npm 12 on Node.js 26.8.2. `.node-version` is the canonical Node pin and `packageManager` in the root manifest is the canonical npm pin; CI and release workflows consume those declarations instead of floating on a Node major.
 
 ## Canonical installation
 
@@ -23,7 +23,9 @@ Do not introduce pnpm, Yarn, a second root lockfile, or manual lockfile edits. U
 
 Dependabot checks both `/` and `/electron` weekly. Compatible minor and patch updates are grouped; major updates remain explicit review items. `.github/workflows/dependency-health.yml` also runs weekly (and on demand) to install both lockfiles, execute the production and packaging advisory gates, and report available updates for both trees.
 
-`web-tree-sitter` is intentionally pinned to `0.25.10` while Rel.AI uses the prebuilt `tree-sitter-wasms` grammar bundle. Web Tree-sitter 0.26 requires current/rebuilt language WASM artifacts; upgrading that runtime is a grammar-asset migration, not a standalone dependency bump.
+`web-tree-sitter` is pinned to `0.27.0` and validated against the vendored grammar set under `vendor/tree-sitter/`. Most grammars are sourced from `tree-sitter-wasm` 2.0.1; QL, SystemRDL, and TLA+ are supplemental builds from their recorded npm grammar packages because that bundle does not contain them. Tree-sitter runtime upgrades must refresh the vendored WASM binaries and provenance manifest together and pass `npm run verify:tree-sitter-assets`; do not update the runtime independently of its grammar assets.
+
+The repository compiler uses TypeScript 7, but `typescript-lsp-runtime` intentionally aliases TypeScript 6.0.3 because the current `typescript-language-server` 6.0.0 integration requires the legacy `lib/tsserver.js` entry point. TypeScript 7 removed that entry point, so moving this compatibility runtime to TypeScript 7 requires a language-server migration rather than a package-only update.
 
 ## Security gates
 

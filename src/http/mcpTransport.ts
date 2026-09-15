@@ -21,6 +21,7 @@ import {
   measureMcpPhaseSync,
   noteMcpAuthenticationFailure,
   observeMcpRequestManifest,
+  recordMcpTransportEvent,
   runMcpRequestSpan,
   validateMcpRequestEnvelope,
   withMcpPerformanceBreakdown,
@@ -57,6 +58,13 @@ type HeaderValidation = HeaderValidationSuccess | HeaderValidationFailure;
 interface HttpAbortScope {
   signal: AbortSignal;
   dispose: () => void;
+}
+
+interface HttpTransportDetails {
+  requestId?: string;
+  method?: string;
+  name?: string;
+  startedAt: number;
 }
 
 type CoreHandler = ReturnType<typeof createMcpHandler>;
@@ -112,6 +120,14 @@ async function handleMcpStreamableObserved(ctx: HttpRouteContext): Promise<void>
     return;
   }
 
+  const transportDetails: HttpTransportDetails = {
+    method: headerValue(ctx.req.headers, 'mcp-method'),
+    name: headerValue(ctx.req.headers, 'mcp-name'),
+    startedAt: Date.now()
+  };
+  createHttpTransportLifecycle(ctx.req, ctx.res, transportDetails);
+  recordMcpTransportEvent('request_started', transportEventDetails(transportDetails));
+
   let message: JsonRpcRequest | null;
   try {
     message = await measureMcpPhase('mcp.receive', async () => {
@@ -148,6 +164,10 @@ async function handleMcpStreamableObserved(ctx: HttpRouteContext): Promise<void>
     clientInfo: legacy ? params.clientInfo : meta[CLIENT_INFO_META_KEY],
     clientCapabilities: legacy ? params.capabilities : meta[CLIENT_CAPABILITIES_META_KEY]
   });
+  transportDetails.requestId = requestId;
+  transportDetails.method = String(message?.method || transportDetails.method || '');
+  const transportName = expectedMcpName(transportDetails.method, params) || transportDetails.name;
+  if (transportName) transportDetails.name = transportName;
   let requestFinished = false;
   const finishRequest = (ok: boolean): void => {
     if (requestFinished) return;
@@ -200,6 +220,7 @@ async function handleMcpStreamableObserved(ctx: HttpRouteContext): Promise<void>
       () => observeMcpRequestManifest(requestContext, String(message?.method || ''))
     );
 
+    recordMcpTransportEvent('request_reached_runtime', transportEventDetails(transportDetails));
     await runMcpRequestSpan(requestContext, {
       protocolVersion: MCP_PROTOCOL_VERSION,
       method: String(message?.method || ''),
@@ -329,6 +350,8 @@ async function isLegacyHttpRequest(req: IncomingMessage, message: JsonRpcRequest
 
 function sendTransportResponse(ctx: HttpRouteContext, response: McpTransportResponse): void {
   measureMcpPhaseSync('transport.write', () => {
+    if (ctx.res.destroyed) return;
+    if (typeof response.onDelivered === 'function') ctx.res.once('finish', response.onDelivered);
     if (response.body == null) {
       ctx.res.statusCode = response.status || 204;
       ctx.res.end();
@@ -349,30 +372,61 @@ function expectedMcpName(method: string, params: JsonRecord = {}): string {
 
 function createHttpRequestAbortScope(
   req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>
+  _res: ServerResponse<IncomingMessage>
 ): HttpAbortScope {
   const controller = new AbortController();
-  const abort = (message: string): void => {
-    if (!controller.signal.aborted) controller.abort(new Error(message));
-  };
-  const onRequestAborted = (): void => abort('HTTP MCP request was aborted by the client.');
-  const onResponseClosed = (): void => {
-    if (!res.writableEnded) abort('HTTP MCP response connection closed before completion.');
-  };
-  const onSocketClosed = (): void => {
-    if (!res.writableEnded) abort('HTTP MCP connection closed before completion.');
+  const onRequestAborted = (): void => {
+    if (!controller.signal.aborted) controller.abort(new Error('HTTP MCP request was aborted by the client.'));
   };
   req.once('aborted', onRequestAborted);
-  res.once('close', onResponseClosed);
-  req.socket?.once('close', onSocketClosed);
-  if (req.aborted || res.destroyed) onRequestAborted();
+  if (req.aborted) onRequestAborted();
   return {
     signal: controller.signal,
     dispose(): void {
       req.off('aborted', onRequestAborted);
-      res.off('close', onResponseClosed);
-      req.socket?.off('close', onSocketClosed);
     }
+  };
+}
+
+function createHttpTransportLifecycle(
+  req: IncomingMessage,
+  res: ServerResponse<IncomingMessage>,
+  details: HttpTransportDetails
+): void {
+  let cancelled = false;
+  let closed = false;
+  const onRequestAborted = (): void => {
+    if (cancelled) return;
+    cancelled = true;
+    recordMcpTransportEvent('request_cancelled', {
+      ...transportEventDetails(details),
+      reasonCode: 'request_aborted'
+    });
+  };
+  const onResponseClosed = (): void => {
+    if (res.writableFinished || closed) return;
+    closed = true;
+    recordMcpTransportEvent('connection_closed', {
+      ...transportEventDetails(details),
+      reasonCode: 'response_closed_before_delivery'
+    });
+  };
+  const onResponseFinished = (): void => {
+    recordMcpTransportEvent('response_delivered', transportEventDetails(details));
+  };
+  req.once('aborted', onRequestAborted);
+  res.once('close', onResponseClosed);
+  res.once('finish', onResponseFinished);
+  if (req.aborted) onRequestAborted();
+  if (res.destroyed && !res.writableFinished) onResponseClosed();
+}
+
+function transportEventDetails(details: HttpTransportDetails): Record<string, unknown> {
+  return {
+    ...(details.requestId ? { requestId: details.requestId } : {}),
+    ...(details.method ? { method: details.method } : {}),
+    ...(details.name ? { name: details.name } : {}),
+    elapsedMs: Math.max(0, Date.now() - details.startedAt)
   };
 }
 

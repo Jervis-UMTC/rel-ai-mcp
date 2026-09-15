@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { OUTCOME_CLASSES, classifyAnalyticsOutcome } from '../src/analyticsOutcome.js';
 import { withStateDatabase } from '../src/stateDatabase.ts';
-import { flushLocalAnalytics, recordLocalToolOutcome, readLocalUsageSnapshot } from '../src/localAnalytics.js';
+import { flushLocalAnalytics, recordLocalToolOutcome, recordLocalTransportEvent, readLocalUsageSnapshot } from '../src/localAnalytics.js';
 import { analyticsBounds, analyticsRangeScope, normalizeUsageSnapshot } from '../src/ui/features/usage/range-model.js';
 import { analyticsMetrics } from '../src/ui/features/usage/render.js';
 
@@ -25,6 +25,9 @@ try {
   recordLocalToolOutcome(config, { tool: 'relai_edit', operationName: 'relai_edit', workspace: 'repo', ok: false, errorCode: 'EDIT_CONTEXT_MISMATCH', errorMessage: 'found 2 matches', durationMs: 20, at });
   recordLocalToolOutcome(config, { tool: 'relai_exec', operationName: 'relai_exec', workspace: 'repo', ok: false, errorMessage: 'spawn EINVAL', durationMs: 30, at });
   recordLocalToolOutcome(config, { tool: 'relai_exec', operationName: 'relai_exec', workspace: 'repo', ok: false, errorMessage: 'Operation cancelled.', durationMs: 40, at });
+  for (const event of ['request_started', 'request_reached_runtime', 'connection_closed', 'upstream_5xx', 'response_delivered']) {
+    assert.equal(recordLocalTransportEvent(config, { event, at }), true);
+  }
 
   const snapshot = readLocalUsageSnapshot(config, '2026-08');
   assert.equal(snapshot.totals.failures, 4, 'raw operation failures remain visible');
@@ -34,10 +37,21 @@ try {
   assert.equal(snapshot.totals.operationFailures, 1);
   assert.equal(snapshot.totals.recoverableFailures, 1);
   assert.equal(snapshot.totals.cancellations, 1);
+  assert.deepEqual(snapshot.transport, {
+    request_started: 1,
+    request_reached_runtime: 1,
+    request_cancelled: 0,
+    connection_closed: 1,
+    upstream_5xx: 1,
+    response_delivered: 1
+  }, 'transport failures must be accounted separately from tool reliability');
+  assert.equal(snapshot.transportSeries[0].connection_closed, 1);
 
   const model = normalizeUsageSnapshot(snapshot, '2026-08');
   const bounds = analyticsBounds('24h', { now: new Date('2026-08-15T03:00:00Z') });
   const scope = analyticsRangeScope([model], bounds);
+  assert.deepEqual(scope.transport, snapshot.transport, 'global analytics range must preserve transport delivery counters separately from tool outcomes');
+  assert.equal(analyticsRangeScope([model], bounds, { workspace: 'repo' }).transport, null, 'global tunnel delivery counters must not be misattributed to a project');
   assert.equal(scope.reliabilityRate.toFixed(2), '100.00');
   assert.equal(scope.operationSuccessRate, 0, 'all recorded operations in this fixture failed even though two failures were reliable tool behavior');
 
@@ -95,7 +109,7 @@ try {
     await flushLocalAnalytics({ stateDir: legacyStateDir });
     assert.equal(fs.existsSync(analyticsDir), false, 'legacy analytics JSON must be removed after SQLite migration');
     const migratedDocument = withStateDatabase({ stateDir: legacyStateDir }, db => JSON.parse(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08').payload));
-    assert.equal(migratedDocument.schemaVersion, 4);
+    assert.equal(migratedDocument.schemaVersion, 5);
     assert.equal(migratedDocument.totals.reliabilityCalls, 1);
   } finally {
     fs.rmSync(legacyStateDir, { recursive: true, force: true });
@@ -131,7 +145,7 @@ try {
     assert.equal(migrated.totals.infrastructureFailures, 0, 'schema-v2 internal-error counts must not be relabeled as confirmed failures');
     recordLocalToolOutcome({ stateDir: previousStateDir }, { tool: 'relai_read', workspace: 'repo', ok: true, durationMs: 5, at: '2026-08-15T02:30:00Z' });
     const persistedDocument = withStateDatabase({ stateDir: previousStateDir }, db => JSON.parse(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08').payload));
-    assert.equal(persistedDocument.schemaVersion, 4);
+    assert.equal(persistedDocument.schemaVersion, 5);
     assert.equal(persistedDocument.totals.successes, 10);
     assert.equal(persistedDocument.totals.failures, 1);
     assert.equal(persistedDocument.totals.reliabilityCalls, 1);
@@ -164,12 +178,12 @@ try {
       db.prepare('INSERT INTO analytics_months(month,updated_at_ms,payload) VALUES(?,?,?)').run('2026-08', Date.now(), JSON.stringify(v3Document));
     });
     const migrated = readLocalUsageSnapshot({ stateDir: v3StateDir }, '2026-08');
-    assert.equal(migrated.totals.reliabilityCalls, 10, 'schema-v3 reliability counters must survive the v4 migration');
+    assert.equal(migrated.totals.reliabilityCalls, 10, 'schema-v3 reliability counters must survive later analytics schema migrations');
     assert.equal(migrated.totals.reliableCalls, 9);
     assert.equal(migrated.totals.operationFailures, 1);
     recordLocalToolOutcome({ stateDir: v3StateDir }, { tool: 'relai_read', operationName: 'read', taskIntent: 'investigation', workspace: 'repo', ok: true, durationMs: 5, at: '2026-08-15T02:30:00Z' });
     const persistedDocument = withStateDatabase({ stateDir: v3StateDir }, db => JSON.parse(db.prepare('SELECT payload FROM analytics_months WHERE month=?').get('2026-08').payload));
-    assert.equal(persistedDocument.schemaVersion, 4);
+    assert.equal(persistedDocument.schemaVersion, 5);
     assert.equal(persistedDocument.totals.reliabilityCalls, 11);
     assert.equal(persistedDocument.totals.reliableCalls, 10);
     assert.equal(persistedDocument.activityMatrix.find(row => row.intent === 'investigation' && row.useCase === 'explore')?.toolCalls, 1);

@@ -152,6 +152,12 @@ function classifyTunnelEvent({ message, component, error, statusCode }) {
   if (statusCode === 404 && (component === 'controlplane' || /tunnel/.test(combined))) {
     return { level: 'error', code: 'tunnel_not_found', message: 'OpenAI could not find the configured Secure MCP Tunnel.' };
   }
+  if (/command response deadline reached|dropping without posting a response/.test(combined)) {
+    return { level: 'warning', code: 'tunnel_response_deadline', message: 'Tunnel response deadline expired before the MCP response could be delivered.' };
+  }
+  if (statusCode >= 500 && /mcp upstream error|upstream error|posted error response/.test(combined)) {
+    return { level: 'warning', code: 'tunnel_upstream_5xx', message: `The tunnel received an upstream HTTP ${statusCode} response from the MCP path.` };
+  }
   if (/poll failed|unexpected eof|\bgoaway\b|context deadline exceeded|i\/o timeout|dns|no such host|connection reset|connection refused|network is unreachable/.test(combined)) {
     return { level: 'warning', code: 'tunnel_connection_interrupted', message: 'Tunnel polling was interrupted. Retrying automatically.' };
   }

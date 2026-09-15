@@ -227,7 +227,7 @@ Determinate progress uses native `progress[value]` with a valid accessible label
 
 ## Performance baseline and budgets
 
-`npm run benchmark:observability` produces machine-readable JSON. The current Windows x64 / Node.js 24 release baseline has no preimplementation comparison and therefore establishes regression budgets rather than claiming an improvement. The benchmark launches an isolated Electron Chromium renderer for mandatory UI measurements; a launch failure, missing metric, nonnumeric result, or budget failure marks the report incomplete or failed and exits nonzero.
+`npm run benchmark:observability` produces machine-readable JSON. The recorded Windows x64 / Node.js 24 release baseline has no preimplementation comparison and therefore establishes regression budgets rather than claiming an improvement. The benchmark launches an isolated Electron Chromium renderer for mandatory UI measurements; a launch failure, missing metric, nonnumeric result, or budget failure marks the report incomplete or failed and exits nonzero.
 
 | Metric | Workload | Result | Budget |
 | --- | --- | ---: | ---: |

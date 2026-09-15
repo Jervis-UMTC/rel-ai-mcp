@@ -169,6 +169,8 @@ const cancellable = selectExecutionMode({
 assert.equal(cancellable.signal.aborted, false);
 connectionController.abort('connection closed');
 assert.equal(cancellable.signal.aborted, true);
+assert.equal(BOUNDED_SYNCHRONOUS_CLEANUP.abortOnRequestClose, true);
+assert.equal(BOUNDED_SYNCHRONOUS_CLEANUP.abortOnConnectionClose, false, 'accepted HTTP work must not advertise connection-close cancellation after transport loss is detached from execution');
 assert.equal(BOUNDED_SYNCHRONOUS_CLEANUP.terminateSubprocessTree, true);
 assert.equal(BOUNDED_SYNCHRONOUS_CLEANUP.awaitSubprocessExit, true);
 

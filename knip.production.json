@@ -31,7 +31,6 @@
       "ignoreDependencies": [
         "monaco-editor",
         "pyright",
-        "tree-sitter-wasms",
         "typescript-language-server",
         "typescript-lsp-runtime"
       ]

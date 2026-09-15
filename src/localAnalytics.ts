@@ -23,8 +23,9 @@ import {
   type TelemetryConfig
 } from './telemetry.types.ts';
 
-const SCHEMA_VERSION = 4;
-const PREVIOUS_SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 5;
+const PREVIOUS_SCHEMA_VERSION = 4;
+const RELIABILITY_SCHEMA_VERSION = 3;
 const PRE_RELIABILITY_SCHEMA_VERSION = 2;
 const LEGACY_SCHEMA_VERSION = 1;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
@@ -54,6 +55,23 @@ interface AnalyticsAggregate {
   recoverableFailures: number;
   cancellations: number;
   executionMs: number;
+}
+
+type TransportEventName =
+  | 'request_started'
+  | 'request_reached_runtime'
+  | 'request_cancelled'
+  | 'connection_closed'
+  | 'upstream_5xx'
+  | 'response_delivered';
+
+interface TransportAggregate {
+  request_started: number;
+  request_reached_runtime: number;
+  request_cancelled: number;
+  connection_closed: number;
+  upstream_5xx: number;
+  response_delivered: number;
 }
 
 type NamedAggregate<K extends 'tool' | 'workspace'> = AnalyticsAggregate & Record<K, string>;
@@ -92,6 +110,7 @@ interface WorkspaceFailureCategoryAggregate extends FailureCategoryAggregate {
 
 interface AnalyticsHour extends AnalyticsAggregate {
   hour: string;
+  transport: TransportAggregate;
   tools: NamedAggregate<'tool'>[];
   workspaces: NamedAggregate<'workspace'>[];
   workspaceTools: WorkspaceToolAggregate[];
@@ -108,6 +127,7 @@ interface AnalyticsDocument {
   schemaVersion: number;
   month: string;
   totals: AnalyticsAggregate;
+  transport: TransportAggregate;
   tools: NamedAggregate<'tool'>[];
   workspaces: NamedAggregate<'workspace'>[];
   workspaceTools: WorkspaceToolAggregate[];
@@ -162,20 +182,7 @@ function recordLocalToolOutcome(config: AnalyticsConfig = {}, event: LocalToolOu
         if (workspace) incrementWorkspaceFailureCategory(document.workspaceFailureCategories, workspace, category);
       }
 
-      const hourly = findOrCreate(document.hours, row => row.hour === hour, () => ({
-        hour,
-        ...emptyAggregate(true),
-        tools: [],
-        workspaces: [],
-        workspaceTools: [],
-        activityMatrix: [],
-        workspaceActivityMatrix: [],
-        taskIntents: [],
-        workspaceTaskIntents: [],
-        failureCategories: [],
-        workspaceFailureCategories: [],
-        performancePhases: {}
-      } as AnalyticsHour));
+      const hourly = findOrCreate(document.hours, row => row.hour === hour, () => emptyHour(hour));
       incrementTotals(hourly, success, failure, durationMs, reliability);
       incrementPerformancePhases(hourly.performancePhases, performancePhases);
       incrementNamed(hourly.tools, 'tool', tool, success, failure, durationMs, reliability);
@@ -199,6 +206,34 @@ function recordLocalToolOutcome(config: AnalyticsConfig = {}, event: LocalToolOu
   }
 }
 
+function recordLocalTransportEvent(
+  config: AnalyticsConfig = {},
+  event: { event?: unknown; at?: unknown; count?: unknown } = {}
+): boolean {
+  try {
+    const eventName = normalizeTransportEventName(event.event);
+    if (!eventName) return false;
+    const at = boundedDate(event.at);
+    const month = monthKey(at);
+    const hour = hourKey(at);
+    const count = boundedTransportCount(event.count);
+    let migratedLegacy = false;
+    withAnalyticsWriteDatabase(config, (db: StateDatabase) => {
+      migratedLegacy = migrateLegacyLocalAnalyticsInDatabase(db, config);
+      const document = readDocumentFromDatabase(db, month);
+      incrementTransport(document.transport, eventName, count);
+      const hourly = findOrCreate(document.hours, row => row.hour === hour, () => emptyHour(hour));
+      incrementTransport(hourly.transport, eventName, count);
+      upsertDocument(db, document);
+    });
+    if (migratedLegacy) removeLegacyAnalyticsDirectory(config);
+    scheduleRetentionPrune(config);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function recordLocalTaskCompletion(config: AnalyticsConfig = {}, event: { workspace?: unknown; taskIntent?: unknown; at?: unknown } = {}): boolean {
   try {
     const at = boundedDate(event.at);
@@ -212,20 +247,7 @@ function recordLocalTaskCompletion(config: AnalyticsConfig = {}, event: { worksp
       const document = readDocumentFromDatabase(db, month);
       incrementTaskIntent(document.taskIntents, intent);
       if (workspace) incrementWorkspaceTaskIntent(document.workspaceTaskIntents, workspace, intent);
-      const hourly = findOrCreate(document.hours, row => row.hour === hour, () => ({
-        hour,
-        ...emptyAggregate(true),
-        tools: [],
-        workspaces: [],
-        workspaceTools: [],
-        activityMatrix: [],
-        workspaceActivityMatrix: [],
-        taskIntents: [],
-        workspaceTaskIntents: [],
-        failureCategories: [],
-        workspaceFailureCategories: [],
-        performancePhases: {}
-      } as AnalyticsHour));
+      const hourly = findOrCreate(document.hours, row => row.hour === hour, () => emptyHour(hour));
       incrementTaskIntent(hourly.taskIntents, intent);
       if (workspace) incrementWorkspaceTaskIntent(hourly.workspaceTaskIntents, workspace, intent);
       upsertDocument(db, document);
@@ -267,6 +289,7 @@ function projectLocalUsageSnapshot(config: AnalyticsConfig, month: string, docum
       }
     },
     totals,
+    transport: transportDto(document.transport),
     tools: document.tools.map(row => ({ tool: row.tool, ...aggregateDto(row) })),
     workspaces: document.workspaces.map(row => ({ workspace: row.workspace, ...aggregateDto(row) })),
     workspaceTools: document.workspaceTools.map(row => ({
@@ -296,6 +319,7 @@ function projectLocalUsageSnapshot(config: AnalyticsConfig, month: string, docum
       requests: number(row.requests),
       ...aggregateDto(row)
     })),
+    transportSeries: document.hours.map(row => ({ hour: row.hour, ...transportDto(row.transport) })),
     toolSeries: document.hours.flatMap(row => row.tools.map(item => ({ hour: row.hour, tool: item.tool, ...aggregateDto(item) }))),
     workspaceSeries: document.hours.flatMap(row => row.workspaces.map(item => ({
       hour: row.hour,
@@ -378,9 +402,9 @@ function upsertDocument(db: StateDatabase, document: AnalyticsDocument, updatedA
 function parseDocument(text: string, month: string): AnalyticsDocument {
   const parsed = asRecord(JSON.parse(text) as unknown);
   const schemaVersion = Number(parsed.schemaVersion);
-  const supportedSchema = [SCHEMA_VERSION, PREVIOUS_SCHEMA_VERSION, PRE_RELIABILITY_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION].includes(schemaVersion);
+  const supportedSchema = [SCHEMA_VERSION, PREVIOUS_SCHEMA_VERSION, RELIABILITY_SCHEMA_VERSION, PRE_RELIABILITY_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION].includes(schemaVersion);
   return supportedSchema && parsed.month === month
-    ? sanitizeDocument(parsed, month, { resetReliability: schemaVersion < PREVIOUS_SCHEMA_VERSION })
+    ? sanitizeDocument(parsed, month, { resetReliability: schemaVersion < RELIABILITY_SCHEMA_VERSION })
     : emptyDocument(month);
 }
 
@@ -581,7 +605,7 @@ function removeWorkspaceLocalAnalytics(config: AnalyticsConfig = {}, workspaceVa
         hour.taskIntents = hour.taskIntents.filter(item => number(item.tasks) > 0);
         hour.failureCategories = hour.failureCategories.filter(item => number(item.failures) > 0);
       }
-      document.hours = document.hours.filter(hour => number(hour.toolCalls) > 0);
+      document.hours = document.hours.filter(hour => number(hour.toolCalls) > 0 || transportTotal(hour.transport) > 0);
       upsertDocument(db, document);
       updatedMonths += 1;
     }
@@ -621,6 +645,7 @@ function emptyDocument(month: string): AnalyticsDocument {
     schemaVersion: SCHEMA_VERSION,
     month,
     totals: emptyAggregate(true),
+    transport: emptyTransportAggregate(),
     tools: [],
     workspaces: [],
     workspaceTools: [],
@@ -639,6 +664,7 @@ function sanitizeDocument(value: unknown, month: string, { resetReliability = fa
   const source = asRecord(value);
   const doc = emptyDocument(month);
   doc.totals = sanitizeAggregate(source.totals, true, resetReliability);
+  doc.transport = sanitizeTransportAggregate(source.transport);
   doc.tools = sanitizeNamedRows(source.tools, 'tool', resetReliability);
   doc.workspaces = sanitizeNamedRows(source.workspaces, 'workspace', resetReliability);
   doc.workspaceTools = sanitizeWorkspaceTools(source.workspaceTools, resetReliability);
@@ -658,6 +684,7 @@ function sanitizeDocument(value: unknown, month: string, { resetReliability = fa
       return {
         hour: String(row.hour),
         ...sanitizeAggregate(row, true, resetReliability),
+        transport: sanitizeTransportAggregate(row.transport),
         tools: sanitizeNamedRows(row.tools, 'tool', resetReliability),
         workspaces: sanitizeNamedRows(row.workspaces, 'workspace', resetReliability),
         workspaceTools: sanitizeWorkspaceTools(row.workspaceTools, resetReliability),
@@ -779,6 +806,73 @@ function aggregateDto(row: Partial<AnalyticsAggregate> | null | undefined): Omit
     recoverableFailures: number(row?.recoverableFailures),
     cancellations: number(row?.cancellations),
     executionMs: number(row?.executionMs)
+  };
+}
+
+function emptyTransportAggregate(): TransportAggregate {
+  return {
+    request_started: 0,
+    request_reached_runtime: 0,
+    request_cancelled: 0,
+    connection_closed: 0,
+    upstream_5xx: 0,
+    response_delivered: 0
+  };
+}
+
+function sanitizeTransportAggregate(value: unknown): TransportAggregate {
+  const source = asRecord(value);
+  const result = emptyTransportAggregate();
+  for (const key of Object.keys(result) as TransportEventName[]) result[key] = number(source[key]);
+  return result;
+}
+
+function transportDto(value: TransportAggregate | null | undefined): TransportAggregate {
+  const source = value || emptyTransportAggregate();
+  return {
+    request_started: number(source.request_started),
+    request_reached_runtime: number(source.request_reached_runtime),
+    request_cancelled: number(source.request_cancelled),
+    connection_closed: number(source.connection_closed),
+    upstream_5xx: number(source.upstream_5xx),
+    response_delivered: number(source.response_delivered)
+  };
+}
+
+function incrementTransport(row: TransportAggregate, event: TransportEventName, count = 1): void {
+  row[event] = number(row[event]) + count;
+}
+
+function transportTotal(row: TransportAggregate | null | undefined): number {
+  const value = row || emptyTransportAggregate();
+  return Object.values(value).reduce((sum, count) => sum + number(count), 0);
+}
+
+function normalizeTransportEventName(value: unknown): TransportEventName | '' {
+  const event = String(value || '').trim() as TransportEventName;
+  return Object.hasOwn(emptyTransportAggregate(), event) ? event : '';
+}
+
+function boundedTransportCount(value: unknown): number {
+  const count = value === undefined ? 1 : Math.floor(Number(value));
+  return Number.isFinite(count) && count > 0 ? Math.min(10_000, count) : 1;
+}
+
+function emptyHour(hour: string): AnalyticsHour {
+  return {
+    hour,
+    ...emptyAggregate(true),
+    transport: emptyTransportAggregate(),
+    tools: [],
+    workspaces: [],
+    workspaceTools: [],
+    activityMatrix: [],
+    workspaceActivityMatrix: [],
+    taskIntents: [],
+    workspaceTaskIntents: [],
+    failureCategories: [],
+    workspaceFailureCategories: [],
+    performancePhases: {}
   };
 }
 
@@ -959,6 +1053,7 @@ export {
   pruneLocalAnalytics,
   recordLocalTaskCompletion,
   recordLocalToolOutcome,
+  recordLocalTransportEvent,
   removeWorkspaceLocalAnalytics,
   readLocalUsageSnapshot,
   readLocalUsageSnapshotAsync

@@ -336,6 +336,16 @@ try {
   assert.equal(res.listenerCount('close'), 0);
   assert.equal(socket.listenerCount('close'), 0);
 
+  const disconnectedReq = new EventEmitter();
+  disconnectedReq.aborted = false;
+  const disconnectedRes = new EventEmitter();
+  disconnectedRes.writableEnded = false;
+  disconnectedRes.destroyed = false;
+  const disconnectedScope = createHttpRequestAbortScope(disconnectedReq, disconnectedRes);
+  disconnectedRes.emit('close');
+  assert.equal(disconnectedScope.signal.aborted, false, 'losing the response connection must not be treated as client cancellation after Rel.AI accepted the request');
+  disconnectedScope.dispose();
+
   assert.equal(expectedMcpName('tasks/get', { taskId: 'task-1' }), 'task-1');
   assert.equal(expectedMcpName('tasks/update', { taskId: 'task-2' }), 'task-2');
   assert.equal(expectedMcpName('tasks/cancel', { taskId: 'task-3' }), 'task-3');
